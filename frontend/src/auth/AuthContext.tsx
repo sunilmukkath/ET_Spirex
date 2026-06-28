@@ -12,7 +12,6 @@ import { api, setAuthToken } from '../api/client'
 const STORAGE_KEY = 'et_spirex_auth'
 
 export const TEAM_USERS = ['Sunil', 'Tony', 'Ravi', 'Aneena', 'Shilaja'] as const
-export const DEFAULT_PASSWORD = 'ET@1234'
 
 interface AuthState {
   username: string

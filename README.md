@@ -53,6 +53,28 @@ npm run dev
 
 Open **http://localhost:5173** in your browser.
 
+## Going live (hosting)
+
+**Streamlit Community Cloud is not compatible with ET Spirex.** Streamlit only runs Python Streamlit apps (`.py` files). ET Spirex is a **React frontend + FastAPI backend** — a different stack.
+
+Use **Render** (free tier) or any Docker host instead:
+
+1. Push this repo to GitHub: [sunilmukkath/ET_Spirex](https://github.com/sunilmukkath/ET_Spirex)
+2. Create a [Render](https://render.com) account → **New Web Service** → connect the repo
+3. Set **Runtime** to **Docker** (uses the root `Dockerfile`)
+4. Add environment variables from `backend/.env.example`:
+   - `LIMESURVEY_URL`, `LIMESURVEY_USERNAME`, `LIMESURVEY_PASSWORD`
+   - `CORS_ORIGINS=*` (or your Render URL)
+5. Deploy — one URL serves both the dashboard UI and `/api` routes
+
+Alternatively, run locally in production mode:
+
+```bash
+cd frontend && npm run build
+cd ../backend && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Open http://localhost:8000
+```
+
 ## Project structure
 
 ```

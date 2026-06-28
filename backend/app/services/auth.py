@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 VALID_USERS = frozenset({"Sunil", "Tony", "Ravi", "Aneena", "Shilaja"})
-DEFAULT_PASSWORD = "ET@1234"
+DEFAULT_PASSWORD = "ET@2026"
 SESSION_TTL_SECONDS = 60 * 60 * 12  # 12 hours
 
 

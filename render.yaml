@@ -1,0 +1,25 @@
+# Deploy ET Spirex on Render (https://render.com) — free tier available.
+# Streamlit Community Cloud cannot host this app (React + FastAPI stack).
+#
+# 1. Push repo to GitHub
+# 2. Render → New → Web Service → connect sunilmukkath/ET_Spirex
+# 3. Runtime: Docker | Branch: main
+# 4. Add environment variables (see backend/.env.example)
+# 5. Deploy — your app will be at https://et-spirex.onrender.com (or similar)
+
+services:
+  - type: web
+    name: et-spirex
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: LIMESURVEY_URL
+        sync: false
+      - key: LIMESURVEY_USERNAME
+        sync: false
+      - key: LIMESURVEY_PASSWORD
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"

@@ -43,8 +43,8 @@ export function QualityPanel({ result, loading, error }: Props) {
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Data hygiene scan</h2>
               <p className="mt-1 text-sm text-slate-500">
-                {result.total_responses.toLocaleString()} responses ·{' '}
-                <strong className="text-slate-700">{result.flagged_count.toLocaleString()}</strong> flagged
+                {(result.total_responses ?? 0).toLocaleString()} responses ·{' '}
+                <strong className="text-slate-700">{(result.flagged_count ?? 0).toLocaleString()}</strong> flagged
               </p>
             </div>
           </div>
@@ -54,16 +54,16 @@ export function QualityPanel({ result, loading, error }: Props) {
           title="Speeders"
           description={
             speeders.available
-              ? `Completed faster than ${speeders.threshold_seconds}s (median ${speeders.median_seconds}s)`
+              ? `Completed faster than ${speeders.threshold_seconds ?? '—'}s (median ${speeders.median_seconds ?? '—'}s)`
               : speeders.message || 'Not available for this survey'
           }
-          count={speeders.count}
+          count={speeders.count ?? 0}
         >
-          {speeders.flags.map((f, i) => (
+          {(speeders.flags ?? []).map((f, i) => (
             <FlagRow
-              key={i}
-              primary={`Response ${f.response_id}`}
-              secondary={`${f.seconds}s (median ${f.median_seconds ?? speeders.median_seconds}s)`}
+              key={`speeder-${f.response_id}-${i}`}
+              primary={`Response ${formatId(f.response_id)}`}
+              secondary={`${f.seconds}s (median ${f.median_seconds ?? speeders.median_seconds ?? '—'}s)`}
             />
           ))}
         </QualitySection>
@@ -71,13 +71,13 @@ export function QualityPanel({ result, loading, error }: Props) {
         <QualitySection
           title="Straight-lining"
           description="Same answer across all items in a grid/matrix question"
-          count={straight_liners.count}
+          count={straight_liners.count ?? 0}
         >
-          {straight_liners.flags.map((f, i) => (
+          {(straight_liners.flags ?? []).map((f, i) => (
             <FlagRow
-              key={i}
-              primary={`Response ${f.response_id}`}
-              secondary={`${f.question} · "${f.value}" × ${f.items}`}
+              key={`straight-${f.response_id}-${f.variable_id}-${i}`}
+              primary={`Response ${formatId(f.response_id)}`}
+              secondary={`${formatLabel(f.question)} · "${formatLabel(f.value)}" × ${f.items}`}
             />
           ))}
         </QualitySection>
@@ -85,13 +85,13 @@ export function QualityPanel({ result, loading, error }: Props) {
         <QualitySection
           title="Gibberish text"
           description="Keyboard mash, repeated characters, or meaningless short answers"
-          count={gibberish.count}
+          count={gibberish.count ?? 0}
         >
-          {gibberish.flags.map((f, i) => (
+          {(gibberish.flags ?? []).map((f, i) => (
             <FlagRow
-              key={i}
-              primary={`Response ${f.response_id}`}
-              secondary={`${f.question}: "${f.text}"`}
+              key={`gibberish-${f.response_id}-${f.variable_id}-${i}`}
+              primary={`Response ${formatId(f.response_id)}`}
+              secondary={`${formatLabel(f.question)}: "${formatLabel(f.text)}"`}
             />
           ))}
         </QualitySection>
@@ -146,4 +146,14 @@ function FlagRow({ primary, secondary }: { primary: string; secondary: string })
       <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{secondary}</p>
     </li>
   )
+}
+
+function formatId(value: string | number | undefined): string {
+  if (value === undefined || value === null) return '—'
+  return String(value)
+}
+
+function formatLabel(value: string | number | undefined): string {
+  if (value === undefined || value === null) return '—'
+  return String(value)
 }

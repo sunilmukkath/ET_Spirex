@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Loader2, Lock, Sparkles, User } from 'lucide-react'
-import { DEFAULT_PASSWORD, TEAM_USERS, useAuth } from '../auth/AuthContext'
+import { TEAM_USERS, useAuth } from '../auth/AuthContext'
 
 interface Props {
   onSuccess?: () => void
@@ -10,8 +10,7 @@ interface Props {
 export function SignInForm({ onSuccess, compact }: Props) {
   const { login } = useAuth()
   const [username, setUsername] = useState<string>(TEAM_USERS[0])
-  const [useDefaultPassword, setUseDefaultPassword] = useState(true)
-  const [customPassword, setCustomPassword] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -19,7 +18,6 @@ export function SignInForm({ onSuccess, compact }: Props) {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
-    const password = useDefaultPassword ? DEFAULT_PASSWORD : customPassword
     try {
       await login(username, password)
       onSuccess?.()
@@ -62,40 +60,22 @@ export function SignInForm({ onSuccess, compact }: Props) {
         </select>
       </label>
 
-      <div className="mb-4 space-y-3">
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-white/80">
+      <label className="mb-4 block text-sm">
+        <span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-white/70">
+          <Lock size={14} /> Password
+        </span>
+        <div className="relative">
+          <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} />
           <input
-            type="radio"
-            name="pwd-mode"
-            checked={useDefaultPassword}
-            onChange={() => setUseDefaultPassword(true)}
-            className="accent-[var(--et-teal)]"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter team password"
+            autoComplete="current-password"
+            className="w-full rounded-xl border border-white/15 bg-[var(--et-navy)]/80 py-3 pl-10 pr-4 text-sm text-white outline-none ring-[var(--et-teal)] focus:ring-2"
           />
-          Use default password ({DEFAULT_PASSWORD})
-        </label>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-white/80">
-          <input
-            type="radio"
-            name="pwd-mode"
-            checked={!useDefaultPassword}
-            onChange={() => setUseDefaultPassword(false)}
-            className="accent-[var(--et-teal)]"
-          />
-          Enter custom password
-        </label>
-        {!useDefaultPassword && (
-          <div className="relative">
-            <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} />
-            <input
-              type="password"
-              value={customPassword}
-              onChange={(e) => setCustomPassword(e.target.value)}
-              placeholder="Password"
-              className="w-full rounded-xl border border-white/15 bg-[var(--et-navy)]/80 py-3 pl-10 pr-4 text-sm text-white outline-none ring-[var(--et-teal)] focus:ring-2"
-            />
-          </div>
-        )}
-      </div>
+        </div>
+      </label>
 
       {error && (
         <p className="mb-4 rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-200 ring-1 ring-red-400/30">
@@ -105,7 +85,7 @@ export function SignInForm({ onSuccess, compact }: Props) {
 
       <button
         type="submit"
-        disabled={submitting || (!useDefaultPassword && !customPassword)}
+        disabled={submitting || !password}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--et-teal)] to-[var(--et-teal-dark)] py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--et-teal)]/25 transition hover:brightness-110 disabled:opacity-50"
       >
         {submitting ? <Loader2 className="animate-spin" size={18} /> : null}
