@@ -80,9 +80,11 @@ def get_responses(
 def invalidate_survey_cache(survey_id: int) -> None:
     from app.services.qc_filter import invalidate_flagged_cache
     from app.services.data_quality import invalidate_quality_cache
+    from app.services.analysis_context import invalidate_analysis_context
 
     keys = [k for k in _CACHE if k[0] == survey_id]
     for key in keys:
         del _CACHE[key]
     invalidate_flagged_cache(survey_id)
     invalidate_quality_cache(survey_id)
+    invalidate_analysis_context(survey_id)

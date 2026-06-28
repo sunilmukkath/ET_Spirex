@@ -131,7 +131,7 @@ export function DashboardPage() {
           </div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Your surveys</h2>
           <p className="mt-2 max-w-xl text-sm text-white/70">
-            Sorted by newest first. Open a survey to explore, crosstab, or run quality checks.
+            Sorted by newest first. Open a survey to explore, chart, crosstab, or run quality checks.
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             {connection && (

@@ -9,6 +9,10 @@ interface Props {
   filters: FilterSpec[]
   onChange: (filters: FilterSpec[]) => void
   compact?: boolean
+  heading?: string
+  applyLabel?: string
+  onApply?: () => void
+  applying?: boolean
 }
 
 function schemaFilterOptions(v: SurveyVariable): { code: string; label: string }[] {
@@ -28,6 +32,10 @@ export function FilterEditor({
   filters,
   onChange,
   compact,
+  heading = 'Filters',
+  applyLabel,
+  onApply,
+  applying,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [draftVarId, setDraftVarId] = useState('')
@@ -135,7 +143,7 @@ export function FilterEditor({
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
           <Filter size={14} />
-          Filters
+          {heading}
         </span>
 
         {filters.map((f, i) => (
@@ -171,6 +179,18 @@ export function FilterEditor({
             className="text-xs text-slate-400 hover:text-slate-600"
           >
             Clear all
+          </button>
+        )}
+
+        {onApply && (
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={applying}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-teal)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-hover)] disabled:opacity-50"
+          >
+            {applying && <Loader2 className="animate-spin" size={12} />}
+            {applyLabel ?? 'Apply filters'}
           </button>
         )}
       </div>

@@ -1,12 +1,10 @@
-import { lazy, Suspense, useState } from 'react'
-import type { BannerResult, ProfileResult, TableCell } from '../../api/client'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import type { BannerResult, FilterSpec, ProfileResult, SurveyVariable, TableCell } from '../../api/client'
 import { ErrorState } from '../States'
+import { FilterEditor } from './FilterEditor'
 import { Loader2 } from 'lucide-react'
 import { ChevronDown } from 'lucide-react'
 
-const DistributionChart = lazy(() =>
-  import('./DistributionChart').then((m) => ({ default: m.DistributionChart })),
-)
 const LocationMap = lazy(() =>
   import('./LocationMap').then((m) => ({ default: m.LocationMap })),
 )
@@ -46,9 +44,6 @@ export function ProfileResults({ result }: { result: ProfileResult }) {
     return (
       <div className="space-y-6">
         <ResultHeader result={result} />
-        <Suspense fallback={<ChartFallback />}>
-          <DistributionChart values={result.values} />
-        </Suspense>
         <DistributionTable values={result.values} baseN={result.base_n || 0} />
       </div>
     )
@@ -155,11 +150,28 @@ export function ProfileResults({ result }: { result: ProfileResult }) {
   return <ErrorState message="Unsupported analysis result" />
 }
 
-export function CrosstabsResults({ result }: { result: BannerResult }) {
+export interface MultiCrosstabControls {
+  surveyId: number
+  completionStatus: string
+  variables: SurveyVariable[]
+  globalFilters: FilterSpec[]
+  tableFilters: Record<string, FilterSpec[]>
+  onTableFiltersChange: (rowId: string, filters: FilterSpec[]) => void
+  onRefreshTable: (rowId: string, tableIndex: number) => void
+  refreshingTableId: string | null
+}
+
+export function CrosstabsResults({
+  result,
+  multiControls,
+}: {
+  result: BannerResult
+  multiControls?: MultiCrosstabControls
+}) {
   if (result.error && !result.tables) return <ErrorState message={result.error} />
 
   if (result.table_type === 'multi' && result.tables?.length) {
-    return <MultiCrosstabList result={result} />
+    return <MultiCrosstabList result={result} controls={multiControls} />
   }
 
   return <BannerTable result={result} />
@@ -169,17 +181,34 @@ function crosstabTableTitle(table: BannerResult, index: number) {
   return table.row_variable?.text || table.row_header || `Table ${index + 1}`
 }
 
-function MultiCrosstabList({ result }: { result: BannerResult }) {
+function MultiCrosstabList({
+  result,
+  controls,
+}: {
+  result: BannerResult
+  controls?: MultiCrosstabControls
+}) {
   const tables = result.tables ?? []
-  const [expanded, setExpanded] = useState<Set<number>>(() => new Set([0]))
+  const [allExpanded, setAllExpanded] = useState(true)
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set(tables.map((_, i) => i)))
+
+  useEffect(() => {
+    setExpanded(allExpanded ? new Set(tables.map((_, i) => i)) : new Set())
+  }, [allExpanded, tables.length])
 
   function toggle(index: number) {
     setExpanded((prev) => {
       const next = new Set(prev)
       if (next.has(index)) next.delete(index)
       else next.add(index)
+      setAllExpanded(next.size === tables.length)
       return next
     })
+  }
+
+  function setExpandAll(expandedState: boolean) {
+    setAllExpanded(expandedState)
+    setExpanded(expandedState ? new Set(tables.map((_, i) => i)) : new Set())
   }
 
   const tableProps = {
@@ -196,29 +225,44 @@ function MultiCrosstabList({ result }: { result: BannerResult }) {
         <p className="text-sm font-medium text-slate-700">
           {tables.length} crosstab {tables.length === 1 ? 'table' : 'tables'}
         </p>
-        <div className="flex gap-2 text-xs">
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+          <span className="font-medium">Expand all tables</span>
           <button
             type="button"
-            onClick={() => setExpanded(new Set(tables.map((_, i) => i)))}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
+            role="switch"
+            aria-checked={allExpanded}
+            onClick={() => setExpandAll(!allExpanded)}
+            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+              allExpanded ? 'bg-[var(--et-teal)]' : 'bg-slate-300'
+            }`}
           >
-            Expand all
+            <span
+              className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                allExpanded ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
           </button>
-          <button
-            type="button"
-            onClick={() => setExpanded(new Set())}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
-          >
-            Collapse all
-          </button>
-        </div>
+        </label>
       </div>
 
       {tables.map((table, index) => {
         const isOpen = expanded.has(index)
         const title = crosstabTableTitle(table, index)
+        const rowId = table.row_variable?.id
+        const tableFilterList =
+          rowId && controls?.tableFilters[rowId] !== undefined
+            ? controls.tableFilters[rowId]
+            : controls?.globalFilters ?? []
+        const hasCustomFilters = Boolean(
+          rowId &&
+            controls?.tableFilters[rowId] !== undefined &&
+            JSON.stringify(controls.tableFilters[rowId]) !==
+              JSON.stringify(controls.globalFilters ?? []),
+        )
+        const refreshing = Boolean(rowId && controls?.refreshingTableId === rowId)
+
         return (
-          <div key={index} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div key={rowId ?? index} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
             <button
               type="button"
               onClick={() => toggle(index)}
@@ -227,6 +271,11 @@ function MultiCrosstabList({ result }: { result: BannerResult }) {
               <span className="min-w-0 flex-1">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                   Table {index + 1}
+                  {hasCustomFilters && (
+                    <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 normal-case">
+                      filtered
+                    </span>
+                  )}
                 </span>
                 <span className="mt-0.5 block truncate text-sm font-medium text-slate-800">{title}</span>
               </span>
@@ -237,8 +286,34 @@ function MultiCrosstabList({ result }: { result: BannerResult }) {
             </button>
             {isOpen && (
               <div className="border-t border-slate-200 p-4">
+                {controls && rowId && (
+                  <div className="mb-4 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+                    <FilterEditor
+                      surveyId={controls.surveyId}
+                      completionStatus={controls.completionStatus}
+                      variables={controls.variables}
+                      filters={tableFilterList}
+                      onChange={(next) => controls.onTableFiltersChange(rowId, next)}
+                      compact
+                      heading="Table filters"
+                      applyLabel="Apply to this table"
+                      onApply={() => controls.onRefreshTable(rowId, index)}
+                      applying={refreshing}
+                    />
+                    {!hasCustomFilters && controls.globalFilters.length > 0 && (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Using default filters from the toolbar. Change filters here and apply to override for this table only.
+                      </p>
+                    )}
+                  </div>
+                )}
                 {table.error ? (
                   <ErrorState message={table.error} />
+                ) : refreshing ? (
+                  <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-500">
+                    <Loader2 className="animate-spin text-[var(--et-teal)]" size={20} />
+                    Updating table…
+                  </div>
                 ) : (
                   <BannerTable result={{ ...table, ...tableProps }} />
                 )}

@@ -8,7 +8,13 @@ from typing import Any
 import pandas as pd
 from scipy.stats import chi2_contingency
 
-from app.services.analysis_context import load_analysis_context
+from app.services.answer_labels import (
+    builtin_scale_options,
+    canonical_answer_code,
+    label_for_answer,
+    normalize_answer_code,
+)
+from app.services.analysis_context import load_analysis_context, load_filtered_context
 from app.services.question_schema import get_variable
 from app.services.variable_columns import find_variable_column as _find_column
 
@@ -22,12 +28,16 @@ def run_question_profile(
     completion_status: str = "complete",
     filters: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    schema, df_raw = load_analysis_context(survey_id, completion_status=completion_status)
+    schema, df_raw = load_filtered_context(
+        survey_id,
+        completion_status=completion_status,
+        filters=filters,
+    )
     variable = get_variable(schema, variable_id)
     if not variable:
         return {"error": f"Variable '{variable_id}' not found"}
 
-    df = _apply_filters(df_raw, schema, filters or [])
+    df = df_raw
     if df.empty:
         return {"error": "No responses match the selected filters"}
 
@@ -56,6 +66,7 @@ def run_banner_table(
     banner_variable_ids: list[str],
     row_variable_ids: list[str] | None = None,
     filters: list[dict[str, Any]] | None = None,
+    row_filters: dict[str, list[dict[str, Any]]] | None = None,
     completion_status: str = "complete",
     show_counts: bool = True,
     show_col_pct: bool = True,
@@ -67,12 +78,18 @@ def run_banner_table(
     row_ids = row_variable_ids or [row_variable_id]
     row_ids = [rid for rid in row_ids if rid]
 
+    def _row_filters(rid: str) -> list[dict[str, Any]]:
+        if row_filters and rid in row_filters:
+            return row_filters[rid]
+        return filters or []
+
     if len(row_ids) <= 1:
+        rid = row_ids[0] if row_ids else row_variable_id
         return _build_banner_table(
             survey_id,
-            row_variable_id=row_ids[0] if row_ids else row_variable_id,
+            row_variable_id=rid,
             banner_variable_ids=banner_variable_ids,
-            filters=filters,
+            filters=_row_filters(rid),
             completion_status=completion_status,
             show_counts=show_counts,
             show_col_pct=show_col_pct,
@@ -89,7 +106,7 @@ def run_banner_table(
             survey_id,
             row_variable_id=rid,
             banner_variable_ids=banner_variable_ids,
-            filters=filters,
+            filters=_row_filters(rid),
             completion_status=completion_status,
             show_counts=show_counts,
             show_col_pct=show_col_pct,
@@ -134,7 +151,14 @@ def _build_banner_table(
     df_raw: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     if schema is None or df_raw is None:
-        schema, df_raw = load_analysis_context(survey_id, completion_status=completion_status)
+        schema, df = load_filtered_context(
+            survey_id,
+            completion_status=completion_status,
+            filters=filters,
+        )
+    else:
+        df = _apply_filters(df_raw, schema, filters or [])
+
     row_var = get_variable(schema, row_variable_id)
     if not row_var:
         return {"error": f"Row variable '{row_variable_id}' not found"}
@@ -149,8 +173,6 @@ def _build_banner_table(
         if not bvar["can_banner"]:
             return {"error": f"'{bvar['text']}' cannot be used as a banner break"}
         banner_vars.append(bvar)
-
-    df = _apply_filters(df_raw, schema, filters or [])
 
     if df.empty:
         return {"error": "No responses match the selected filters"}
@@ -235,6 +257,8 @@ def _apply_filters(
     schema: dict[str, Any],
     filters: list[dict[str, Any]],
 ) -> pd.DataFrame:
+    if not filters:
+        return df
     result = df.copy()
     for f in filters:
         var = get_variable(schema, f.get("variable_id", ""))
@@ -422,24 +446,19 @@ def _natural_sort_key(value: str) -> tuple[int, Any]:
 
 
 def _ordered_categories(var: dict[str, Any], series: pd.Series) -> list[str]:
+    canonical = series.dropna().astype(str).str.strip().map(lambda v: canonical_answer_code(var, v))
+    canonical = canonical[canonical != ""]
     if var.get("answer_options"):
-        codes = [o["code"] for o in var["answer_options"]]
-        present = set(series.dropna().astype(str).unique())
+        codes = [normalize_answer_code(o["code"]) for o in var["answer_options"]]
+        present = set(canonical.unique())
         return [c for c in codes if c in present] + sorted(
             present - set(codes), key=_natural_sort_key
         )
-    return sorted(series.dropna().astype(str).unique().tolist(), key=_natural_sort_key)
+    return sorted(canonical.unique().tolist(), key=_natural_sort_key)
 
 
 def _label_for_code(var: dict[str, Any], code: str) -> str:
-    code_str = str(code)
-    for opt in var.get("answer_options") or []:
-        if str(opt["code"]) == code_str:
-            return opt["label"]
-    for sq in var.get("subquestions") or []:
-        if str(sq["code"]) == code_str:
-            return sq["label"]
-    return code_str
+    return label_for_answer(var, code)
 
 
 def _resolve_subquestion_column(var: dict[str, Any], sq: dict[str, Any], df: pd.DataFrame) -> str | None:
@@ -471,10 +490,12 @@ def _banner_single(
     rows = []
     for cat in categories:
         row_label = _label_for_code(row_var, cat)
-        cells = _distribution_cells(df, col, cat, banner_columns)
+        cells = _distribution_cells(df, col, cat, banner_columns, row_var=row_var)
         rows.append({"code": cat, "label": row_label, "cells": cells})
 
-    total_cells = _distribution_cells(df, col, None, banner_columns, is_total_row=True)
+    total_cells = _distribution_cells(
+        df, col, None, banner_columns, is_total_row=True, row_var=row_var
+    )
     rows.append({"code": "_total", "label": "Total", "cells": total_cells, "is_total": True})
 
     headers = [{"key": "total", "label": "Total", "banner_id": None}] + [
@@ -497,6 +518,7 @@ def _distribution_cells(
     banner_columns: list[dict[str, Any]],
     *,
     is_total_row: bool = False,
+    row_var: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     cells: list[dict[str, Any]] = []
 
@@ -505,7 +527,12 @@ def _distribution_cells(
         if is_total_row:
             count = n
         else:
-            count = int((subset[col].astype(str) == str(match_value)).sum())
+            col_series = subset[col].dropna().astype(str).str.strip()
+            if row_var:
+                canonical = col_series.map(lambda v: canonical_answer_code(row_var, v))
+                count = int((canonical == str(match_value)).sum())
+            else:
+                count = int((col_series == str(match_value)).sum())
         pct = round((count / n) * 100, 1) if n else 0.0
         return {"count": count, "base": n, "col_pct": pct}
 
@@ -812,12 +839,13 @@ def _profile_single(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
     if col is None:
         return {"error": f"No response data for '{var['text']}'", "variable": _var_summary(var)}
 
-    series = df[col].dropna().astype(str)
-    total = len(series)
+    series = df[col].dropna().astype(str).str.strip()
+    canonical = series.map(lambda v: canonical_answer_code(var, v))
+    total = int((canonical != "").sum())
     categories = _ordered_categories(var, series)
     values = []
     for cat in categories:
-        count = int((series == cat).sum())
+        count = int((canonical == cat).sum())
         values.append(
             {
                 "code": cat,
@@ -993,3 +1021,251 @@ def _profile_location(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
         "points": points[:5000],
         "bounds": bounds,
     }
+
+
+def run_chart_data(
+    survey_id: int,
+    variable_id: str,
+    *,
+    completion_status: str = "complete",
+    filters: list[dict[str, Any]] | None = None,
+    chart_type: str = "auto",
+    bins: int = 10,
+    banner_variable_id: str | None = None,
+    y_variable_id: str | None = None,
+    z_variable_id: str | None = None,
+) -> dict[str, Any]:
+    """Build chart-ready payloads; supports profile types plus histogram and banner breakdown."""
+    if y_variable_id and chart_type in ("scatter_xy", "bubble"):
+        return _scatter_chart_data(
+            survey_id,
+            x_variable_id=variable_id,
+            y_variable_id=y_variable_id,
+            z_variable_id=z_variable_id if chart_type == "bubble" else None,
+            completion_status=completion_status,
+            filters=filters,
+            chart_type=chart_type,
+        )
+
+    if banner_variable_id and chart_type in ("banner_grouped", "banner_stacked", "banner_heatmap"):
+        banner = run_banner_table(
+            survey_id,
+            row_variable_id=variable_id,
+            row_variable_ids=[variable_id],
+            banner_variable_ids=[banner_variable_id],
+            filters=filters,
+            completion_status=completion_status,
+            show_significance=False,
+            metric="auto",
+        )
+        if banner.get("error") and not banner.get("headers"):
+            return banner
+        banner["chart_type"] = chart_type
+        return banner
+
+    if chart_type == "histogram":
+        return _numeric_histogram(
+            survey_id,
+            variable_id,
+            completion_status=completion_status,
+            filters=filters,
+            bins=bins,
+        )
+
+    profile = run_question_profile(
+        survey_id,
+        variable_id,
+        completion_status=completion_status,
+        filters=filters,
+    )
+    if profile.get("error"):
+        return profile
+    profile["chart_type"] = chart_type
+    return profile
+
+
+def _numeric_histogram(
+    survey_id: int,
+    variable_id: str,
+    *,
+    completion_status: str = "complete",
+    filters: list[dict[str, Any]] | None = None,
+    bins: int = 10,
+) -> dict[str, Any]:
+    schema, df = load_filtered_context(
+        survey_id,
+        completion_status=completion_status,
+        filters=filters,
+    )
+    variable = get_variable(schema, variable_id)
+    if not variable:
+        return {"error": f"Variable '{variable_id}' not found"}
+    if variable["kind"] != "numeric":
+        return {"error": "Histogram is only available for numeric questions"}
+
+    if df.empty:
+        return {"error": "No responses match the selected filters"}
+
+    col = variable["columns"][0] if variable["columns"] else variable["code"]
+    if col not in df.columns:
+        return {"error": "No data column found"}
+
+    numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+    if numeric.empty:
+        return {"error": "No numeric responses"}
+
+    bins = max(3, min(int(bins), 50))
+    counts, edges = pd.cut(numeric, bins=bins, retbins=True, duplicates="drop")
+    grouped = counts.value_counts().sort_index()
+    total = int(len(numeric))
+    values = []
+    for interval, count in grouped.items():
+        left = float(interval.left)
+        right = float(interval.right)
+        label = f"{left:.1g}–{right:.1g}"
+        values.append(
+            {
+                "code": label,
+                "label": label,
+                "count": int(count),
+                "percentage": round(100 * int(count) / total, 1) if total else 0,
+            }
+        )
+
+    return {
+        "analysis_type": "histogram",
+        "chart_type": "histogram",
+        "variable": _var_summary(variable),
+        "base_n": total,
+        "values": values,
+    }
+
+
+def _value_series_for_chart(var: dict[str, Any], df: pd.DataFrame) -> pd.Series:
+    """Per-respondent numeric values for scatter / bubble axes."""
+    kind = var.get("kind")
+
+    if kind == "numeric":
+        if var.get("ls_type") == "K" and var.get("subquestions"):
+            cols = [sq["column"] for sq in var["subquestions"] if sq.get("column") in df.columns]
+            if not cols:
+                return pd.Series(index=df.index, dtype=float)
+            nums = df[cols].apply(pd.to_numeric, errors="coerce")
+            return nums.mean(axis=1)
+        col = var["columns"][0] if var.get("columns") else var["code"]
+        if col not in df.columns:
+            return pd.Series(index=df.index, dtype=float)
+        return pd.to_numeric(df[col], errors="coerce")
+
+    if kind in ("single", "custom", "rank"):
+        col = _find_column(var, df)
+        if col is None:
+            return pd.Series(index=df.index, dtype=float)
+        raw = df[col].astype(str).str.strip()
+        numeric = pd.to_numeric(raw.replace({"": pd.NA, "nan": pd.NA}), errors="coerce")
+        if numeric.notna().sum() >= max(3, int(len(df) * 0.3)):
+            return numeric
+        options = var.get("answer_options") or builtin_scale_options(var)
+        code_to_idx = {str(o["code"]): float(i + 1) for i, o in enumerate(options)}
+        canonical = raw.map(lambda v: canonical_answer_code(var, v))
+        return canonical.map(code_to_idx)
+
+    if kind == "multi":
+        subquestions = var.get("subquestions") or []
+        if not subquestions and var.get("answer_options"):
+            subquestions = [
+                {"code": o["code"], "label": o["label"], "column": f"{var['code']}_{o['code']}"}
+                for o in var["answer_options"]
+            ]
+        count = pd.Series(0.0, index=df.index)
+        for sq in subquestions:
+            col = _resolve_subquestion_column(var, sq, df)
+            if col is None:
+                continue
+            checked = df[col].astype(str).isin(["Y", "1", "yes", "Yes"])
+            count = count + checked.astype(float)
+        return count
+
+    return pd.Series(index=df.index, dtype=float)
+
+
+def _scatter_chart_data(
+    survey_id: int,
+    *,
+    x_variable_id: str,
+    y_variable_id: str,
+    z_variable_id: str | None = None,
+    completion_status: str = "complete",
+    filters: list[dict[str, Any]] | None = None,
+    chart_type: str = "scatter_xy",
+) -> dict[str, Any]:
+    schema, df = load_filtered_context(
+        survey_id,
+        completion_status=completion_status,
+        filters=filters,
+    )
+    x_var = get_variable(schema, x_variable_id)
+    y_var = get_variable(schema, y_variable_id)
+    if not x_var:
+        return {"error": f"X variable '{x_variable_id}' not found"}
+    if not y_var:
+        return {"error": f"Y variable '{y_variable_id}' not found"}
+    if x_variable_id == y_variable_id:
+        return {"error": "X and Y must be different variables"}
+    if z_variable_id and z_variable_id in (x_variable_id, y_variable_id):
+        return {"error": "Size variable must differ from X and Y"}
+
+    z_var = get_variable(schema, z_variable_id) if z_variable_id else None
+    if z_variable_id and not z_var:
+        return {"error": f"Size variable '{z_variable_id}' not found"}
+
+    if df.empty:
+        return {"error": "No responses match the selected filters"}
+
+    x_series = _value_series_for_chart(x_var, df)
+    y_series = _value_series_for_chart(y_var, df)
+    z_series = _value_series_for_chart(z_var, df) if z_var else None
+
+    mask = x_series.notna() & y_series.notna()
+    if z_series is not None:
+        mask = mask & z_series.notna()
+
+    paired = df.loc[mask]
+    if paired.empty:
+        return {
+            "error": "No respondents with valid values on all selected axes",
+            "x_variable": _var_summary(x_var),
+            "y_variable": _var_summary(y_var),
+        }
+
+    xs = x_series.loc[mask]
+    ys = y_series.loc[mask]
+    zs = z_series.loc[mask] if z_series is not None else None
+
+    points: list[dict[str, float]] = []
+    for i in range(len(paired)):
+        pt: dict[str, float] = {
+            "x": round(float(xs.iloc[i]), 4),
+            "y": round(float(ys.iloc[i]), 4),
+        }
+        if zs is not None:
+            pt["z"] = round(float(zs.iloc[i]), 4)
+        points.append(pt)
+
+    max_points = 3000
+    if len(points) > max_points:
+        step = max(1, len(points) // max_points)
+        points = points[::step][:max_points]
+
+    result: dict[str, Any] = {
+        "analysis_type": "scatter",
+        "chart_type": chart_type,
+        "variable": _var_summary(x_var),
+        "x_variable": _var_summary(x_var),
+        "y_variable": _var_summary(y_var),
+        "base_n": int(mask.sum()),
+        "scatter_points": points,
+    }
+    if z_var:
+        result["z_variable"] = _var_summary(z_var)
+    return result

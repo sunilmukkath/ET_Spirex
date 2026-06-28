@@ -10,11 +10,11 @@ from app.lime_client import (
     get_survey_questions,
     list_projects,
 )
-from app.models.analysis import BannerRequest, ProfileRequest, ProjectStatsRequest
+from app.models.analysis import BannerRequest, ChartRequest, ProfileRequest, ProjectStatsRequest
 from app.models.auth import LoginRequest, LoginResponse
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
 from app.services.auth import VALID_USERS, authenticate, get_session, list_active_sessions, logout
-from app.services.banner_analysis import run_banner_table, run_question_profile, get_filter_options
+from app.services.banner_analysis import run_banner_table, run_chart_data, run_question_profile, get_filter_options
 from app.services.custom_variable_store import (
     create_custom_variable,
     delete_custom_variable,
@@ -154,6 +154,18 @@ def survey_schema(
             completion_status=completion_status,
             light=light,
         )
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.post("/projects/{survey_id}/warmup")
+def survey_warmup(survey_id: int, completion_status: str = "complete"):
+    """Preload responses and full schema so the first analysis is faster."""
+    try:
+        from app.services.analysis_context import warmup_analysis_context
+
+        warmup_analysis_context(survey_id, completion_status=completion_status)
+        return {"ok": True}
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
 
@@ -336,6 +348,24 @@ def question_profile(survey_id: int, body: ProfileRequest):
         raise _handle_lime_error(exc) from exc
 
 
+@router.post("/projects/{survey_id}/analysis/chart")
+def chart_data(survey_id: int, body: ChartRequest):
+    try:
+        return run_chart_data(
+            survey_id,
+            body.variable_id,
+            completion_status=body.completion_status,
+            filters=[f.model_dump() for f in body.filters],
+            chart_type=body.chart_type,
+            bins=body.bins,
+            banner_variable_id=body.banner_variable_id,
+            y_variable_id=body.y_variable_id,
+            z_variable_id=body.z_variable_id,
+        )
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
 @router.post("/projects/{survey_id}/analysis/banner")
 def banner_analysis(survey_id: int, body: BannerRequest):
     try:
@@ -346,6 +376,10 @@ def banner_analysis(survey_id: int, body: BannerRequest):
             row_variable_ids=row_ids,
             banner_variable_ids=body.banner_variable_ids,
             filters=[f.model_dump() for f in body.filters],
+            row_filters={
+                k: [f.model_dump() for f in v]
+                for k, v in body.row_filters.items()
+            },
             completion_status=body.completion_status,
             show_counts=body.show_counts,
             show_col_pct=body.show_col_pct,
@@ -368,6 +402,10 @@ def banner_export(survey_id: int, body: BannerRequest):
             row_variable_ids=row_ids,
             banner_variable_ids=body.banner_variable_ids,
             filters=[f.model_dump() for f in body.filters],
+            row_filters={
+                k: [f.model_dump() for f in v]
+                for k, v in body.row_filters.items()
+            },
             completion_status=body.completion_status,
             show_counts=body.show_counts,
             show_col_pct=body.show_col_pct,

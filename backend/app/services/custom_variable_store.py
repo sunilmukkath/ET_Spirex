@@ -19,12 +19,16 @@ _LIST_TTL = 60
 
 
 def invalidate_custom_variable_cache(survey_id: int | None = None) -> None:
+    from app.services.analysis_context import invalidate_analysis_context
+
     if survey_id is None:
         _LIST_CACHE.clear()
+        invalidate_analysis_context(None)
         return
     keys = [k for k in _LIST_CACHE if k[0] == survey_id]
     for key in keys:
         del _LIST_CACHE[key]
+    invalidate_analysis_context(survey_id)
 
 
 def _safe_username(username: str | None) -> str | None:

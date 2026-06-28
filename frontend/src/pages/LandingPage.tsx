@@ -1,8 +1,11 @@
 import { Navigate, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
+  Database,
   Layers,
+  PieChart,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Table2,
   Zap,
@@ -16,17 +19,37 @@ const FEATURES = [
   {
     icon: Layers,
     title: 'Explore',
-    desc: 'Charts, filters, and GPS maps for every question type.',
+    desc: 'Instant distributions, summary stats, and GPS maps for every question.',
+  },
+  {
+    icon: PieChart,
+    title: 'Charts',
+    desc: 'Build bar, pie, histogram, and banner charts one at a time — export PNG or CSV.',
   },
   {
     icon: Table2,
     title: 'Crosstabs',
-    desc: 'Multi-banner tables with chi-square significance and Excel export.',
+    desc: 'Multi-banner tables with per-table filters, significance testing, and Excel export.',
   },
   {
     icon: ShieldCheck,
     title: 'Data quality',
-    desc: 'Speeders, straight-lining, and gibberish detection built in.',
+    desc: 'Quality score, speeders, duplicates, straight-lining, and gibberish detection.',
+  },
+  {
+    icon: SlidersHorizontal,
+    title: 'Custom variables',
+    desc: 'Recode, combine categories, and net scores — ready for banners and filters.',
+  },
+  {
+    icon: Database,
+    title: 'Raw data',
+    desc: 'Search, filter columns, and export the full response dataset.',
+  },
+  {
+    icon: BarChart3,
+    title: 'QC-approved analysis',
+    desc: 'Analyze clean samples with flagged responses automatically excluded.',
   },
   {
     icon: Zap,
@@ -79,19 +102,19 @@ export function LandingPage() {
             Analytics that feel as sharp as your research.
           </h1>
           <p className="mt-5 max-w-lg text-base leading-relaxed text-white/70 sm:text-lg">
-            ET Spirex turns LimeSurvey data into explore charts, advanced crosstabs,
-            quality scans, and export-ready tables — built for the Elastic Tree team.
+            ET Spirex turns LimeSurvey data into explore charts, custom visualisations,
+            advanced crosstabs, quality scans, and export-ready tables — built for the Elastic Tree team.
           </p>
 
-          <div className="mt-10 grid gap-4 sm:grid-cols-2">
+          <div className="mt-10 grid gap-3 sm:grid-cols-2">
             {FEATURES.map(({ icon: Icon, title, desc }) => (
               <div
                 key={title}
                 className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm transition hover:border-[var(--et-teal)]/30 hover:bg-white/[0.07]"
               >
-                <Icon className="mb-2 text-[var(--et-teal-light)]" size={22} />
-                <h3 className="font-semibold text-white">{title}</h3>
-                <p className="mt-1 text-xs leading-relaxed text-white/55">{desc}</p>
+                <Icon className="mb-2 text-[var(--et-teal-light)]" size={20} />
+                <h3 className="text-sm font-semibold text-white">{title}</h3>
+                <p className="mt-1 text-[11px] leading-relaxed text-white/55">{desc}</p>
               </div>
             ))}
           </div>

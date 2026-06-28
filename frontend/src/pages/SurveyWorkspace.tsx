@@ -27,16 +27,20 @@ import { useAuth } from '../auth/AuthContext'
 import { BannerPicker } from '../components/analysis/BannerPicker'
 import { FilterEditor } from '../components/analysis/FilterEditor'
 import { QuestionNavigator } from '../components/analysis/QuestionNavigator'
+import { SurveyOverviewBar } from '../components/analysis/SurveyOverviewBar'
 import { CrosstabsResults, ProfileResults } from '../components/analysis/Results'
 import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
 import { StatusBadge } from '../components/StatusBadge'
-import { ErrorState } from '../components/States'
+import { ErrorState, TableSkeleton } from '../components/States'
 
 const DataPanel = lazy(() =>
   import('../components/analysis/DataPanel').then((m) => ({ default: m.DataPanel })),
 )
 const QualityPanel = lazy(() =>
   import('../components/analysis/QualityPanel').then((m) => ({ default: m.QualityPanel })),
+)
+const ChartsPanel = lazy(() =>
+  import('../components/analysis/ChartsPanel').then((m) => ({ default: m.ChartsPanel })),
 )
 
 function PanelLoader() {
@@ -47,10 +51,11 @@ function PanelLoader() {
   )
 }
 
-type Mode = 'explore' | 'crosstabs' | 'quality' | 'variables' | 'data'
+type Mode = 'explore' | 'charts' | 'crosstabs' | 'quality' | 'variables' | 'data'
 
 function parseMode(raw: string | null): Mode {
   if (raw === 'crosstabs' || raw === 'compare') return 'crosstabs'
+  if (raw === 'charts') return 'charts'
   if (raw === 'quality') return 'quality'
   if (raw === 'variables') return 'variables'
   if (raw === 'data') return 'data'
@@ -88,6 +93,8 @@ export function SurveyWorkspace() {
   const [confidenceLevel, setConfidenceLevel] = useState(0.95)
   const [sigEnabled, setSigEnabled] = useState(true)
   const [filters, setFilters] = useState<FilterSpec[]>([])
+  const [tableFilters, setTableFilters] = useState<Record<string, FilterSpec[]>>({})
+  const [refreshingTableId, setRefreshingTableId] = useState<string | null>(null)
   const [qualityResult, setQualityResult] = useState<DataQualityResult | null>(null)
   const [qualityLoading, setQualityLoading] = useState(false)
   const [qualityError, setQualityError] = useState<string | null>(null)
@@ -129,6 +136,8 @@ export function SurveyWorkspace() {
 
   const profileAbort = useRef<AbortController | null>(null)
   const initialized = useRef(false)
+  const qualityCacheRef = useRef<Map<string, { at: number; data: DataQualityResult }>>(new Map())
+  const QUALITY_CACHE_MS = 120_000
 
   const setMode = (m: Mode) => {
     setSearchParams((prev) => {
@@ -140,6 +149,10 @@ export function SurveyWorkspace() {
   function buildBannerRequest() {
     const rowIds = sideRowIds.length > 0 ? sideRowIds : selectedId ? [selectedId] : []
     if (rowIds.length === 0) return null
+    const row_filters: Record<string, FilterSpec[]> = {}
+    for (const id of rowIds) {
+      row_filters[id] = tableFilters[id] ?? filters
+    }
     return {
       row_variable_id: rowIds[0],
       row_variable_ids: rowIds,
@@ -152,6 +165,7 @@ export function SurveyWorkspace() {
       confidence_level: confidenceLevel,
       metric,
       filters,
+      row_filters,
     }
   }
 
@@ -197,6 +211,7 @@ export function SurveyWorkspace() {
         setSchema(data)
         pickDefaults(data)
         setSchemaLoading(false)
+        api.warmupSurvey(surveyId, completionStatus).catch(() => {})
       })
       .catch((err) => {
         if (!cancelled) {
@@ -282,14 +297,26 @@ export function SurveyWorkspace() {
 
   useEffect(() => {
     if (mode !== 'quality' || !Number.isFinite(surveyId) || surveyId <= 0) return
+    const cacheKey = `${surveyId}:${completionStatus}`
+    const cached = qualityCacheRef.current.get(cacheKey)
+    if (cached && Date.now() - cached.at < QUALITY_CACHE_MS) {
+      setQualityResult(cached.data)
+      setQualityLoading(false)
+      setQualityError(null)
+      return
+    }
+
     let cancelled = false
     setQualityLoading(true)
     setQualityError(null)
     setQualityResult(null)
     api
-      .getDataQuality(surveyId, 'complete')
+      .getDataQuality(surveyId, completionStatus)
       .then((data) => {
-        if (!cancelled) setQualityResult(data)
+        if (!cancelled) {
+          qualityCacheRef.current.set(cacheKey, { at: Date.now(), data })
+          setQualityResult(data)
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -303,14 +330,16 @@ export function SurveyWorkspace() {
     return () => {
       cancelled = true
     }
-  }, [mode, surveyId])
+  }, [mode, surveyId, completionStatus])
 
   const refreshQuality = useCallback(async () => {
     if (!Number.isFinite(surveyId) || surveyId <= 0) return
+    const cacheKey = `${surveyId}:${completionStatus}`
     setQualityLoading(true)
     setQualityError(null)
     try {
-      const data = await api.getDataQuality(surveyId, 'complete', true)
+      const data = await api.getDataQuality(surveyId, completionStatus, true)
+      qualityCacheRef.current.set(cacheKey, { at: Date.now(), data })
       setQualityResult(data)
     } catch (err) {
       setQualityError(err instanceof Error ? err.message : 'Quality scan failed')
@@ -318,7 +347,7 @@ export function SurveyWorkspace() {
     } finally {
       setQualityLoading(false)
     }
-  }, [surveyId])
+  }, [surveyId, completionStatus])
 
   async function runBanner() {
     const request = buildBannerRequest()
@@ -332,6 +361,45 @@ export function SurveyWorkspace() {
     } finally {
       setAnalyzing(false)
     }
+  }
+
+  async function refreshCrosstabTable(rowId: string, tableIndex: number) {
+    const request = buildBannerRequest()
+    if (!request) return
+    const tableFilterList = tableFilters[rowId] ?? filters
+    setRefreshingTableId(rowId)
+    try {
+      const result = await api.runBanner(surveyId, {
+        ...request,
+        row_variable_id: rowId,
+        row_variable_ids: [rowId],
+        filters: tableFilterList,
+        row_filters: { [rowId]: tableFilterList },
+      })
+      const table =
+        result.table_type === 'multi' && result.tables?.length ? result.tables[0] : result
+      setBannerResult((prev) => {
+        if (!prev?.tables) return prev
+        const tables = [...prev.tables]
+        tables[tableIndex] = table
+        return { ...prev, tables }
+      })
+    } catch (err) {
+      setBannerResult((prev) => {
+        if (!prev?.tables) return prev
+        const tables = [...prev.tables]
+        tables[tableIndex] = {
+          error: err instanceof Error ? err.message : 'Failed to update table',
+        }
+        return { ...prev, tables }
+      })
+    } finally {
+      setRefreshingTableId(null)
+    }
+  }
+
+  function updateTableFilters(rowId: string, next: FilterSpec[]) {
+    setTableFilters((prev) => ({ ...prev, [rowId]: next }))
   }
 
   async function exportBanner() {
@@ -440,6 +508,9 @@ export function SurveyWorkspace() {
           <ModeButton active={mode === 'explore'} onClick={() => setMode('explore')} icon={<Layers size={15} />}>
             Explore
           </ModeButton>
+          <ModeButton active={mode === 'charts'} onClick={() => setMode('charts')} icon={<BarChart3 size={15} />}>
+            Charts
+          </ModeButton>
           <ModeButton active={mode === 'crosstabs'} onClick={() => setMode('crosstabs')} icon={<Table2 size={15} />}>
             Crosstabs
           </ModeButton>
@@ -467,7 +538,7 @@ export function SurveyWorkspace() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-          {mode !== 'quality' && mode !== 'variables' && mode !== 'data' && (
+          {mode !== 'quality' && mode !== 'variables' && mode !== 'data' && mode !== 'charts' && (
             <QuestionNavigator
               variables={activeSchema?.variables ?? []}
               groups={activeSchema?.groups ?? []}
@@ -497,12 +568,33 @@ export function SurveyWorkspace() {
             </div>
           )}
 
+          {mode === 'charts' && (
+            <Suspense fallback={<PanelLoader />}>
+              <ChartsPanel
+                surveyId={surveyId}
+                completionStatus={completionStatus}
+                variables={activeSchema?.variables ?? []}
+                groups={activeSchema?.groups ?? []}
+                selectedVar={selectedVar}
+                selectedId={selectedId}
+                onVariableChange={handleSelectQuestion}
+                filters={filters}
+                onFiltersChange={setFilters}
+                schemaLoading={schemaLoading}
+              />
+            </Suspense>
+          )}
+
           {mode === 'explore' && (
             <ExplorePanel
               surveyId={surveyId}
               completionStatus={completionStatus}
               selectedVar={selectedVar}
               variables={activeSchema?.variables ?? []}
+              groups={activeSchema?.groups ?? []}
+              responseCount={activeSchema?.response_count ?? project?.responses.completed ?? 0}
+              questionCount={activeSchema?.question_count ?? activeSchema?.variables.length ?? 0}
+              customVarCount={customVariables.length}
               filters={filters}
               onFiltersChange={setFilters}
               analyzing={analyzing}
@@ -584,6 +676,10 @@ export function SurveyWorkspace() {
               onExport={exportBanner}
               bannerResult={bannerResult}
               schemaLoading={schemaLoading}
+              tableFilters={tableFilters}
+              onTableFiltersChange={updateTableFilters}
+              onRefreshTable={refreshCrosstabTable}
+              refreshingTableId={refreshingTableId}
             />
           )}
         </main>
@@ -622,6 +718,10 @@ function ExplorePanel({
   completionStatus,
   selectedVar,
   variables,
+  groups,
+  responseCount,
+  questionCount,
+  customVarCount,
   filters,
   onFiltersChange,
   analyzing,
@@ -633,6 +733,10 @@ function ExplorePanel({
   completionStatus: string
   selectedVar: SurveyVariable | null
   variables: SurveyVariable[]
+  groups: { id: number; title: string; order: number; variable_ids: string[] }[]
+  responseCount: number
+  questionCount: number
+  customVarCount: number
   filters: FilterSpec[]
   onFiltersChange: (filters: FilterSpec[]) => void
   analyzing: boolean
@@ -640,12 +744,26 @@ function ExplorePanel({
   schemaLoading: boolean
   enriching: boolean
 }) {
+  const overview = (
+    <SurveyOverviewBar
+      responseCount={responseCount}
+      questionCount={questionCount}
+      groupCount={groups.length}
+      variables={variables}
+      completionStatus={completionStatus}
+      customVarCount={customVarCount}
+    />
+  )
+
   if (schemaLoading) {
     return (
-      <div className="flex flex-1 items-center justify-center p-8">
-        <div className="text-center">
-          <Loader2 className="mx-auto animate-spin text-[var(--et-teal)]" size={32} />
-          <p className="mt-4 text-sm text-slate-500">Loading question list...</p>
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="shrink-0 border-b border-slate-200 bg-[var(--canvas)] px-6 py-4">
+          {overview}
+        </div>
+        <div className="flex flex-1 flex-col gap-4 p-8">
+          <TableSkeleton rows={4} />
+          <TableSkeleton rows={8} />
         </div>
       </div>
     )
@@ -653,17 +771,25 @@ function ExplorePanel({
 
   if (!selectedVar) {
     return (
-      <EmptyCanvas
-        icon={<BarChart3 size={40} />}
-        title="Select a question"
-        description="Choose any question from the sidebar to see its distribution, chart, and summary stats."
-      />
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="shrink-0 border-b border-slate-200 bg-[var(--canvas)] px-6 py-4">
+          {overview}
+        </div>
+        <EmptyCanvas
+          icon={<BarChart3 size={40} />}
+          title="Select a question"
+          description="Choose any question from the sidebar to see its distribution, chart, and summary stats."
+        />
+      </div>
     )
   }
 
   if (enriching && !profileResult && !analyzing) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="shrink-0 border-b border-slate-200 bg-[var(--canvas)] px-6 py-4">
+          {overview}
+        </div>
         <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
           <FilterEditor
             surveyId={surveyId}
@@ -689,6 +815,9 @@ function ExplorePanel({
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="shrink-0 border-b border-slate-200 bg-[var(--canvas)] px-6 py-4">
+        {overview}
+      </div>
       <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
         <FilterEditor
           surveyId={surveyId}
@@ -762,6 +891,10 @@ function CrosstabsPanel({
   onExport,
   bannerResult,
   schemaLoading,
+  tableFilters,
+  onTableFiltersChange,
+  onRefreshTable,
+  refreshingTableId,
 }: {
   surveyId: number
   completionStatus: string
@@ -800,6 +933,10 @@ function CrosstabsPanel({
   onExport: () => void
   bannerResult: BannerResult | null
   schemaLoading: boolean
+  tableFilters: Record<string, FilterSpec[]>
+  onTableFiltersChange: (rowId: string, filters: FilterSpec[]) => void
+  onRefreshTable: (rowId: string, tableIndex: number) => void
+  refreshingTableId: string | null
 }) {
   const canRun = sideRowVars.length > 0 && bannerVars.length > 0 && !schemaLoading
 
@@ -935,10 +1072,15 @@ function CrosstabsPanel({
           filters={filters}
           onChange={onFiltersChange}
           compact
+          heading="Default filters"
         />
         </div>
 
-        <p className="mt-3 text-xs text-slate-400">
+        <p className="mt-2 text-xs text-slate-400">
+          Default filters apply to all tables on build. Override filters per table in each table section below.
+        </p>
+
+        <p className="mt-1 text-xs text-slate-400">
           Use <strong>Add side row</strong> or <strong>Add banner column</strong> above, or click questions in the sidebar · <strong>+</strong> = banner · <strong>S</strong> = side row · a question can be both row and banner.
         </p>
       </div>
@@ -958,7 +1100,19 @@ function CrosstabsPanel({
         )}
         {bannerResult && !analyzing && (
           <div className="animate-fade-in rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
-            <CrosstabsResults result={bannerResult} />
+            <CrosstabsResults
+              result={bannerResult}
+              multiControls={{
+                surveyId,
+                completionStatus,
+                variables,
+                globalFilters: filters,
+                tableFilters,
+                onTableFiltersChange: onTableFiltersChange,
+                onRefreshTable: onRefreshTable,
+                refreshingTableId,
+              }}
+            />
           </div>
         )}
       </div>

@@ -78,9 +78,14 @@ export function SignInForm({ onSuccess, compact }: Props) {
       </label>
 
       {error && (
-        <p className="mb-4 rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-200 ring-1 ring-red-400/30">
-          {error}
-        </p>
+        <div className="mb-4 space-y-1 rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-200 ring-1 ring-red-400/30">
+          <p>{error}</p>
+          {error.includes('backend') || error.includes('server') || error.includes('Network') ? (
+            <p className="text-xs text-red-200/80">
+              Local dev: run backend on port 8000, then refresh this page.
+            </p>
+          ) : null}
+        </div>
       )}
 
       <button

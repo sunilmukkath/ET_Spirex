@@ -29,3 +29,32 @@ export function EmptyState({ title, description }: { title: string; description:
     </div>
   )
 }
+
+export function SkeletonBlock({ className = '' }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-lg bg-slate-200/80 ${className}`}
+      aria-hidden
+    />
+  )
+}
+
+export function ChartSkeleton() {
+  return (
+    <div className="space-y-4" aria-label="Loading chart">
+      <SkeletonBlock className="h-4 w-48" />
+      <SkeletonBlock className="h-72 w-full" />
+    </div>
+  )
+}
+
+export function TableSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div className="space-y-2" aria-label="Loading">
+      <SkeletonBlock className="h-8 w-full" />
+      {Array.from({ length: rows }).map((_, i) => (
+        <SkeletonBlock key={i} className="h-6 w-full" />
+      ))}
+    </div>
+  )
+}

@@ -7,6 +7,7 @@ from typing import Any
 from app.config import settings
 
 from app.lime_client import get_client
+from app.services.answer_labels import builtin_scale_options
 from app.services.location_detect import apply_location_kind
 from app.services.question_types import (
     AnswerOption,
@@ -53,9 +54,9 @@ def _builtin_answer_options(ls_type: str) -> list[AnswerOption]:
     presets: dict[str, list[tuple[str, str]]] = {
         "Y": [("Y", "Yes"), ("N", "No")],
         "G": [("M", "Male"), ("F", "Female"), ("U", "Uncertain"), ("O", "Other")],
-        "5": [(str(i), str(i)) for i in range(1, 6)],
-        "A": [(str(i), str(i)) for i in range(1, 6)],
-        "B": [(str(i), str(i)) for i in range(1, 11)],
+        "5": builtin_scale_options("5") or [(str(i), str(i)) for i in range(1, 6)],
+        "A": builtin_scale_options("A") or [(str(i), str(i)) for i in range(1, 6)],
+        "B": builtin_scale_options("B") or [(str(i), str(i)) for i in range(1, 11)],
     }
     return [
         AnswerOption(code=code, label=label, sort_order=i)
@@ -336,9 +337,13 @@ def get_variable(schema: dict[str, Any], variable_id: str) -> dict[str, Any] | N
 
 
 def invalidate_schema_cache(survey_id: int | None = None) -> None:
+    from app.services.analysis_context import invalidate_analysis_context
+
     if survey_id is None:
         _SCHEMA_CACHE.clear()
+        invalidate_analysis_context(None)
         return
     keys = [k for k in _SCHEMA_CACHE if k[0] == survey_id]
     for key in keys:
         del _SCHEMA_CACHE[key]
+    invalidate_analysis_context(survey_id)

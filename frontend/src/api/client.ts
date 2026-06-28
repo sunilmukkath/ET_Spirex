@@ -166,6 +166,7 @@ export interface BannerRequest {
   row_variable_ids?: string[]
   banner_variable_ids: string[]
   filters?: FilterSpec[]
+  row_filters?: Record<string, FilterSpec[]>
   completion_status?: string
   show_counts?: boolean
   show_col_pct?: boolean
@@ -231,6 +232,11 @@ export interface ProfileResult {
   top_words?: { word: string; count: number }[]
   points?: { lat: number; lng: number }[]
   bounds?: { north: number; south: number; east: number; west: number } | null
+  chart_type?: string
+  scatter_points?: { x: number; y: number; z?: number }[]
+  x_variable?: { id: string; code: string; text: string; kind: string; type_label: string }
+  y_variable?: { id: string; code: string; text: string; kind: string; type_label: string }
+  z_variable?: { id: string; code: string; text: string; kind: string; type_label: string }
 }
 
 export interface DataQualityResult {
@@ -331,16 +337,42 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
   return headers
 }
 
+const API_TIMEOUT_MS = 12_000
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: authHeaders(init?.headers),
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.detail || `Request failed (${res.status})`)
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+
+  if (init?.signal) {
+    init.signal.addEventListener('abort', () => controller.abort(), { once: true })
   }
-  return res.json()
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers: authHeaders(init?.headers),
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || `Request failed (${res.status})`)
+    }
+    return res.json()
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error(
+        'Cannot reach the ET Spirex server. If running locally, start the backend on port 8000.',
+      )
+    }
+    if (err instanceof TypeError) {
+      throw new Error(
+        'Network error — is the backend running? Use: cd backend && uvicorn app.main:app --port 8000',
+      )
+    }
+    throw err
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
 }
 
 const schemaCache = new Map<string, { at: number; data: SurveySchema }>()
@@ -416,6 +448,40 @@ export const api = {
       }),
       signal,
     }),
+  runChart: (
+    id: number,
+    query: {
+      variableId: string
+      completionStatus?: string
+      filters?: FilterSpec[]
+      chartType?: string
+      bins?: number
+      bannerVariableId?: string
+      yVariableId?: string
+      zVariableId?: string
+    },
+    signal?: AbortSignal,
+  ) =>
+    fetchJson<ProfileResult & BannerResult>(`/api/projects/${id}/analysis/chart`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        variable_id: query.variableId,
+        completion_status: query.completionStatus ?? 'complete',
+        filters: query.filters ?? [],
+        chart_type: query.chartType ?? 'auto',
+        bins: query.bins ?? 10,
+        banner_variable_id: query.bannerVariableId || null,
+        y_variable_id: query.yVariableId || null,
+        z_variable_id: query.zVariableId || null,
+      }),
+      signal,
+    }),
+  warmupSurvey: (id: number, completionStatus = 'complete') =>
+    fetchJson<{ ok: boolean }>(
+      `/api/projects/${id}/warmup?completion_status=${encodeURIComponent(completionStatus)}`,
+      { method: 'POST' },
+    ),
   getFilterOptions: (surveyId: number, variableId: string, completionStatus = 'complete') =>
     fetchJson<{ options: { code: string; label: string; count?: number }[]; error?: string }>(
       `/api/projects/${surveyId}/variables/${variableId}/filter-options?completion_status=${completionStatus}`,
