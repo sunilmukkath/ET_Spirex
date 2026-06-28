@@ -84,9 +84,34 @@ export function LollipopChart({
   )
 }
 
-export function ComboChart({ values, options }: { values: ValueRow[]; options: ChartDisplayOptions }) {
-  const data = toChartRows(values, options)
+export function ComboChart({
+  values,
+  lineValues,
+  options,
+  lineLabel,
+}: {
+  values: ValueRow[]
+  lineValues?: ValueRow[]
+  options: ChartDisplayOptions
+  lineLabel?: string
+}) {
+  const barRows = toChartRows(values, options)
+  const lineRows = lineValues?.map((v) => ({
+    value:
+      options.valueMode === 'percent' ? v.percentage : v.count,
+  }))
+  const data = barRows.map((row, i) => ({
+    ...row,
+    lineValue:
+      lineRows?.[i]?.value ??
+      (lineValues
+        ? options.valueMode === 'percent'
+          ? (lineValues[i]?.percentage ?? 0)
+          : (lineValues[i]?.count ?? 0)
+        : row.value),
+  }))
   const stroke = colors(options)[0]
+  const lineStroke = colors(options)[2] ?? colors(options)[1] ?? stroke
   return (
     <div className="h-80">
       <ResponsiveContainer width="100%" height="100%">
@@ -96,12 +121,12 @@ export function ComboChart({ values, options }: { values: ValueRow[]; options: C
           <YAxis />
           <Tooltip />
           <Legend />
-          <Bar dataKey="value" name="Value" fill={stroke} radius={[4, 4, 0, 0]} />
+          <Bar dataKey="value" name="Bars" fill={stroke} radius={[4, 4, 0, 0]} />
           <Line
             type="monotone"
-            dataKey="value"
-            name="Trend"
-            stroke={colors(options)[2] ?? stroke}
+            dataKey="lineValue"
+            name={lineLabel ? truncate(lineLabel, 28) : 'Line series'}
+            stroke={lineStroke}
             strokeWidth={2}
             dot
           />

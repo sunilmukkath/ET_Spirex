@@ -1,6 +1,20 @@
 from pydantic import BaseModel, Field
 
 
+class FilterCondition(BaseModel):
+    type: str = "condition"
+    variable_id: str
+    operator: str = "in"
+    values: list[str] = Field(default_factory=list)
+
+
+class FilterGroup(BaseModel):
+    type: str = "group"
+    logic: str = "and"
+    negate: bool = False
+    children: list[dict] = Field(default_factory=list)
+
+
 class FilterSpec(BaseModel):
     variable_id: str
     values: list[str] = Field(default_factory=list)
@@ -11,6 +25,7 @@ class BannerRequest(BaseModel):
     row_variable_ids: list[str] = Field(default_factory=list)
     banner_variable_ids: list[str] = Field(default_factory=list)
     filters: list[FilterSpec] = Field(default_factory=list)
+    filter_tree: dict | None = None
     row_filters: dict[str, list[FilterSpec]] = Field(default_factory=dict)
     completion_status: str = "complete"
     show_counts: bool = True

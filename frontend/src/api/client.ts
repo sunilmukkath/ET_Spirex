@@ -235,6 +235,7 @@ export interface ProfileResult {
   chart_type?: string
   scatter_points?: { x: number; y: number; z?: number }[]
   x_variable?: { id: string; code: string; text: string; kind: string; type_label: string }
+  line_values?: { code: string; label: string; count: number; percentage: number }[]
   y_variable?: { id: string; code: string; text: string; kind: string; type_label: string }
   z_variable?: { id: string; code: string; text: string; kind: string; type_label: string }
 }

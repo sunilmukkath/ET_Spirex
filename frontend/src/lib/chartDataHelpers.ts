@@ -144,11 +144,27 @@ export function needsBanner(chartType: string) {
 }
 
 export function needsYVariable(chartType: string) {
-  return chartType === 'scatter_xy' || chartType === 'bubble'
+  return chartType === 'scatter_xy' || chartType === 'bubble' || chartType === 'combo'
 }
 
 export function needsZVariable(chartType: string) {
   return chartType === 'bubble'
+}
+
+export function mergeComboLineValues(
+  primary: { code: string; label: string; count: number; percentage: number }[],
+  secondary: { code: string; label: string; count: number; percentage: number }[],
+  maxItems: number,
+) {
+  const bars = primary.slice(0, maxItems)
+  const byCode = new Map(secondary.map((v) => [v.code, v]))
+  const byLabel = new Map(secondary.map((v) => [v.label, v]))
+  const line = bars.map((p, i) => {
+    const match =
+      byCode.get(p.code) ?? byLabel.get(p.label) ?? secondary[i]
+    return match ?? { code: p.code, label: p.label, count: 0, percentage: 0 }
+  })
+  return { bars, line }
 }
 
 export function scatterAxisVariables(variables: SurveyVariable[], excludeIds: string[] = []) {

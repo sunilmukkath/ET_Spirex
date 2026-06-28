@@ -71,8 +71,9 @@ export function QualityPanel({ result, loading, error, onRefresh }: Props) {
     const dupes = result.duplicate_exclude_count ?? 0
     const flaggedPct = total > 0 ? (flagged / total) * 100 : 0
     const cleanPct = total > 0 ? (clean / total) * 100 : 100
+    const passRate = cleanPct
     const qualityScore = Math.round(cleanPct)
-    return { total, flagged, clean, dupes, flaggedPct, cleanPct, qualityScore }
+    return { total, flagged, clean, dupes, flaggedPct, cleanPct, passRate, qualityScore }
   }, [result])
 
   if (loading && !result) {
@@ -128,6 +129,47 @@ export function QualityPanel({ result, loading, error, onRefresh }: Props) {
           </div>
         )}
 
+        {/* QC outcome summary */}
+        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                QC outcome summary
+              </h3>
+              <p className="mt-1 text-xs text-slate-400">
+                Completed interviews scanned · a record fails if it triggers any check below
+              </p>
+            </div>
+            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+              {metrics.passRate.toFixed(1)}% pass rate
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <QcSummaryTile
+              label="Sample size"
+              value={metrics.total}
+              sub="Total completed interviews in dataset"
+              icon={Users}
+              tone="neutral"
+            />
+            <QcSummaryTile
+              label="Passed QC"
+              value={metrics.clean}
+              sub={`${metrics.cleanPct.toFixed(1)}% cleared all checks`}
+              icon={CheckCircle2}
+              tone="pass"
+            />
+            <QcSummaryTile
+              label="Failed QC"
+              value={metrics.flagged}
+              sub={`${metrics.flaggedPct.toFixed(1)}% flagged · at least one issue`}
+              icon={ShieldAlert}
+              tone="fail"
+            />
+          </div>
+        </div>
+
         {/* Header + score */}
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-6">
@@ -168,22 +210,22 @@ export function QualityPanel({ result, loading, error, onRefresh }: Props) {
           {/* Primary metrics */}
           <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard
-              label="Total scanned"
+              label="Sample size"
               value={metrics.total}
-              sub="Completed responses"
+              sub="Completed interviews scanned"
               tone="neutral"
             />
             <MetricCard
-              label="Flagged records"
+              label="Passed QC"
+              value={metrics.clean}
+              sub={`${metrics.cleanPct.toFixed(1)}% of sample`}
+              tone="good"
+            />
+            <MetricCard
+              label="Failed QC"
               value={metrics.flagged}
               sub={`${metrics.flaggedPct.toFixed(1)}% of sample`}
               tone="warn"
-            />
-            <MetricCard
-              label="Clean estimate"
-              value={metrics.clean}
-              sub={`${metrics.cleanPct.toFixed(1)}% usable`}
-              tone="good"
             />
             <MetricCard
               label="Dupes to exclude"
@@ -233,6 +275,67 @@ export function QualityPanel({ result, loading, error, onRefresh }: Props) {
           </div>
         </div>
 
+        {/* QC check types performed */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-800">QC checks performed</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Five automated quality checks run on every completed interview. Click a check below for
+            flagged records.
+          </p>
+          <ul className="mt-4 space-y-3">
+            {(Object.keys(CHECK_META) as CheckId[]).map((id) => {
+              const meta = CHECK_META[id]
+              const check = checks.find((c) => c.id === id)
+              const count = check?.count ?? 0
+              const available = isCheckAvailable(id, result)
+              const Icon = meta.icon
+              return (
+                <li
+                  key={id}
+                  className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3"
+                >
+                  <div className={`rounded-lg p-2 ring-1 ${meta.tone}`}>
+                    <Icon size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-900">{meta.title}</p>
+                      {!available && (
+                        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                          Not available
+                        </span>
+                      )}
+                      {available && count === 0 && (
+                        <span className="rounded-full bg-[var(--et-teal-light)] px-2 py-0.5 text-[10px] font-medium text-[var(--et-teal-dark)]">
+                          All clear
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500">{meta.description}</p>
+                    {id === 'speeders' && result.speeders?.threshold_seconds != null && (
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Rule: completion under{' '}
+                        {Math.round(result.speeders.threshold_seconds)}s (25% of median time)
+                      </p>
+                    )}
+                    {id === 'duplicate_phones' && (
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Rule: same normalized phone on multiple records — keep earliest response
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold tabular-nums text-slate-900">
+                      {available ? count : '—'}
+                    </p>
+                    <p className="text-[10px] text-slate-400">failed</p>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+
         {/* Check cards with share bars */}
         <div>
           <h3 className="mb-3 text-sm font-semibold text-slate-700">Quality checks</h3>
@@ -280,6 +383,47 @@ export function QualityPanel({ result, loading, error, onRefresh }: Props) {
 
         <CheckDetail checkId={activeCheck} result={result} total={metrics.total} />
       </div>
+    </div>
+  )
+}
+
+function isCheckAvailable(id: CheckId, result: DataQualityResult): boolean {
+  if (id === 'speeders') return result.speeders?.available !== false
+  if (id === 'duplicate_phones') return result.duplicate_phones?.available !== false
+  return true
+}
+
+function QcSummaryTile({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  tone,
+}: {
+  label: string
+  value: number
+  sub: string
+  icon: typeof Users
+  tone: 'neutral' | 'pass' | 'fail'
+}) {
+  const styles = {
+    neutral: 'ring-slate-200 bg-white text-slate-900',
+    pass: 'ring-emerald-200 bg-emerald-50 text-emerald-900',
+    fail: 'ring-rose-200 bg-rose-50 text-rose-900',
+  }
+  const iconStyles = {
+    neutral: 'text-slate-500',
+    pass: 'text-emerald-600',
+    fail: 'text-rose-600',
+  }
+  return (
+    <div className={`rounded-xl px-5 py-4 ring-1 ${styles[tone]}`}>
+      <div className="flex items-center gap-2">
+        <Icon size={18} className={iconStyles[tone]} />
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      </div>
+      <p className="mt-2 text-3xl font-bold tabular-nums">{value.toLocaleString()}</p>
+      <p className="mt-1 text-xs text-slate-500">{sub}</p>
     </div>
   )
 }

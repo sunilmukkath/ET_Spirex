@@ -709,7 +709,20 @@ export function ChartVisualizer({ chartType, data, options }: Props) {
     return <Bar100Chart values={valueRows} options={options} layout="vertical" />
   }
   if (chartType === 'combo') {
-    return <ComboChart values={valueRows} options={options} />
+    const lineRows = (profile.line_values ?? []).map((v) => ({
+      label: v.label || v.code || '',
+      code: v.code,
+      count: v.count,
+      percentage: v.percentage,
+    }))
+    return (
+      <ComboChart
+        values={valueRows}
+        lineValues={lineRows.length ? lineRows : undefined}
+        lineLabel={profile.y_variable?.text}
+        options={options}
+      />
+    )
   }
   if (chartType === 'stacked_area') {
     return <StackedAreaChart values={valueRows} options={options} />

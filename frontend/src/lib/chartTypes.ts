@@ -113,10 +113,11 @@ export const CHART_TYPES: ChartTypeOption[] = [
     id: 'combo',
     label: 'Bar + line combo',
     shortLabel: 'Combo',
-    description: 'Bars with trend line overlay',
+    description: 'Bars from one question, line trend from a second question',
     category: 'bars',
     kinds: ['single', 'multi', 'rank', 'custom'],
     tier: 'advanced',
+    needsYVariable: true,
   },
   {
     id: 'pie',
