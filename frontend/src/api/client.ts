@@ -61,6 +61,90 @@ export interface SurveyVariable {
   can_filter: boolean
   lat_column?: string
   lng_column?: string
+  custom?: boolean
+  source_variable_id?: string
+}
+
+export interface CategoryMapping {
+  label: string
+  source_values: string[]
+}
+
+export type CustomVariableType = 'recode' | 'combine' | 'net_score'
+
+export interface CustomVariable {
+  id: string
+  survey_id: number
+  name: string
+  code: string
+  variable_type: CustomVariableType
+  source_variable_id: string
+  source_variable_ids: string[]
+  categories: CategoryMapping[]
+  include_unmapped: boolean
+  unmapped_label: string
+  tracked_codes: string[]
+  top_codes: string[]
+  bottom_codes: string[]
+  created_at: number
+  updated_at: number
+}
+
+export interface CustomVariableInput {
+  name: string
+  code: string
+  variable_type: CustomVariableType
+  source_variable_id: string
+  source_variable_ids: string[]
+  categories: CategoryMapping[]
+  include_unmapped: boolean
+  unmapped_label: string
+  tracked_codes: string[]
+  top_codes: string[]
+  bottom_codes: string[]
+}
+
+export interface CustomVariablePreview {
+  error?: string
+  total?: number
+  preview_type?: 'combine' | 'net_score' | 'recode'
+  top_count?: number
+  bottom_count?: number
+  neutral_count?: number
+  top_pct?: number
+  bottom_pct?: number
+  net_pct?: number
+  counts: { label: string; count: number; percentage: number }[]
+}
+
+export interface RawDataColumn {
+  key: string
+  label: string
+  kind: 'system' | 'raw' | 'custom'
+  variable_id?: string | null
+}
+
+export interface RawDataPage {
+  survey_id: number
+  completion_status: string
+  total_rows: number
+  filtered_rows?: number
+  search?: string
+  search_column?: string
+  page: number
+  page_size: number
+  total_pages: number
+  columns: RawDataColumn[]
+  rows: Record<string, unknown>[]
+  custom_variables: CustomVariable[]
+}
+
+export interface RawDataQuery {
+  completionStatus?: string
+  page?: number
+  pageSize?: number
+  search?: string
+  searchColumn?: string
 }
 
 export interface SurveySchema {
@@ -152,13 +236,47 @@ export interface ProfileResult {
 export interface DataQualityResult {
   total_responses: number
   flagged_count: number
+  clean_estimate?: number
+  duplicate_exclude_count?: number
+  message?: string
+  checks?: { id: string; title: string; count: number; severity: string }[]
   speeders: {
     available?: boolean
     message?: string
     count: number
     median_seconds?: number
     threshold_seconds?: number
-    flags: { response_id: string | number; seconds: number; median_seconds?: number }[]
+    flags: { response_id: string | number; seconds: number; median_seconds?: number; reason?: string }[]
+  }
+  test_responses: {
+    count: number
+    flags: {
+      response_id: string | number
+      field: string
+      text: string
+      reason?: string
+    }[]
+  }
+  duplicate_phones: {
+    available?: boolean
+    message?: string
+    count: number
+    exclude_count?: number
+    flags: {
+      response_id: string | number
+      phone: string
+      normalized_phone?: string
+      field: string
+      keep_response_id: string | number
+      reason?: string
+    }[]
+    groups?: {
+      phone: string
+      field: string
+      response_ids: (string | number)[]
+      keep_response_id: string | number
+      duplicate_count: number
+    }[]
   }
   straight_liners: {
     count: number
@@ -168,6 +286,7 @@ export interface DataQualityResult {
       question: string
       value: string
       items: number
+      reason?: string
     }[]
   }
   gibberish: {
@@ -177,6 +296,7 @@ export interface DataQualityResult {
       variable_id: string
       question: string
       text: string
+      reason?: string
     }[]
   }
 }
@@ -223,6 +343,13 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json()
 }
 
+const schemaCache = new Map<string, { at: number; data: SurveySchema }>()
+const SCHEMA_CACHE_MS = 90_000
+
+function schemaCacheKey(id: number, completionStatus: string, light: boolean) {
+  return `${id}:${completionStatus}:${light}`
+}
+
 export const api = {
   login: (username: string, password: string) =>
     fetchJson<{ token: string; username: string }>('/api/auth/login', {
@@ -259,11 +386,26 @@ export const api = {
   getProject: (id: number) => fetchJson<ProjectDetail>(`/api/projects/${id}`),
   getQuestions: (id: number) =>
     fetchJson<{ questions: Question[] }>(`/api/projects/${id}/questions`),
-  getSchema: (id: number, completionStatus = 'complete', light = false) =>
-    fetchJson<SurveySchema>(
+  getSchema: async (id: number, completionStatus = 'complete', light = false, signal?: AbortSignal) => {
+    const key = schemaCacheKey(id, completionStatus, light)
+    const hit = schemaCache.get(key)
+    if (hit && Date.now() - hit.at < SCHEMA_CACHE_MS) {
+      return hit.data
+    }
+    const data = await fetchJson<SurveySchema>(
       `/api/projects/${id}/schema?completion_status=${completionStatus}&light=${light}`,
-    ),
-  runProfile: (id: number, variableId: string, completionStatus = 'complete', filters: FilterSpec[] = []) =>
+      { signal },
+    )
+    schemaCache.set(key, { at: Date.now(), data })
+    return data
+  },
+  runProfile: (
+    id: number,
+    variableId: string,
+    completionStatus = 'complete',
+    filters: FilterSpec[] = [],
+    signal?: AbortSignal,
+  ) =>
     fetchJson<ProfileResult>(`/api/projects/${id}/analysis/profile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -272,11 +414,93 @@ export const api = {
         completion_status: completionStatus,
         filters,
       }),
+      signal,
     }),
-  getDataQuality: (id: number, completionStatus = 'complete') =>
-    fetchJson<DataQualityResult>(
-      `/api/projects/${id}/analysis/quality?completion_status=${completionStatus}`,
+  getFilterOptions: (surveyId: number, variableId: string, completionStatus = 'complete') =>
+    fetchJson<{ options: { code: string; label: string; count?: number }[]; error?: string }>(
+      `/api/projects/${surveyId}/variables/${variableId}/filter-options?completion_status=${completionStatus}`,
     ),
+  getDataQuality: (id: number, completionStatus = 'complete', refresh = false) =>
+    fetchJson<DataQualityResult>(
+      `/api/projects/${id}/analysis/quality?completion_status=${completionStatus}${refresh ? '&refresh=true' : ''}`,
+    ),
+  getCustomVariables: (id: number) =>
+    fetchJson<{ variables: CustomVariable[] }>(`/api/projects/${id}/variables/custom`),
+  createCustomVariable: (id: number, body: CustomVariableInput) =>
+    fetchJson<CustomVariable>(`/api/projects/${id}/variables/custom`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateCustomVariable: (id: number, variableId: string, body: Partial<CustomVariableInput>) =>
+    fetchJson<CustomVariable>(`/api/projects/${id}/variables/custom/${variableId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteCustomVariable: (id: number, variableId: string) =>
+    fetchJson<{ ok: boolean }>(`/api/projects/${id}/variables/custom/${variableId}`, {
+      method: 'DELETE',
+    }),
+  previewCustomVariable: (id: number, body: CustomVariableInput, completionStatus = 'complete') =>
+    fetchJson<CustomVariablePreview>(
+      `/api/projects/${id}/variables/custom/preview?completion_status=${completionStatus}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+  syncCustomVariables: (id: number, variables: CustomVariable[]) =>
+    fetchJson<{ variables: CustomVariable[]; saved: boolean }>(
+      `/api/projects/${id}/variables/custom/sync`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variables }),
+      },
+    ),
+  getRawData: (id: number, query: RawDataQuery = {}, signal?: AbortSignal) => {
+    const {
+      completionStatus = 'complete',
+      page = 1,
+      pageSize = 50,
+      search = '',
+      searchColumn = '',
+    } = query
+    const params = new URLSearchParams({
+      completion_status: completionStatus,
+      page: String(page),
+      page_size: String(pageSize),
+    })
+    if (search.trim()) params.set('search', search.trim())
+    if (searchColumn.trim()) params.set('search_column', searchColumn.trim())
+    return fetchJson<RawDataPage>(`/api/projects/${id}/data/raw?${params.toString()}`, { signal })
+  },
+  exportRawData: async (id: number, query: RawDataQuery = {}, filename = 'survey_data.csv') => {
+    const {
+      completionStatus = 'complete',
+      search = '',
+      searchColumn = '',
+    } = query
+    const params = new URLSearchParams({ completion_status: completionStatus })
+    if (search.trim()) params.set('search', search.trim())
+    if (searchColumn.trim()) params.set('search_column', searchColumn.trim())
+    const res = await fetch(`/api/projects/${id}/data/raw/export?${params.toString()}`, {
+      headers: authHeaders(),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || `Export failed (${res.status})`)
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  },
   runBanner: (id: number, request: BannerRequest) =>
     fetchJson<BannerResult>(`/api/projects/${id}/analysis/banner`, {
       method: 'POST',

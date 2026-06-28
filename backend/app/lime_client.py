@@ -293,11 +293,13 @@ def export_responses_dataframe(
     completion_status: str = "all",
     fields: list[str] | None = None,
 ) -> pd.DataFrame:
+    from app.services.qc_filter import normalize_export_status
+
     client = get_client()
     raw = client.export_responses(
         survey_id,
         file_format="csv",
-        completion_status=completion_status,
+        completion_status=normalize_export_status(completion_status),
         fields=fields,
     )
     df = pd.read_csv(io.BytesIO(raw), delimiter=";", low_memory=False)

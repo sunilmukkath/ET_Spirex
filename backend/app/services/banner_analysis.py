@@ -8,23 +8,11 @@ from typing import Any
 import pandas as pd
 from scipy.stats import chi2_contingency
 
-from app.services.question_schema import build_survey_schema, get_variable
-from app.services.response_store import get_responses
+from app.services.analysis_context import load_analysis_context
+from app.services.question_schema import get_variable
+from app.services.variable_columns import find_variable_column as _find_column
 
 Z_THRESHOLDS = {0.90: 1.645, 0.95: 1.96, 0.99: 2.576}
-
-
-def _find_column(var: dict[str, Any], df: pd.DataFrame) -> str | None:
-    code = var.get("code", "")
-    for col in var.get("columns") or []:
-        if col in df.columns:
-            return col
-    if code in df.columns:
-        return code
-    for c in df.columns:
-        if c == code or c.startswith(f"{code}_") or (code and c.startswith(code)):
-            return c
-    return None
 
 
 def run_question_profile(
@@ -34,13 +22,12 @@ def run_question_profile(
     completion_status: str = "complete",
     filters: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    schema = build_survey_schema(survey_id, completion_status=completion_status)
+    schema, df_raw = load_analysis_context(survey_id, completion_status=completion_status)
     variable = get_variable(schema, variable_id)
     if not variable:
         return {"error": f"Variable '{variable_id}' not found"}
 
-    dataset = get_responses(survey_id, completion_status=completion_status)
-    df = _apply_filters(dataset.dataframe, schema, filters or [])
+    df = _apply_filters(df_raw, schema, filters or [])
     if df.empty:
         return {"error": "No responses match the selected filters"}
 
@@ -95,6 +82,7 @@ def run_banner_table(
             metric=metric,
         )
 
+    schema, df_raw = load_analysis_context(survey_id, completion_status=completion_status)
     tables = []
     for rid in row_ids:
         table = _build_banner_table(
@@ -109,6 +97,8 @@ def run_banner_table(
             show_significance=show_significance,
             confidence_level=confidence_level,
             metric=metric,
+            schema=schema,
+            df_raw=df_raw,
         )
         tables.append(table)
 
@@ -140,8 +130,11 @@ def _build_banner_table(
     show_significance: bool = True,
     confidence_level: float = 0.95,
     metric: str = "auto",
+    schema: dict[str, Any] | None = None,
+    df_raw: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
-    schema = build_survey_schema(survey_id, completion_status=completion_status)
+    if schema is None or df_raw is None:
+        schema, df_raw = load_analysis_context(survey_id, completion_status=completion_status)
     row_var = get_variable(schema, row_variable_id)
     if not row_var:
         return {"error": f"Row variable '{row_variable_id}' not found"}
@@ -157,8 +150,7 @@ def _build_banner_table(
             return {"error": f"'{bvar['text']}' cannot be used as a banner break"}
         banner_vars.append(bvar)
 
-    dataset = get_responses(survey_id, completion_status=completion_status)
-    df = _apply_filters(dataset.dataframe, schema, filters or [])
+    df = _apply_filters(df_raw, schema, filters or [])
 
     if df.empty:
         return {"error": "No responses match the selected filters"}
@@ -248,24 +240,134 @@ def _apply_filters(
         var = get_variable(schema, f.get("variable_id", ""))
         if not var:
             continue
-        values = f.get("values") or []
+        values = [str(v) for v in (f.get("values") or []) if str(v).strip()]
         if not values:
             continue
-        mask = pd.Series(False, index=result.index)
-        if var["kind"] == "multi":
-            for col in var["columns"]:
-                if col in result.columns:
-                    mask |= result[col].astype(str).isin(["Y", "1", "yes", "Yes"])
-        elif var["kind"] == "single":
-            col = var["columns"][0] if var["columns"] else var["code"]
-            if col in result.columns:
-                mask = result[col].astype(str).isin([str(v) for v in values])
-        else:
-            col = var["columns"][0] if var["columns"] else None
-            if col and col in result.columns:
-                mask = result[col].astype(str).isin([str(v) for v in values])
+
+        match_values = _filter_match_values(var, values)
+        kind = var.get("kind")
+
+        if kind == "multi":
+            mask = pd.Series(False, index=result.index)
+            subquestions = var.get("subquestions") or []
+            if not subquestions and var.get("answer_options"):
+                subquestions = [
+                    {
+                        "code": o["code"],
+                        "label": o["label"],
+                        "column": f"{var.get('code')}_{o['code']}",
+                    }
+                    for o in var["answer_options"]
+                ]
+            for code in values:
+                for sq in subquestions:
+                    if str(sq.get("code")) != str(code):
+                        continue
+                    col = _resolve_subquestion_column(var, sq, result)
+                    if col and col in result.columns:
+                        mask |= result[col].astype(str).str.strip().isin(
+                            ["Y", "1", "yes", "Yes", "y"]
+                        )
+            result = result[mask]
+            continue
+
+        col = _find_column(var, result)
+        if not col or col not in result.columns:
+            continue
+
+        series = result[col].astype(str).str.strip()
+        mask = series.isin(match_values)
+        # Also match when export uses labels but filter sends codes (or vice versa)
+        if not mask.any() and var.get("answer_options"):
+            label_to_code = {
+                str(o.get("label", "")).strip(): str(o["code"])
+                for o in var["answer_options"]
+            }
+            code_to_label = {
+                str(o["code"]): str(o.get("label", "")).strip()
+                for o in var["answer_options"]
+            }
+            expanded: set[str] = set()
+            for v in values:
+                expanded.add(v)
+                if v in code_to_label and code_to_label[v]:
+                    expanded.add(code_to_label[v])
+                if v in label_to_code:
+                    expanded.add(label_to_code[v])
+            mask = series.isin(expanded)
         result = result[mask]
+
     return result
+
+
+def _filter_match_values(var: dict[str, Any], values: list[str]) -> set[str]:
+    match = set(values)
+    for code in values:
+        match.add(str(code))
+        label = _label_for_code(var, str(code))
+        if label:
+            match.add(label)
+    return {m.strip() for m in match if m.strip()}
+
+
+def get_filter_options(
+    survey_id: int,
+    variable_id: str,
+    *,
+    completion_status: str = "complete",
+) -> dict[str, Any]:
+    schema, df = load_analysis_context(survey_id, completion_status=completion_status)
+    var = get_variable(schema, variable_id)
+    if not var:
+        return {"options": [], "error": "Variable not found"}
+
+    kind = var.get("kind")
+    options: list[dict[str, Any]] = []
+
+    if kind == "multi":
+        subquestions = var.get("subquestions") or []
+        if not subquestions and var.get("answer_options"):
+            subquestions = [
+                {"code": o["code"], "label": o["label"], "column": f"{var.get('code')}_{o['code']}"}
+                for o in var["answer_options"]
+            ]
+        for sq in subquestions:
+            col = _resolve_subquestion_column(var, sq, df)
+            if not col or col not in df.columns:
+                continue
+            selected = df[col].astype(str).str.strip().isin(["Y", "1", "yes", "Yes", "y"]).sum()
+            if int(selected) > 0:
+                options.append(
+                    {
+                        "code": str(sq.get("code")),
+                        "label": str(sq.get("label") or sq.get("code")),
+                        "count": int(selected),
+                    }
+                )
+        return {"options": options}
+
+    col = _find_column(var, df)
+    if not col or col not in df.columns:
+        return {"options": [], "error": "No data column for this question"}
+
+    counts = df[col].dropna().astype(str).str.strip().value_counts()
+    for raw_code, count in counts.items():
+        if not raw_code or raw_code.lower() in ("nan", "none"):
+            continue
+        options.append(
+            {
+                "code": raw_code,
+                "label": _label_for_code(var, raw_code),
+                "count": int(count),
+            }
+        )
+
+    if var.get("answer_options"):
+        order = [str(o["code"]) for o in var["answer_options"]]
+        code_index = {c: i for i, c in enumerate(order)}
+        options.sort(key=lambda o: (code_index.get(o["code"], 9999), o["code"]))
+
+    return {"options": options}
 
 
 def _build_banner_columns(

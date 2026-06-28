@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from app.config import settings
-from citric import Client
 
 from app.lime_client import get_client
 from app.services.location_detect import apply_location_kind
@@ -125,11 +124,7 @@ def _resolve_variable_columns(
 
 
 def _fetch_question_props(qid: int) -> dict[str, Any]:
-    client = Client(
-        settings.limesurvey_url,
-        settings.limesurvey_username,
-        settings.limesurvey_password,
-    )
+    client = get_client()
     return dict(
         client.get_question_properties(
             qid,
@@ -144,6 +139,18 @@ def _response_count(survey_id: int) -> int:
         return int(summary.get("count_total") or 0)
     except Exception:
         return 0
+
+
+def _response_count_for_status(survey_id: int, completion_status: str) -> int:
+    try:
+        from app.services.qc_filter import QC_APPROVED_STATUS, qc_approved_response_count
+        from app.services.response_store import get_responses
+
+        if completion_status == QC_APPROVED_STATUS:
+            return qc_approved_response_count(survey_id)
+        return len(get_responses(survey_id, completion_status=completion_status).dataframe)
+    except Exception:
+        return _response_count(survey_id)
 
 
 def _variable_to_dict(v: SurveyVariable) -> dict[str, Any]:
@@ -197,7 +204,7 @@ def build_survey_schema(
     client = get_client()
     groups = client.list_groups(survey_id)
     groups_sorted = sorted(groups, key=lambda g: int(g.get("group_order") or 0))
-    response_count = _response_count(survey_id)
+    response_count = _response_count_for_status(survey_id, completion_status)
 
     variables: list[SurveyVariable] = []
     group_summaries: list[dict[str, Any]] = []
@@ -261,9 +268,6 @@ def build_survey_schema(
                 }
             )
 
-    if not light and enrich_queue:
-        _enrich_variables_parallel(survey_id, completion_status, enrich_queue)
-
     df_columns: list[str] = []
     if not light:
         try:
@@ -274,6 +278,11 @@ def build_survey_schema(
             )
         except Exception:
             pass
+
+    if not light and enrich_queue:
+        _enrich_variables_parallel(enrich_queue, df_columns)
+
+    if not light and df_columns:
         apply_location_kind(variables, df_columns)
 
     result = {
@@ -289,21 +298,10 @@ def build_survey_schema(
 
 
 def _enrich_variables_parallel(
-    survey_id: int,
-    completion_status: str,
     enrich_queue: list[tuple[SurveyVariable, int]],
+    df_columns: list[str],
 ) -> None:
     """Fetch answer options / subquestions in parallel (one API call per question)."""
-    df_columns: list[str] = []
-    try:
-        from app.services.response_store import get_responses
-
-        df_columns = list(
-            get_responses(survey_id, completion_status=completion_status).dataframe.columns
-        )
-    except Exception:
-        pass
-
     props_by_qid: dict[int, dict[str, Any]] = {}
     workers = min(12, len(enrich_queue))
 

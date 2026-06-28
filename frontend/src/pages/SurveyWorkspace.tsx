@@ -1,18 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   BarChart3,
+  Database,
   Download,
   Info,
   Layers,
   Loader2,
   ShieldCheck,
+  SlidersHorizontal,
   Table2,
 } from 'lucide-react'
 import {
   api,
   type BannerResult,
+  type CustomVariable,
   type DataQualityResult,
   type FilterSpec,
   type ProfileResult,
@@ -20,23 +23,42 @@ import {
   type SurveySchema,
   type SurveyVariable,
 } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { BannerPicker } from '../components/analysis/BannerPicker'
 import { FilterEditor } from '../components/analysis/FilterEditor'
-import { QualityPanel } from '../components/analysis/QualityPanel'
 import { QuestionNavigator } from '../components/analysis/QuestionNavigator'
 import { CrosstabsResults, ProfileResults } from '../components/analysis/Results'
+import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
 import { StatusBadge } from '../components/StatusBadge'
 import { ErrorState } from '../components/States'
 
-type Mode = 'explore' | 'crosstabs' | 'quality'
+const DataPanel = lazy(() =>
+  import('../components/analysis/DataPanel').then((m) => ({ default: m.DataPanel })),
+)
+const QualityPanel = lazy(() =>
+  import('../components/analysis/QualityPanel').then((m) => ({ default: m.QualityPanel })),
+)
+
+function PanelLoader() {
+  return (
+    <div className="flex flex-1 items-center justify-center p-8">
+      <Loader2 className="animate-spin text-[var(--et-teal)]" size={32} />
+    </div>
+  )
+}
+
+type Mode = 'explore' | 'crosstabs' | 'quality' | 'variables' | 'data'
 
 function parseMode(raw: string | null): Mode {
   if (raw === 'crosstabs' || raw === 'compare') return 'crosstabs'
   if (raw === 'quality') return 'quality'
+  if (raw === 'variables') return 'variables'
+  if (raw === 'data') return 'data'
   return 'explore'
 }
 
 export function SurveyWorkspace() {
+  const { user } = useAuth()
   const { id } = useParams()
   const location = useLocation()
   const navTitle = (location.state as { title?: string } | null)?.title
@@ -69,6 +91,41 @@ export function SurveyWorkspace() {
   const [qualityResult, setQualityResult] = useState<DataQualityResult | null>(null)
   const [qualityLoading, setQualityLoading] = useState(false)
   const [qualityError, setQualityError] = useState<string | null>(null)
+  const [customVariables, setCustomVariables] = useState<CustomVariable[]>([])
+
+  const mergedSchema = useMemo((): SurveySchema | null => {
+    if (!schema) return null
+    if (!customVariables.length) return schema
+    const customVars = customVariables.map(customVariableToSurvey)
+    const customGroup = {
+      id: -1,
+      title: 'Custom variables',
+      order: 9999,
+      variable_ids: customVars.map((v) => v.id),
+    }
+    const existingGroup = schema.groups.find((g) => g.id === -1)
+    const groups = existingGroup
+      ? schema.groups.map((g) =>
+          g.id === -1
+            ? { ...g, variable_ids: [...g.variable_ids, ...customGroup.variable_ids] }
+            : g,
+        )
+      : [...schema.groups, customGroup]
+    return {
+      ...schema,
+      variables: [...schema.variables, ...customVars],
+      groups,
+    }
+  }, [schema, customVariables])
+
+  const reloadCustomVariables = useCallback(async () => {
+    try {
+      const { variables } = await api.getCustomVariables(surveyId)
+      setCustomVariables(variables)
+    } catch {
+      /* ignore */
+    }
+  }, [surveyId])
 
   const profileAbort = useRef<AbortController | null>(null)
   const initialized = useRef(false)
@@ -81,10 +138,10 @@ export function SurveyWorkspace() {
   }
 
   function buildBannerRequest() {
-    if (!selectedId) return null
-    const rowIds = [selectedId, ...sideRowIds.filter((id) => id !== selectedId)]
+    const rowIds = sideRowIds.length > 0 ? sideRowIds : selectedId ? [selectedId] : []
+    if (rowIds.length === 0) return null
     return {
-      row_variable_id: selectedId,
+      row_variable_id: rowIds[0],
       row_variable_ids: rowIds,
       banner_variable_ids: bannerIds,
       completion_status: completionStatus,
@@ -127,6 +184,7 @@ export function SurveyWorkspace() {
       if (first && !initialized.current) {
         initialized.current = true
         setSelectedId(first.id)
+        setSideRowIds([first.id])
       }
       const banner = data.variables.find((v) => v.kind === 'single' && v.id !== first?.id)
       if (banner) setBannerIds([banner.id])
@@ -162,20 +220,40 @@ export function SurveyWorkspace() {
     return () => { cancelled = true }
   }, [surveyId, completionStatus])
 
+  useEffect(() => {
+    if (!surveyId) return
+    reloadCustomVariables()
+  }, [surveyId, reloadCustomVariables])
+
+  const activeSchema = mergedSchema ?? schema
+
   const selectedVar = useMemo(
-    () => schema?.variables.find((v) => v.id === selectedId) ?? null,
-    [schema, selectedId],
+    () => activeSchema?.variables.find((v) => v.id === selectedId) ?? null,
+    [activeSchema, selectedId],
   )
 
-  const bannerVars = useMemo(
-    () => schema?.variables.filter((v) => bannerIds.includes(v.id)) ?? [],
-    [schema, bannerIds],
+  const bannerIdSet = useMemo(() => new Set(bannerIds), [bannerIds])
+
+  const bannerVars = useMemo(() => {
+    if (!activeSchema) return []
+    return activeSchema.variables.filter((v) => bannerIdSet.has(v.id))
+  }, [activeSchema, bannerIdSet])
+
+  const sideRowVars = useMemo(() => {
+    if (!activeSchema) return []
+    const map = new Map(activeSchema.variables.map((v) => [v.id, v]))
+    return sideRowIds.map((id) => map.get(id)).filter((v): v is SurveyVariable => Boolean(v))
+  }, [activeSchema, sideRowIds])
+
+  const primaryRowVar = useMemo(
+    () => sideRowVars[0] ?? selectedVar,
+    [sideRowVars, selectedVar],
   )
 
   const availableMetrics = useMemo(() => {
-    if (!selectedVar) return ['auto']
-    return ['auto', ...selectedVar.metrics]
-  }, [selectedVar])
+    if (!primaryRowVar) return ['auto']
+    return ['auto', ...primaryRowVar.metrics]
+  }, [primaryRowVar])
 
   // Auto-run profile when question selected in explore mode
   const runProfile = useCallback(async (varId: string, activeFilters: FilterSpec[]) => {
@@ -185,7 +263,7 @@ export function SurveyWorkspace() {
     setAnalyzing(true)
     setProfileResult(null)
     try {
-      const result = await api.runProfile(surveyId, varId, completionStatus, activeFilters)
+      const result = await api.runProfile(surveyId, varId, completionStatus, activeFilters, ctrl.signal)
       if (!ctrl.signal.aborted) setProfileResult(result)
     } catch (err) {
       if (!ctrl.signal.aborted) {
@@ -197,18 +275,19 @@ export function SurveyWorkspace() {
   }, [surveyId, completionStatus])
 
   useEffect(() => {
-    if (mode !== 'explore' || !selectedId || schemaLoading || enriching) return
+    if (mode !== 'explore' || !selectedId || schemaLoading) return
     const t = setTimeout(() => runProfile(selectedId, filters), 300)
     return () => clearTimeout(t)
-  }, [mode, selectedId, schemaLoading, enriching, filters, runProfile])
+  }, [mode, selectedId, schemaLoading, filters, runProfile])
 
   useEffect(() => {
-    if (mode !== 'quality' || schemaLoading) return
+    if (mode !== 'quality' || !Number.isFinite(surveyId) || surveyId <= 0) return
     let cancelled = false
     setQualityLoading(true)
     setQualityError(null)
+    setQualityResult(null)
     api
-      .getDataQuality(surveyId, completionStatus)
+      .getDataQuality(surveyId, 'complete')
       .then((data) => {
         if (!cancelled) setQualityResult(data)
       })
@@ -221,12 +300,29 @@ export function SurveyWorkspace() {
       .finally(() => {
         if (!cancelled) setQualityLoading(false)
       })
-    return () => { cancelled = true }
-  }, [mode, surveyId, completionStatus, schemaLoading])
+    return () => {
+      cancelled = true
+    }
+  }, [mode, surveyId])
+
+  const refreshQuality = useCallback(async () => {
+    if (!Number.isFinite(surveyId) || surveyId <= 0) return
+    setQualityLoading(true)
+    setQualityError(null)
+    try {
+      const data = await api.getDataQuality(surveyId, 'complete', true)
+      setQualityResult(data)
+    } catch (err) {
+      setQualityError(err instanceof Error ? err.message : 'Quality scan failed')
+      setQualityResult(null)
+    } finally {
+      setQualityLoading(false)
+    }
+  }, [surveyId])
 
   async function runBanner() {
     const request = buildBannerRequest()
-    if (!request || bannerIds.length === 0) return
+    if (!request || bannerIds.length === 0 || sideRowIds.length === 0) return
     setAnalyzing(true)
     setBannerResult(null)
     try {
@@ -255,15 +351,46 @@ export function SurveyWorkspace() {
     setBannerIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
   }
 
+  function addSideRow(id: string) {
+    setSideRowIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
+    if (!selectedId) setSelectedId(id)
+    setBannerResult(null)
+  }
+
+  function addAllSideRows() {
+    const ids = (activeSchema?.variables ?? [])
+      .filter((v) => v.can_banner && !bannerIdSet.has(v.id))
+      .map((v) => v.id)
+    setSideRowIds(ids)
+    if (ids.length > 0) setSelectedId(ids[0])
+    setBannerResult(null)
+  }
+
   function toggleSideRow(id: string) {
-    setSideRowIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    )
+    setSideRowIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id)
+      return [...prev, id]
+    })
+    setBannerResult(null)
+  }
+
+  function clearSideRows() {
+    setSideRowIds([])
+    setBannerResult(null)
+  }
+
+  function clearBanners() {
+    setBannerIds([])
+    setBannerResult(null)
   }
 
   function handleSelectQuestion(id: string) {
     setSelectedId(id)
     if (mode === 'crosstabs') {
+      setSideRowIds((prev) => {
+        const rest = prev.filter((x) => x !== id)
+        return [id, ...rest]
+      })
       setBannerResult(null)
     }
   }
@@ -306,6 +433,12 @@ export function SurveyWorkspace() {
           <ModeButton active={mode === 'quality'} onClick={() => setMode('quality')} icon={<ShieldCheck size={15} />}>
             Quality
           </ModeButton>
+          <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
+            Variables
+          </ModeButton>
+          <ModeButton active={mode === 'data'} onClick={() => setMode('data')} icon={<Database size={15} />}>
+            Data
+          </ModeButton>
         </div>
 
         <select
@@ -314,16 +447,17 @@ export function SurveyWorkspace() {
           className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
         >
           <option value="complete">Completed</option>
+          <option value="qc_approved">QC Approved</option>
           <option value="all">All responses</option>
           <option value="incomplete">Incomplete</option>
         </select>
       </header>
 
       <div className="flex min-h-0 flex-1">
-          {mode !== 'quality' && (
+          {mode !== 'quality' && mode !== 'variables' && mode !== 'data' && (
             <QuestionNavigator
-              variables={schema?.variables ?? []}
-              groups={schema?.groups ?? []}
+              variables={activeSchema?.variables ?? []}
+              groups={activeSchema?.groups ?? []}
               selectedId={selectedId}
               onSelect={handleSelectQuestion}
               loading={schemaLoading}
@@ -352,8 +486,10 @@ export function SurveyWorkspace() {
 
           {mode === 'explore' && (
             <ExplorePanel
+              surveyId={surveyId}
+              completionStatus={completionStatus}
               selectedVar={selectedVar}
-              variables={schema?.variables ?? []}
+              variables={activeSchema?.variables ?? []}
               filters={filters}
               onFiltersChange={setFilters}
               analyzing={analyzing}
@@ -364,20 +500,51 @@ export function SurveyWorkspace() {
           )}
 
           {mode === 'quality' && (
-            <QualityPanel
-              result={qualityResult}
-              loading={qualityLoading}
-              error={qualityError}
+            <Suspense fallback={<PanelLoader />}>
+              <QualityPanel
+                result={qualityResult}
+                loading={qualityLoading}
+                error={qualityError}
+                onRefresh={refreshQuality}
+              />
+            </Suspense>
+          )}
+
+          {mode === 'variables' && (
+            <VariablesPanel
+              surveyId={surveyId}
+              schema={schema}
+              completionStatus={completionStatus}
+              username={user?.username ?? null}
+              onChanged={reloadCustomVariables}
             />
+          )}
+
+          {mode === 'data' && (
+            <Suspense fallback={<PanelLoader />}>
+              <DataPanel
+                surveyId={surveyId}
+                completionStatus={completionStatus}
+                username={user?.username ?? null}
+                onVariablesChanged={reloadCustomVariables}
+                onOpenVariables={() => setMode('variables')}
+              />
+            </Suspense>
           )}
 
           {mode === 'crosstabs' && (
             <CrosstabsPanel
-              selectedVar={selectedVar}
-              variables={schema?.variables ?? []}
-              sideRowVars={schema?.variables.filter((v) => sideRowIds.includes(v.id)) ?? []}
+              surveyId={surveyId}
+              completionStatus={completionStatus}
+              variables={activeSchema?.variables ?? []}
+              sideRowVars={sideRowVars}
+              sideRowIds={sideRowIds}
               bannerVars={bannerVars}
               bannerIds={bannerIds}
+              onAddSideRow={addSideRow}
+              onAddAllSideRows={addAllSideRows}
+              onClearSideRows={clearSideRows}
+              onClearBanners={clearBanners}
               onAddBanner={addBanner}
               filters={filters}
               onFiltersChange={setFilters}
@@ -436,6 +603,8 @@ function ModeButton({
 }
 
 function ExplorePanel({
+  surveyId,
+  completionStatus,
   selectedVar,
   variables,
   filters,
@@ -445,6 +614,8 @@ function ExplorePanel({
   schemaLoading,
   enriching,
 }: {
+  surveyId: number
+  completionStatus: string
   selectedVar: SurveyVariable | null
   variables: SurveyVariable[]
   filters: FilterSpec[]
@@ -477,12 +648,24 @@ function ExplorePanel({
 
   if (enriching && !profileResult && !analyzing) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center p-8">
-        <div className="max-w-md text-center">
-          <p className="font-medium text-slate-800">{selectedVar.text}</p>
-          <div className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-500">
-            <Loader2 className="animate-spin text-[var(--et-teal)]" size={18} />
-            Preparing analysis...
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
+          <FilterEditor
+            surveyId={surveyId}
+            completionStatus={completionStatus}
+            variables={variables}
+            filters={filters}
+            onChange={onFiltersChange}
+            compact
+          />
+        </div>
+        <div className="flex flex-1 flex-col items-center justify-center p-8">
+          <div className="max-w-md text-center">
+            <p className="font-medium text-slate-800">{selectedVar.text}</p>
+            <div className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-500">
+              <Loader2 className="animate-spin text-[var(--et-teal)]" size={18} />
+              Preparing analysis…
+            </div>
           </div>
         </div>
       </div>
@@ -492,7 +675,14 @@ function ExplorePanel({
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
-        <FilterEditor variables={variables} filters={filters} onChange={onFiltersChange} compact />
+        <FilterEditor
+          surveyId={surveyId}
+          completionStatus={completionStatus}
+          variables={variables}
+          filters={filters}
+          onChange={onFiltersChange}
+          compact
+        />
       </div>
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-4xl animate-fade-in">
@@ -520,11 +710,17 @@ function ExplorePanel({
 }
 
 function CrosstabsPanel({
-  selectedVar,
+  surveyId,
+  completionStatus,
   variables,
   sideRowVars,
+  sideRowIds,
   bannerVars,
   bannerIds,
+  onAddSideRow,
+  onAddAllSideRows,
+  onClearSideRows,
+  onClearBanners,
   onAddBanner,
   onRemoveBanner,
   onRemoveSideRow,
@@ -550,11 +746,17 @@ function CrosstabsPanel({
   bannerResult,
   schemaLoading,
 }: {
-  selectedVar: SurveyVariable | null
+  surveyId: number
+  completionStatus: string
   variables: SurveyVariable[]
   sideRowVars: SurveyVariable[]
+  sideRowIds: string[]
   bannerVars: SurveyVariable[]
   bannerIds: string[]
+  onAddSideRow: (id: string) => void
+  onAddAllSideRows: () => void
+  onClearSideRows: () => void
+  onClearBanners: () => void
   onAddBanner: (id: string) => void
   onRemoveBanner: (id: string) => void
   onRemoveSideRow: (id: string) => void
@@ -580,48 +782,50 @@ function CrosstabsPanel({
   bannerResult: BannerResult | null
   schemaLoading: boolean
 }) {
-  const canRun = selectedVar && bannerVars.length > 0 && !schemaLoading
+  const canRun = sideRowVars.length > 0 && bannerVars.length > 0 && !schemaLoading
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-4">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="max-h-[45vh] shrink-0 overflow-y-auto border-b border-slate-200 bg-white px-6 py-4">
         <div className="flex flex-wrap items-start gap-4">
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Side (row)</p>
-            <p className="mt-1 truncate text-sm font-medium text-slate-900">
-              {selectedVar?.text || 'Click a question in the sidebar'}
-            </p>
-            {sideRowVars.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {sideRowVars.map((v) => (
-                  <span
-                    key={v.id}
-                    className="inline-flex max-w-[180px] items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-800 ring-1 ring-indigo-200"
-                  >
-                    <span className="truncate">{v.text || v.code}</span>
-                    <button type="button" onClick={() => onRemoveSideRow(v.id)} className="hover:text-indigo-600">×</button>
-                  </span>
-                ))}
-              </div>
-            )}
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Side (rows)</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <SelectionChips
+                vars={sideRowVars}
+                onRemove={onRemoveSideRow}
+                onClearAll={onClearSideRows}
+                chipClassName="inline-flex max-w-[200px] items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-800 ring-1 ring-indigo-200"
+              />
+              <BannerPicker
+                variables={variables}
+                selectedIds={sideRowIds}
+                excludeIds={bannerIds}
+                onAdd={onAddSideRow}
+                onRemove={onRemoveSideRow}
+                onAddAll={onAddAllSideRows}
+                label="Add side row"
+                pickerTitle="Side rows"
+                emptyMessage="No side row questions available"
+                variant="side"
+                showAddAll
+              />
+            </div>
           </div>
 
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Banners (columns)</p>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {bannerVars.map((v) => (
-                <span
-                  key={v.id}
-                  className="inline-flex max-w-[200px] items-center gap-1 rounded-full bg-[var(--et-teal-light)] px-2.5 py-1 text-xs font-medium text-[var(--et-teal-dark)] ring-1 ring-[var(--et-teal)]/25"
-                >
-                  <span className="truncate">{v.text || v.code}</span>
-                  <button type="button" onClick={() => onRemoveBanner(v.id)} className="ml-0.5 rounded-full hover:bg-[var(--et-teal)]/15">×</button>
-                </span>
-              ))}
+              <SelectionChips
+                vars={bannerVars}
+                onRemove={onRemoveBanner}
+                onClearAll={onClearBanners}
+                chipClassName="inline-flex max-w-[200px] items-center gap-1 rounded-full bg-[var(--et-teal-light)] px-2.5 py-1 text-xs font-medium text-[var(--et-teal-dark)] ring-1 ring-[var(--et-teal)]/25"
+              />
               <BannerPicker
                 variables={variables}
                 selectedIds={bannerIds}
-                excludeIds={selectedVar ? [selectedVar.id, ...sideRowVars.map((v) => v.id)] : []}
+                excludeIds={sideRowIds}
                 onAdd={onAddBanner}
                 onRemove={onRemoveBanner}
               />
@@ -699,20 +903,27 @@ function CrosstabsPanel({
         </div>
 
         <div className="mt-3">
-          <FilterEditor variables={variables} filters={filters} onChange={onFiltersChange} compact />
+          <FilterEditor
+          surveyId={surveyId}
+          completionStatus={completionStatus}
+          variables={variables}
+          filters={filters}
+          onChange={onFiltersChange}
+          compact
+        />
         </div>
 
         <p className="mt-3 text-xs text-slate-400">
-          Click a question for the side (row). Use <strong>Add banner column</strong> or the <strong>+</strong> button in the sidebar · <strong>S</strong> = extra side row.
+          Use <strong>Add side row</strong> or <strong>Add banner column</strong> above, or click questions in the sidebar · <strong>+</strong> = banner · <strong>S</strong> = side row.
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-6">
         {!bannerResult && !analyzing && (
           <EmptyCanvas
             icon={<Table2 size={40} />}
             title="Advanced crosstabs"
-            description="Pick a side question and one or more banner breaks, choose table format options, then build the crosstab."
+            description="Add side row and banner column questions, choose table format options, then build the crosstab."
           />
         )}
         {analyzing && (
@@ -727,6 +938,55 @@ function CrosstabsPanel({
         )}
       </div>
     </div>
+  )
+}
+
+function SelectionChips({
+  vars,
+  onRemove,
+  onClearAll,
+  chipClassName,
+  maxVisible = 3,
+}: {
+  vars: SurveyVariable[]
+  onRemove: (id: string) => void
+  onClearAll: () => void
+  chipClassName: string
+  maxVisible?: number
+}) {
+  if (vars.length === 0) return null
+
+  const visible = vars.slice(0, maxVisible)
+  const hiddenCount = vars.length - visible.length
+
+  return (
+    <>
+      {vars.length > maxVisible && (
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+          {vars.length} selected
+        </span>
+      )}
+      {visible.map((v) => (
+        <span key={v.id} className={chipClassName}>
+          <span className="truncate">{v.text || v.code}</span>
+          <button type="button" onClick={() => onRemove(v.id)} className="ml-0.5 rounded-full hover:opacity-70">
+            ×
+          </button>
+        </span>
+      ))}
+      {hiddenCount > 0 && (
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200">
+          +{hiddenCount} more
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onClearAll}
+        className="text-xs font-medium text-slate-400 hover:text-red-600"
+      >
+        Clear all
+      </button>
+    </>
   )
 }
 

@@ -1,15 +1,23 @@
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { lazy, Suspense, useState } from 'react'
 import type { BannerResult, ProfileResult, TableCell } from '../../api/client'
 import { ErrorState } from '../States'
-import { LocationMap } from './LocationMap'
+import { Loader2 } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
+
+const DistributionChart = lazy(() =>
+  import('./DistributionChart').then((m) => ({ default: m.DistributionChart })),
+)
+const LocationMap = lazy(() =>
+  import('./LocationMap').then((m) => ({ default: m.LocationMap })),
+)
+
+function ChartFallback() {
+  return (
+    <div className="flex h-72 items-center justify-center text-slate-400">
+      <Loader2 className="animate-spin" size={24} />
+    </div>
+  )
+}
 
 const KIND_COLORS: Record<string, string> = {
   single: 'bg-blue-100 text-blue-800',
@@ -35,42 +43,12 @@ export function ProfileResults({ result }: { result: ProfileResult }) {
   if (result.error) return <ErrorState message={result.error} />
 
   if (result.analysis_type === 'distribution' && result.values) {
-    const chartData = result.values.slice(0, 20).map((v) => ({
-      name: truncate(v.label || v.code, 28),
-      fullLabel: v.label || v.code,
-      count: v.count,
-      pct: v.percentage,
-    }))
     return (
       <div className="space-y-6">
         <ResultHeader result={result} />
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ bottom: 70, left: 8, right: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="name"
-                angle={-30}
-                textAnchor="end"
-                interval={0}
-                height={70}
-                tick={{ fontSize: 11 }}
-              />
-              <YAxis allowDecimals={false} />
-              <Tooltip
-                contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
-                labelFormatter={(_label, payload) =>
-                  (payload?.[0]?.payload as { fullLabel?: string })?.fullLabel ?? String(_label)
-                }
-                formatter={(value, _name, item) => [
-                  `${value ?? 0} (${(item?.payload as { pct?: number })?.pct ?? 0}%)`,
-                  'Count',
-                ]}
-              />
-              <Bar dataKey="count" fill="var(--et-teal)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <Suspense fallback={<ChartFallback />}>
+          <DistributionChart values={result.values} />
+        </Suspense>
         <DistributionTable values={result.values} baseN={result.base_n || 0} />
       </div>
     )
@@ -163,7 +141,9 @@ export function ProfileResults({ result }: { result: ProfileResult }) {
     return (
       <div className="space-y-4">
         <ResultHeader result={result} />
-        <LocationMap points={result.points ?? []} bounds={result.bounds} />
+        <Suspense fallback={<ChartFallback />}>
+          <LocationMap points={result.points ?? []} bounds={result.bounds} />
+        </Suspense>
         <p className="text-sm text-slate-500">
           {result.base_n ?? 0} responses with valid GPS coordinates
           {(result.points?.length ?? 0) >= 5000 && ' (showing first 5,000)'}
@@ -179,22 +159,96 @@ export function CrosstabsResults({ result }: { result: BannerResult }) {
   if (result.error && !result.tables) return <ErrorState message={result.error} />
 
   if (result.table_type === 'multi' && result.tables?.length) {
-    return (
-      <div className="space-y-10">
-        {result.tables.map((table, i) => (
-          <div key={i} className={i > 0 ? 'border-t border-slate-200 pt-8' : ''}>
-            {table.error ? (
-              <ErrorState message={table.error} />
-            ) : (
-              <BannerTable result={{ ...table, confidence_level: result.confidence_level ?? table.confidence_level, show_counts: result.show_counts ?? table.show_counts, show_col_pct: result.show_col_pct ?? table.show_col_pct, show_row_pct: result.show_row_pct ?? table.show_row_pct, show_significance: result.show_significance ?? table.show_significance }} />
-            )}
-          </div>
-        ))}
-      </div>
-    )
+    return <MultiCrosstabList result={result} />
   }
 
   return <BannerTable result={result} />
+}
+
+function crosstabTableTitle(table: BannerResult, index: number) {
+  return table.row_variable?.text || table.row_header || `Table ${index + 1}`
+}
+
+function MultiCrosstabList({ result }: { result: BannerResult }) {
+  const tables = result.tables ?? []
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set([0]))
+
+  function toggle(index: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
+  const tableProps = {
+    confidence_level: result.confidence_level,
+    show_counts: result.show_counts,
+    show_col_pct: result.show_col_pct,
+    show_row_pct: result.show_row_pct,
+    show_significance: result.show_significance,
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+        <p className="text-sm font-medium text-slate-700">
+          {tables.length} crosstab {tables.length === 1 ? 'table' : 'tables'}
+        </p>
+        <div className="flex gap-2 text-xs">
+          <button
+            type="button"
+            onClick={() => setExpanded(new Set(tables.map((_, i) => i)))}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
+          >
+            Expand all
+          </button>
+          <button
+            type="button"
+            onClick={() => setExpanded(new Set())}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
+          >
+            Collapse all
+          </button>
+        </div>
+      </div>
+
+      {tables.map((table, index) => {
+        const isOpen = expanded.has(index)
+        const title = crosstabTableTitle(table, index)
+        return (
+          <div key={index} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <button
+              type="button"
+              onClick={() => toggle(index)}
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-slate-50"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Table {index + 1}
+                </span>
+                <span className="mt-0.5 block truncate text-sm font-medium text-slate-800">{title}</span>
+              </span>
+              <ChevronDown
+                size={18}
+                className={`shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {isOpen && (
+              <div className="border-t border-slate-200 p-4">
+                {table.error ? (
+                  <ErrorState message={table.error} />
+                ) : (
+                  <BannerTable result={{ ...table, ...tableProps }} />
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function BannerTable({ result }: { result: BannerResult }) {

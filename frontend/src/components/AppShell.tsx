@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LogOut, Users } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
+import { BrandLogo } from './BrandLogo'
 
 function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString(undefined, {
@@ -31,12 +32,7 @@ export function AppShell() {
       <header className="sticky top-0 z-20 border-b border-[var(--et-teal)]/10 bg-white/80 shadow-sm backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3.5">
           <Link to="/dashboard" className="group rounded-lg transition">
-            <p className="font-display text-lg font-bold tracking-tight text-[var(--et-navy)] group-hover:text-[var(--et-teal-dark)]">
-              ET <span className="text-[var(--et-teal)]">Spirex</span>
-            </p>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--et-gold)]">
-              Elastic Tree
-            </p>
+            <BrandLogo size="sm" showTagline={false} />
           </Link>
 
           <div className="relative flex items-center gap-3">

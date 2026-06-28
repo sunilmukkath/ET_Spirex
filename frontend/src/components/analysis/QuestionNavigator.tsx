@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { memo, useDeferredValue, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Plus, Search, X } from 'lucide-react'
 import type { SurveyVariable } from '../../api/client'
 
@@ -10,6 +10,7 @@ const KIND_LABELS: Record<string, string> = {
   text: 'Text',
   rank: 'Rank',
   location: 'GPS',
+  custom: 'Custom',
 }
 
 const KIND_DOT: Record<string, string> = {
@@ -20,6 +21,7 @@ const KIND_DOT: Record<string, string> = {
   text: 'bg-slate-400',
   rank: 'bg-pink-400',
   location: 'bg-emerald-400',
+  custom: 'bg-[var(--et-gold)]',
 }
 
 interface Props {
@@ -36,7 +38,7 @@ interface Props {
   onSideRowToggle?: (id: string) => void
 }
 
-export function QuestionNavigator({
+export const QuestionNavigator = memo(function QuestionNavigator({
   variables,
   groups,
   selectedId,
@@ -50,12 +52,17 @@ export function QuestionNavigator({
   onSideRowToggle,
 }: Props) {
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(groups.map((g) => g.id)))
+
+  const compareSet = useMemo(() => new Set(compareIds), [compareIds])
+  const sideRowSet = useMemo(() => new Set(sideRowIds), [sideRowIds])
+  const primarySideRowId = sideRowIds[0] ?? null
 
   const varMap = useMemo(() => new Map(variables.map((v) => [v.id, v])), [variables])
 
   const filteredGroups = useMemo(() => {
-    const q = search.toLowerCase()
+    const q = deferredSearch.toLowerCase()
     return groups
       .map((g) => ({
         ...g,
@@ -69,7 +76,7 @@ export function QuestionNavigator({
           }),
       }))
       .filter((g) => g.vars.length > 0)
-  }, [groups, varMap, search, compareMode])
+  }, [groups, varMap, deferredSearch, compareMode])
 
   if (loading) {
     return (
@@ -94,7 +101,7 @@ export function QuestionNavigator({
         </p>
         {compareMode && (
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
-            Click question = row · <span className="text-[var(--et-teal-light)]">+</span> = banner column · <span className="text-indigo-300">S</span> = side row
+            Click = primary side row · <span className="text-indigo-300">S</span> = side row · <span className="text-[var(--et-teal-light)]">+</span> = banner
           </p>
         )}
         <div className="relative">
@@ -134,17 +141,22 @@ export function QuestionNavigator({
               {expanded.has(group.id) && (
                 <ul className="mt-0.5 space-y-0.5 pb-2">
                   {group.vars.map((v) => {
-                    const isBanner = compareIds.includes(v.id)
-                    const isSideRow = sideRowIds.includes(v.id)
-                    const canAddBanner = compareMode && onCompareToggle && v.id !== selectedId && v.can_banner
+                    const isBanner = compareSet.has(v.id)
+                    const isSideRow = sideRowSet.has(v.id)
+                    const isPrimarySideRow = compareMode && primarySideRowId === v.id
+                    const canAddBanner = compareMode && onCompareToggle && !sideRowSet.has(v.id) && v.can_banner
 
                     return (
                       <li key={v.id}>
                         <div
                           className={`group flex items-stretch rounded-lg transition ${
-                            selectedId === v.id
-                              ? 'bg-[var(--sidebar-active)] ring-1 ring-[var(--et-teal)]/30'
-                              : 'hover:bg-[var(--sidebar-hover)]'
+                            isPrimarySideRow
+                              ? 'bg-[var(--sidebar-active)] ring-1 ring-indigo-400/40'
+                              : isSideRow
+                                ? 'bg-indigo-500/10 ring-1 ring-indigo-400/20'
+                                : selectedId === v.id
+                                  ? 'bg-[var(--sidebar-active)] ring-1 ring-[var(--et-teal)]/30'
+                                  : 'hover:bg-[var(--sidebar-hover)]'
                           }`}
                         >
                           <button
@@ -155,10 +167,10 @@ export function QuestionNavigator({
                             <div className="flex items-center gap-2">
                               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${KIND_DOT[v.kind] || 'bg-slate-500'}`} />
                               <span className="text-[10px] font-medium text-slate-500">{KIND_LABELS[v.kind] || v.kind}</span>
-                              {selectedId === v.id && compareMode && (
-                                <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-bold text-sky-300">ROW</span>
+                              {isPrimarySideRow && (
+                                <span className="rounded bg-indigo-500/25 px-1.5 py-0.5 text-[9px] font-bold text-indigo-200">ROW</span>
                               )}
-                              {isSideRow && (
+                              {isSideRow && !isPrimarySideRow && (
                                 <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-bold text-indigo-200">SIDE</span>
                               )}
                               {isBanner && (
@@ -169,10 +181,10 @@ export function QuestionNavigator({
                               {v.text || v.code}
                             </p>
                           </button>
-                          {compareMode && onSideRowToggle && v.id !== selectedId && v.can_banner && (
+                          {compareMode && onSideRowToggle && !compareSet.has(v.id) && v.can_banner && (
                             <button
                               type="button"
-                              title={isSideRow ? 'Remove side row' : 'Add as additional side row'}
+                              title={isSideRow ? 'Remove side row' : 'Add as side row'}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 onSideRowToggle(v.id)
@@ -219,4 +231,4 @@ export function QuestionNavigator({
       </div>
     </aside>
   )
-}
+})
