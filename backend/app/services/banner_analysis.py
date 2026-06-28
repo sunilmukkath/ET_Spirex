@@ -1,0 +1,893 @@
+from __future__ import annotations
+
+import math
+import re
+from collections import Counter
+from typing import Any
+
+import pandas as pd
+from scipy.stats import chi2_contingency
+
+from app.services.question_schema import build_survey_schema, get_variable
+from app.services.response_store import get_responses
+
+Z_THRESHOLDS = {0.90: 1.645, 0.95: 1.96, 0.99: 2.576}
+
+
+def _find_column(var: dict[str, Any], df: pd.DataFrame) -> str | None:
+    code = var.get("code", "")
+    for col in var.get("columns") or []:
+        if col in df.columns:
+            return col
+    if code in df.columns:
+        return code
+    for c in df.columns:
+        if c == code or c.startswith(f"{code}_") or (code and c.startswith(code)):
+            return c
+    return None
+
+
+def run_question_profile(
+    survey_id: int,
+    variable_id: str,
+    *,
+    completion_status: str = "complete",
+    filters: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    schema = build_survey_schema(survey_id, completion_status=completion_status)
+    variable = get_variable(schema, variable_id)
+    if not variable:
+        return {"error": f"Variable '{variable_id}' not found"}
+
+    dataset = get_responses(survey_id, completion_status=completion_status)
+    df = _apply_filters(dataset.dataframe, schema, filters or [])
+    if df.empty:
+        return {"error": "No responses match the selected filters"}
+
+    kind = variable["kind"]
+    if kind == "single":
+        return _profile_single(variable, df)
+    if kind == "multi":
+        return _profile_multi(variable, df)
+    if kind == "array":
+        return _profile_array(variable, df)
+    if kind == "numeric":
+        return _profile_numeric(variable, df)
+    if kind == "rank":
+        return _profile_rank(variable, df)
+    if kind == "text":
+        return _profile_text(variable, df)
+    if kind == "location":
+        return _profile_location(variable, df)
+    return {"error": f"Analysis not supported for {variable['type_label']}"}
+
+
+def run_banner_table(
+    survey_id: int,
+    *,
+    row_variable_id: str,
+    banner_variable_ids: list[str],
+    row_variable_ids: list[str] | None = None,
+    filters: list[dict[str, Any]] | None = None,
+    completion_status: str = "complete",
+    show_counts: bool = True,
+    show_col_pct: bool = True,
+    show_row_pct: bool = False,
+    show_significance: bool = True,
+    confidence_level: float = 0.95,
+    metric: str = "auto",
+) -> dict[str, Any]:
+    row_ids = row_variable_ids or [row_variable_id]
+    row_ids = [rid for rid in row_ids if rid]
+
+    if len(row_ids) <= 1:
+        return _build_banner_table(
+            survey_id,
+            row_variable_id=row_ids[0] if row_ids else row_variable_id,
+            banner_variable_ids=banner_variable_ids,
+            filters=filters,
+            completion_status=completion_status,
+            show_counts=show_counts,
+            show_col_pct=show_col_pct,
+            show_row_pct=show_row_pct,
+            show_significance=show_significance,
+            confidence_level=confidence_level,
+            metric=metric,
+        )
+
+    tables = []
+    for rid in row_ids:
+        table = _build_banner_table(
+            survey_id,
+            row_variable_id=rid,
+            banner_variable_ids=banner_variable_ids,
+            filters=filters,
+            completion_status=completion_status,
+            show_counts=show_counts,
+            show_col_pct=show_col_pct,
+            show_row_pct=show_row_pct,
+            show_significance=show_significance,
+            confidence_level=confidence_level,
+            metric=metric,
+        )
+        tables.append(table)
+
+    errors = [t.get("error") for t in tables if t.get("error")]
+    if errors and all(t.get("error") for t in tables):
+        return {"error": errors[0], "tables": tables}
+
+    return {
+        "table_type": "multi",
+        "tables": tables,
+        "confidence_level": confidence_level,
+        "show_counts": show_counts,
+        "show_col_pct": show_col_pct,
+        "show_row_pct": show_row_pct,
+        "show_significance": show_significance,
+    }
+
+
+def _build_banner_table(
+    survey_id: int,
+    *,
+    row_variable_id: str,
+    banner_variable_ids: list[str],
+    filters: list[dict[str, Any]] | None = None,
+    completion_status: str = "complete",
+    show_counts: bool = True,
+    show_col_pct: bool = True,
+    show_row_pct: bool = False,
+    show_significance: bool = True,
+    confidence_level: float = 0.95,
+    metric: str = "auto",
+) -> dict[str, Any]:
+    schema = build_survey_schema(survey_id, completion_status=completion_status)
+    row_var = get_variable(schema, row_variable_id)
+    if not row_var:
+        return {"error": f"Row variable '{row_variable_id}' not found"}
+    if not row_var["can_banner"]:
+        return {"error": f"'{row_var['text']}' cannot be used as a banner row"}
+
+    banner_vars = []
+    for bid in banner_variable_ids:
+        bvar = get_variable(schema, bid)
+        if not bvar:
+            return {"error": f"Banner variable '{bid}' not found"}
+        if not bvar["can_banner"]:
+            return {"error": f"'{bvar['text']}' cannot be used as a banner break"}
+        banner_vars.append(bvar)
+
+    dataset = get_responses(survey_id, completion_status=completion_status)
+    df = _apply_filters(dataset.dataframe, schema, filters or [])
+
+    if df.empty:
+        return {"error": "No responses match the selected filters"}
+
+    resolved_metric = metric if metric != "auto" else _default_metric(row_var)
+    base_n = len(df)
+
+    banner_columns = _build_banner_columns(banner_vars, df)
+    if not banner_columns:
+        return {"error": "Banner variables have no valid data columns"}
+
+    if row_var["kind"] in ("single",) or (
+        row_var["kind"] == "array" and row_var["subquestions"]
+    ):
+        if row_var["kind"] == "single":
+            table = _banner_single(row_var, banner_columns, df, resolved_metric)
+        else:
+            table = _banner_array(row_var, banner_columns, df, resolved_metric)
+    elif row_var["kind"] == "multi":
+        table = _banner_multi(row_var, banner_columns, df)
+    elif row_var["kind"] == "numeric":
+        table = _banner_numeric(row_var, banner_columns, df, resolved_metric)
+    else:
+        return {"error": f"Banner analysis not supported for {row_var['type_label']}"}
+
+    if show_significance and resolved_metric == "distribution":
+        if table.get("table_type") == "array" and table.get("sections"):
+            for section in table["sections"]:
+                _add_significance(section, row_var, confidence_level=confidence_level)
+                if show_row_pct:
+                    _apply_row_pcts(section)
+        else:
+            _add_significance(table, row_var, confidence_level=confidence_level)
+            if show_row_pct:
+                _apply_row_pcts(table)
+    elif show_row_pct:
+        if table.get("table_type") == "array" and table.get("sections"):
+            for section in table["sections"]:
+                _apply_row_pcts(section)
+        else:
+            _apply_row_pcts(table)
+
+    return {
+        "row_variable": _var_summary(row_var),
+        "banner_variables": [_var_summary(v) for v in banner_vars],
+        "metric": resolved_metric,
+        "base_n": base_n,
+        "filtered_n": len(df),
+        "filters_applied": filters or [],
+        "show_counts": show_counts,
+        "show_col_pct": show_col_pct,
+        "show_row_pct": show_row_pct,
+        "show_significance": show_significance,
+        "confidence_level": confidence_level,
+        **table,
+    }
+
+
+def _var_summary(v: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": v["id"],
+        "code": v["code"],
+        "text": v["text"],
+        "kind": v["kind"],
+        "type_label": v["type_label"],
+    }
+
+
+def _default_metric(row_var: dict[str, Any]) -> str:
+    metrics = row_var.get("metrics") or []
+    if "distribution" in metrics:
+        return "distribution"
+    if "checkbox_rate" in metrics:
+        return "checkbox_rate"
+    if "mean" in metrics:
+        return "mean"
+    return "distribution"
+
+
+def _apply_filters(
+    df: pd.DataFrame,
+    schema: dict[str, Any],
+    filters: list[dict[str, Any]],
+) -> pd.DataFrame:
+    result = df.copy()
+    for f in filters:
+        var = get_variable(schema, f.get("variable_id", ""))
+        if not var:
+            continue
+        values = f.get("values") or []
+        if not values:
+            continue
+        mask = pd.Series(False, index=result.index)
+        if var["kind"] == "multi":
+            for col in var["columns"]:
+                if col in result.columns:
+                    mask |= result[col].astype(str).isin(["Y", "1", "yes", "Yes"])
+        elif var["kind"] == "single":
+            col = var["columns"][0] if var["columns"] else var["code"]
+            if col in result.columns:
+                mask = result[col].astype(str).isin([str(v) for v in values])
+        else:
+            col = var["columns"][0] if var["columns"] else None
+            if col and col in result.columns:
+                mask = result[col].astype(str).isin([str(v) for v in values])
+        result = result[mask]
+    return result
+
+
+def _build_banner_columns(
+    banner_vars: list[dict[str, Any]],
+    df: pd.DataFrame,
+) -> list[dict[str, Any]]:
+    columns: list[dict[str, Any]] = []
+    for bvar in banner_vars:
+        if bvar["kind"] == "single":
+            col = bvar["columns"][0] if bvar["columns"] else bvar["code"]
+            if col not in df.columns:
+                continue
+            categories = _ordered_categories(bvar, df[col])
+            for cat in categories:
+                label = _label_for_code(bvar, cat)
+                columns.append(
+                    {
+                        "banner_id": bvar["id"],
+                        "banner_text": bvar["text"],
+                        "category_code": cat,
+                        "category_label": label,
+                        "header": label,
+                        "filter_col": col,
+                        "filter_value": cat,
+                    }
+                )
+        elif bvar["kind"] == "multi":
+            for sq in bvar["subquestions"]:
+                col = sq["column"]
+                if col not in df.columns:
+                    continue
+                columns.append(
+                    {
+                        "banner_id": bvar["id"],
+                        "banner_text": bvar["text"],
+                        "category_code": sq["code"],
+                        "category_label": sq["label"],
+                        "header": sq["label"],
+                        "filter_col": col,
+                        "filter_value": "Y",
+                        "is_checkbox": True,
+                    }
+                )
+    return columns
+
+
+def _natural_sort_key(value: str) -> tuple[int, Any]:
+    text = str(value)
+    if text.isdigit():
+        return (0, int(text))
+    return (1, text)
+
+
+def _ordered_categories(var: dict[str, Any], series: pd.Series) -> list[str]:
+    if var.get("answer_options"):
+        codes = [o["code"] for o in var["answer_options"]]
+        present = set(series.dropna().astype(str).unique())
+        return [c for c in codes if c in present] + sorted(
+            present - set(codes), key=_natural_sort_key
+        )
+    return sorted(series.dropna().astype(str).unique().tolist(), key=_natural_sort_key)
+
+
+def _label_for_code(var: dict[str, Any], code: str) -> str:
+    code_str = str(code)
+    for opt in var.get("answer_options") or []:
+        if str(opt["code"]) == code_str:
+            return opt["label"]
+    for sq in var.get("subquestions") or []:
+        if str(sq["code"]) == code_str:
+            return sq["label"]
+    return code_str
+
+
+def _resolve_subquestion_column(var: dict[str, Any], sq: dict[str, Any], df: pd.DataFrame) -> str | None:
+    col = sq.get("column")
+    if col and col in df.columns:
+        return col
+    code = var.get("code", "")
+    sq_code = sq.get("code", "")
+    for candidate in (f"{code}_{sq_code}", sq_code, col):
+        if candidate and candidate in df.columns:
+            return candidate
+    return _find_column({**var, "columns": [col, f"{code}_{sq_code}", sq_code]}, df)
+
+
+def _banner_single(
+    row_var: dict[str, Any],
+    banner_columns: list[dict[str, Any]],
+    df: pd.DataFrame,
+    metric: str,
+) -> dict[str, Any]:
+    col = _find_column(row_var, df)
+    if col is None:
+        return {"error": f"Data column for '{row_var['text']}' not found in responses"}
+
+    if metric == "mean":
+        return _banner_numeric_row(row_var, banner_columns, df, col)
+
+    categories = _ordered_categories(row_var, df[col])
+    rows = []
+    for cat in categories:
+        row_label = _label_for_code(row_var, cat)
+        cells = _distribution_cells(df, col, cat, banner_columns)
+        rows.append({"code": cat, "label": row_label, "cells": cells})
+
+    total_cells = _distribution_cells(df, col, None, banner_columns, is_total_row=True)
+    rows.append({"code": "_total", "label": "Total", "cells": total_cells, "is_total": True})
+
+    headers = [{"key": "total", "label": "Total", "banner_id": None}] + [
+        {"key": f"{c['banner_id']}_{c['category_code']}", "label": c["header"], "banner_id": c["banner_id"]}
+        for c in banner_columns
+    ]
+
+    return {
+        "table_type": "distribution",
+        "row_header": row_var["text"],
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+def _distribution_cells(
+    df: pd.DataFrame,
+    col: str,
+    category: str | None,
+    banner_columns: list[dict[str, Any]],
+    *,
+    is_total_row: bool = False,
+) -> list[dict[str, Any]]:
+    cells: list[dict[str, Any]] = []
+
+    def _cell(subset: pd.DataFrame, match_value: str | None) -> dict[str, Any]:
+        n = len(subset)
+        if is_total_row:
+            count = n
+        else:
+            count = int((subset[col].astype(str) == str(match_value)).sum())
+        pct = round((count / n) * 100, 1) if n else 0.0
+        return {"count": count, "base": n, "col_pct": pct}
+
+    cells.append(_cell(df, category))
+
+    for banner in banner_columns:
+        bcol = banner["filter_col"]
+        if banner.get("is_checkbox"):
+            subset = df[df[bcol].astype(str).isin(["Y", "1", "yes", "Yes"])]
+        else:
+            subset = df[df[bcol].astype(str) == str(banner["filter_value"])]
+        cells.append(_cell(subset, category))
+
+    return cells
+
+
+def _banner_multi(
+    row_var: dict[str, Any],
+    banner_columns: list[dict[str, Any]],
+    df: pd.DataFrame,
+) -> dict[str, Any]:
+    rows = []
+    for sq in row_var["subquestions"]:
+        col = sq["column"]
+        if col not in df.columns:
+            continue
+        cells = []
+        total_n = len(df)
+        total_yes = int(df[col].astype(str).isin(["Y", "1", "yes", "Yes"]).sum())
+        cells.append(
+            {
+                "count": total_yes,
+                "base": total_n,
+                "col_pct": round((total_yes / total_n) * 100, 1) if total_n else 0,
+            }
+        )
+        for banner in banner_columns:
+            if banner.get("is_checkbox"):
+                subset = df[df[banner["filter_col"]].astype(str).isin(["Y", "1", "yes", "Yes"])]
+            else:
+                subset = df[df[banner["filter_col"]].astype(str) == str(banner["filter_value"])]
+            n = len(subset)
+            yes = int(subset[col].astype(str).isin(["Y", "1", "yes", "Yes"]).sum()) if n else 0
+            cells.append(
+                {
+                    "count": yes,
+                    "base": n,
+                    "col_pct": round((yes / n) * 100, 1) if n else 0,
+                }
+            )
+        rows.append({"code": sq["code"], "label": sq["label"], "cells": cells})
+
+    headers = [{"key": "total", "label": "Total", "banner_id": None}] + [
+        {"key": f"{c['banner_id']}_{c['category_code']}", "label": c["header"], "banner_id": c["banner_id"]}
+        for c in banner_columns
+    ]
+
+    return {
+        "table_type": "checkbox_rate",
+        "row_header": row_var["text"],
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+def _banner_array(
+    row_var: dict[str, Any],
+    banner_columns: list[dict[str, Any]],
+    df: pd.DataFrame,
+    metric: str,
+) -> dict[str, Any]:
+    if metric in ("mean", "top2box", "bottom2box"):
+        return _banner_array_metrics(row_var, banner_columns, df, metric)
+
+    answer_options = row_var.get("answer_options") or []
+    if not answer_options:
+        for sq in row_var["subquestions"][:1]:
+            col = sq["column"]
+            if col in df.columns:
+                answer_options = [{"code": c, "label": c} for c in _ordered_categories(row_var, df[col])]
+                break
+
+    sections = []
+    for sq in row_var["subquestions"]:
+        col = sq["column"]
+        if col not in df.columns:
+            continue
+        temp_var = {**row_var, "columns": [col], "text": sq["label"]}
+        section = _banner_single(temp_var, banner_columns, df, "distribution")
+        section["subquestion"] = sq["label"]
+        sections.append(section)
+
+    return {
+        "table_type": "array",
+        "row_header": row_var["text"],
+        "sections": sections,
+    }
+
+
+def _banner_array_metrics(
+    row_var: dict[str, Any],
+    banner_columns: list[dict[str, Any]],
+    df: pd.DataFrame,
+    metric: str,
+) -> dict[str, Any]:
+    rows = []
+    for sq in row_var["subquestions"]:
+        col = sq["column"]
+        if col not in df.columns:
+            continue
+        cells = _metric_cells(df, col, banner_columns, metric, row_var)
+        rows.append({"code": sq["code"], "label": sq["label"], "cells": cells})
+
+    headers = [{"key": "total", "label": "Total", "banner_id": None}] + [
+        {"key": f"{c['banner_id']}_{c['category_code']}", "label": c["header"], "banner_id": c["banner_id"]}
+        for c in banner_columns
+    ]
+
+    return {
+        "table_type": metric,
+        "row_header": row_var["text"],
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+def _banner_numeric(
+    row_var: dict[str, Any],
+    banner_columns: list[dict[str, Any]],
+    df: pd.DataFrame,
+    metric: str,
+) -> dict[str, Any]:
+    if row_var["ls_type"] == "K" and row_var["subquestions"]:
+        return _banner_array_metrics(row_var, banner_columns, df, metric)
+
+    col = row_var["columns"][0] if row_var["columns"] else row_var["code"]
+    return _banner_numeric_row(row_var, banner_columns, df, col, metric)
+
+
+def _banner_numeric_row(
+    row_var: dict[str, Any],
+    banner_columns: list[dict[str, Any]],
+    df: pd.DataFrame,
+    col: str,
+    metric: str = "mean",
+) -> dict[str, Any]:
+    cells = _metric_cells(df, col, banner_columns, metric, row_var)
+    headers = [{"key": "total", "label": "Total", "banner_id": None}] + [
+        {"key": f"{c['banner_id']}_{c['category_code']}", "label": c["header"], "banner_id": c["banner_id"]}
+        for c in banner_columns
+    ]
+    return {
+        "table_type": metric,
+        "row_header": row_var["text"],
+        "headers": headers,
+        "rows": [{"code": metric, "label": metric.replace("_", " ").title(), "cells": cells}],
+    }
+
+
+def _metric_cells(
+    df: pd.DataFrame,
+    col: str,
+    banner_columns: list[dict[str, Any]],
+    metric: str,
+    row_var: dict[str, Any],
+) -> list[dict[str, Any]]:
+    cells = [_compute_metric(df, col, metric, row_var)]
+    for banner in banner_columns:
+        if banner.get("is_checkbox"):
+            subset = df[df[banner["filter_col"]].astype(str).isin(["Y", "1", "yes", "Yes"])]
+        else:
+            subset = df[df[banner["filter_col"]].astype(str) == str(banner["filter_value"])]
+        cells.append(_compute_metric(subset, col, metric, row_var))
+    return cells
+
+
+def _compute_metric(
+    df: pd.DataFrame,
+    col: str,
+    metric: str,
+    row_var: dict[str, Any],
+) -> dict[str, Any]:
+    if col not in df.columns:
+        return {"value": None, "base": 0}
+
+    numeric = pd.to_numeric(df[col], errors="coerce")
+    valid = numeric.dropna()
+    n = int(valid.count())
+    if n == 0:
+        return {"value": None, "base": 0}
+
+    if metric == "mean":
+        return {"value": round(float(valid.mean()), 2), "base": n}
+
+    codes = [o["code"] for o in row_var.get("answer_options") or []]
+    if codes:
+        top_codes = set(codes[-2:]) if len(codes) >= 2 else set(codes)
+        bottom_codes = set(codes[:2]) if len(codes) >= 2 else set(codes)
+    else:
+        top_codes = {str(int(valid.max())), str(int(valid.max()) - 1)} if valid.max() >= 2 else set()
+        bottom_codes = {"1", "2"}
+
+    str_vals = df[col].astype(str)
+    if metric == "top2box":
+        count = int(str_vals.isin(top_codes).sum())
+        return {"value": round((count / n) * 100, 1), "base": n, "col_pct": round((count / n) * 100, 1), "count": count}
+    if metric == "bottom2box":
+        count = int(str_vals.isin(bottom_codes).sum())
+        return {"value": round((count / n) * 100, 1), "base": n, "col_pct": round((count / n) * 100, 1), "count": count}
+
+    return {"value": round(float(valid.mean()), 2), "base": n}
+
+
+def _apply_row_pcts(table: dict[str, Any]) -> None:
+    for row in table.get("rows", []):
+        if row.get("is_total"):
+            continue
+        row_base = row.get("cells", [{}])[0].get("count", 0) if row.get("cells") else 0
+        if not row_base:
+            continue
+        for cell in row.get("cells", []):
+            count = cell.get("count", 0) or 0
+            cell["row_pct"] = round((count / row_base) * 100, 1)
+
+
+def _add_significance(
+    table: dict[str, Any],
+    row_var: dict[str, Any],
+    *,
+    confidence_level: float = 0.95,
+) -> None:
+    if table.get("table_type") != "distribution":
+        return
+
+    data_rows = [r for r in table.get("rows", []) if not r.get("is_total")]
+    if len(data_rows) < 1:
+        return
+
+    banner_count = max(len(data_rows[0].get("cells", [])) - 1, 0)
+    if banner_count < 1:
+        return
+
+    observed = []
+    for row in data_rows:
+        observed.append([int(c.get("count", 0) or 0) for c in row.get("cells", [])[1:]])
+
+    matrix = pd.DataFrame(observed)
+    if matrix.sum().sum() == 0:
+        return
+
+    try:
+        _, _, _, expected = chi2_contingency(matrix.to_numpy(), correction=False)
+    except ValueError:
+        return
+
+    row_margins = matrix.sum(axis=1).to_numpy(dtype=float)
+    col_margins = matrix.sum(axis=0).to_numpy(dtype=float)
+    grand = float(matrix.sum().sum())
+    threshold = Z_THRESHOLDS.get(confidence_level, Z_THRESHOLDS[0.95])
+
+    for ri, row in enumerate(data_rows):
+        for ci in range(banner_count):
+            obs = float(matrix.iat[ri, ci])
+            exp = float(expected[ri, ci])
+            if exp <= 0:
+                continue
+            row_share = row_margins[ri] / grand if grand else 0
+            col_share = col_margins[ci] / grand if grand else 0
+            denom = exp * (1 - row_share) * (1 - col_share)
+            if denom <= 0:
+                continue
+            residual = (obs - exp) / math.sqrt(denom)
+            cell = row["cells"][ci + 1]
+            cell["sig"] = _sig_letters(residual, confidence_level=confidence_level)
+            cell["chi_residual"] = round(residual, 2)
+
+
+def _two_proportion_z(p1: float, n1: int, p2: float, n2: int) -> float:
+    if n1 == 0 or n2 == 0:
+        return 0.0
+    p_pool = (p1 * n1 + p2 * n2) / (n1 + n2)
+    if p_pool in (0, 1):
+        return 0.0
+    se = math.sqrt(p_pool * (1 - p_pool) * (1 / n1 + 1 / n2))
+    if se == 0:
+        return 0.0
+    return (p2 - p1) / se
+
+
+def _sig_letters(z: float, *, confidence_level: float = 0.95) -> str | None:
+    threshold = Z_THRESHOLDS.get(confidence_level, Z_THRESHOLDS[0.95])
+    if abs(z) < threshold:
+        return None
+    marker = "+" if z > 0 else "-"
+    if confidence_level >= 0.99:
+        return f"{marker}99"
+    if confidence_level >= 0.95:
+        return f"{marker}95"
+    return f"{marker}90"
+
+
+def _profile_single(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
+    col = _find_column(var, df)
+    if col is None:
+        return {"error": f"No response data for '{var['text']}'", "variable": _var_summary(var)}
+
+    series = df[col].dropna().astype(str)
+    total = len(series)
+    categories = _ordered_categories(var, series)
+    values = []
+    for cat in categories:
+        count = int((series == cat).sum())
+        values.append(
+            {
+                "code": cat,
+                "label": _label_for_code(var, cat),
+                "count": count,
+                "percentage": round((count / total) * 100, 1) if total else 0,
+            }
+        )
+    return {
+        "analysis_type": "distribution",
+        "variable": _var_summary(var),
+        "base_n": total,
+        "values": values,
+    }
+
+
+def _profile_multi(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
+    total = len(df)
+    values = []
+    subquestions = var.get("subquestions") or []
+    if not subquestions and var.get("answer_options"):
+        subquestions = [
+            {"code": o["code"], "label": o["label"], "column": f"{var['code']}_{o['code']}"}
+            for o in var["answer_options"]
+        ]
+
+    for sq in subquestions:
+        col = _resolve_subquestion_column(var, sq, df)
+        if col is None:
+            continue
+        yes = int(df[col].astype(str).isin(["Y", "1", "yes", "Yes"]).sum())
+        values.append(
+            {
+                "code": sq["code"],
+                "label": sq["label"],
+                "count": yes,
+                "percentage": round((yes / total) * 100, 1) if total else 0,
+            }
+        )
+    return {
+        "analysis_type": "checkbox_rate",
+        "variable": _var_summary(var),
+        "base_n": total,
+        "values": values,
+    }
+
+
+def _profile_array(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
+    sections = []
+    for sq in var.get("subquestions") or []:
+        col = _resolve_subquestion_column(var, sq, df)
+        if col is None:
+            continue
+        temp = {**var, "columns": [col]}
+        profile = _profile_single(temp, df)
+        profile["subquestion"] = sq["label"]
+        sections.append(profile)
+    return {
+        "analysis_type": "array",
+        "variable": _var_summary(var),
+        "base_n": len(df),
+        "sections": sections,
+    }
+
+
+def _profile_numeric(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
+    if var["ls_type"] == "K" and var["subquestions"]:
+        sections = []
+        for sq in var["subquestions"]:
+            col = sq["column"]
+            if col not in df.columns:
+                continue
+            numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+            sections.append(
+                {
+                    "subquestion": sq["label"],
+                    "count": int(numeric.count()),
+                    "mean": round(float(numeric.mean()), 2) if len(numeric) else None,
+                    "median": round(float(numeric.median()), 2) if len(numeric) else None,
+                    "min": round(float(numeric.min()), 2) if len(numeric) else None,
+                    "max": round(float(numeric.max()), 2) if len(numeric) else None,
+                }
+            )
+        return {"analysis_type": "numeric_multi", "variable": _var_summary(var), "sections": sections}
+
+    col = var["columns"][0] if var["columns"] else var["code"]
+    numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+    return {
+        "analysis_type": "numeric",
+        "variable": _var_summary(var),
+        "count": int(numeric.count()),
+        "mean": round(float(numeric.mean()), 2) if len(numeric) else None,
+        "median": round(float(numeric.median()), 2) if len(numeric) else None,
+        "std": round(float(numeric.std()), 2) if len(numeric) > 1 else 0,
+        "min": round(float(numeric.min()), 2) if len(numeric) else None,
+        "max": round(float(numeric.max()), 2) if len(numeric) else None,
+    }
+
+
+def _profile_rank(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
+    return _profile_multi(var, df)
+
+
+def _profile_text(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
+    col = var["columns"][0] if var["columns"] else var["code"]
+    if col not in df.columns:
+        return {"error": "No data", "variable": _var_summary(var)}
+    texts = df[col].dropna()
+    word_counts: Counter[str] = Counter()
+    samples: list[str] = []
+    for text in texts:
+        s = str(text).strip()
+        if not s or s.lower() in ("nan", "none"):
+            continue
+        if len(samples) < 20:
+            samples.append(s)
+        for word in re.findall(r"[a-zA-Z]{3,}", s.lower()):
+            word_counts[word] += 1
+
+    return {
+        "analysis_type": "text",
+        "variable": _var_summary(var),
+        "response_count": int(texts.shape[0]),
+        "samples": samples,
+        "top_words": [
+            {"word": word, "count": count}
+            for word, count in word_counts.most_common(40)
+        ],
+    }
+
+
+def _profile_location(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
+    lat_col = var.get("lat_column") or ""
+    lng_col = var.get("lng_column") or ""
+    if not lat_col or not lng_col:
+        pair_cols = [c for c in var.get("columns") or [] if c in df.columns]
+        if len(pair_cols) >= 2:
+            lat_col, lng_col = pair_cols[0], pair_cols[1]
+        else:
+            return {"error": "No GPS columns found", "variable": _var_summary(var)}
+
+    if lat_col not in df.columns or lng_col not in df.columns:
+        return {"error": "GPS columns missing in response data", "variable": _var_summary(var)}
+
+    points: list[dict[str, float]] = []
+    for _, row in df.iterrows():
+        lat = pd.to_numeric(row.get(lat_col), errors="coerce")
+        lng = pd.to_numeric(row.get(lng_col), errors="coerce")
+        if pd.isna(lat) or pd.isna(lng):
+            continue
+        lat_f, lng_f = float(lat), float(lng)
+        if not (-90 <= lat_f <= 90 and -180 <= lng_f <= 180):
+            continue
+        if lat_f == 0 and lng_f == 0:
+            continue
+        points.append({"lat": lat_f, "lng": lng_f})
+
+    bounds = None
+    if points:
+        lats = [p["lat"] for p in points]
+        lngs = [p["lng"] for p in points]
+        bounds = {
+            "north": max(lats),
+            "south": min(lats),
+            "east": max(lngs),
+            "west": min(lngs),
+        }
+
+    return {
+        "analysis_type": "location",
+        "variable": _var_summary(var),
+        "base_n": len(points),
+        "points": points[:5000],
+        "bounds": bounds,
+    }
