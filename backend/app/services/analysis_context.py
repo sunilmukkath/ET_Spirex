@@ -45,6 +45,13 @@ def _filters_digest(filters: list[dict[str, Any]] | None) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
+def _filter_tree_digest(tree: dict[str, Any] | None) -> str:
+    if not tree:
+        return ""
+    payload = json.dumps(tree, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()[:24]
+
+
 def invalidate_analysis_context(survey_id: int | None = None) -> None:
     with _META_LOCK:
         if survey_id is None:
@@ -90,22 +97,24 @@ def load_filtered_context(
     *,
     completion_status: str = "complete",
     filters: list[dict[str, Any]] | None = None,
+    filter_tree: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     """Load analysis context and apply filters (filtered result cached)."""
+    from app.services.filter_engine import apply_filter_tree, legacy_filters_to_tree
+
     schema, df = load_analysis_context(survey_id, completion_status=completion_status)
-    if not filters:
+    tree = filter_tree or legacy_filters_to_tree(filters)
+    if not tree or not tree.get("children"):
         return schema, df
 
-    digest = _filters_digest(filters)
+    digest = _filter_tree_digest(tree)
     cache_key = (survey_id, completion_status, digest)
     now = time.time()
     hit = _FILTER_CACHE.get(cache_key)
     if hit and now - hit[0] < _FILTER_TTL:
         return schema, hit[1]
 
-    from app.services.banner_analysis import _apply_filters
-
-    filtered = _apply_filters(df, schema, filters)
+    filtered = apply_filter_tree(df, schema, tree)
     _FILTER_CACHE[cache_key] = (time.time(), filtered)
     return schema, filtered
 

@@ -10,11 +10,18 @@ from app.lime_client import (
     get_survey_questions,
     list_projects,
 )
-from app.models.analysis import BannerRequest, ChartRequest, ProfileRequest, ProjectStatsRequest
+from app.models.analysis import (
+    AdvancedAnalysisRequest,
+    BannerRequest,
+    ChartRequest,
+    ProfileRequest,
+    ProjectStatsRequest,
+)
 from app.models.auth import LoginRequest, LoginResponse
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
 from app.services.auth import VALID_USERS, authenticate, get_session, list_active_sessions, logout
 from app.services.banner_analysis import run_banner_table, run_chart_data, run_question_profile, get_filter_options
+from app.services.advanced_analysis import run_advanced_analysis
 from app.services.custom_variable_store import (
     create_custom_variable,
     delete_custom_variable,
@@ -342,7 +349,8 @@ def question_profile(survey_id: int, body: ProfileRequest):
             survey_id,
             body.variable_id,
             completion_status=body.completion_status,
-            filters=[f.model_dump() for f in body.filters],
+            filters=[f.model_dump() for f in body.filters] if not body.filter_tree else None,
+            filter_tree=body.filter_tree,
         )
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
@@ -355,12 +363,33 @@ def chart_data(survey_id: int, body: ChartRequest):
             survey_id,
             body.variable_id,
             completion_status=body.completion_status,
-            filters=[f.model_dump() for f in body.filters],
+            filters=[f.model_dump() for f in body.filters] if not body.filter_tree else None,
+            filter_tree=body.filter_tree,
             chart_type=body.chart_type,
             bins=body.bins,
             banner_variable_id=body.banner_variable_id,
             y_variable_id=body.y_variable_id,
             z_variable_id=body.z_variable_id,
+        )
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.post("/projects/{survey_id}/analysis/advanced")
+def advanced_analysis(survey_id: int, body: AdvancedAnalysisRequest):
+    try:
+        return run_advanced_analysis(
+            survey_id,
+            analysis_type=body.analysis_type,
+            completion_status=body.completion_status,
+            filters=[f.model_dump() for f in body.filters] if not body.filter_tree else None,
+            filter_tree=body.filter_tree,
+            variable_ids=body.variable_ids,
+            dependent_id=body.dependent_id,
+            independent_ids=body.independent_ids,
+            group_variable_id=body.group_variable_id,
+            numeric_variable_id=body.numeric_variable_id,
+            method=body.method,
         )
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
@@ -375,7 +404,8 @@ def banner_analysis(survey_id: int, body: BannerRequest):
             row_variable_id=body.row_variable_id,
             row_variable_ids=row_ids,
             banner_variable_ids=body.banner_variable_ids,
-            filters=[f.model_dump() for f in body.filters],
+            filters=[f.model_dump() for f in body.filters] if not body.filter_tree else None,
+            filter_tree=body.filter_tree,
             row_filters={
                 k: [f.model_dump() for f in v]
                 for k, v in body.row_filters.items()
@@ -401,7 +431,8 @@ def banner_export(survey_id: int, body: BannerRequest):
             row_variable_id=body.row_variable_id,
             row_variable_ids=row_ids,
             banner_variable_ids=body.banner_variable_ids,
-            filters=[f.model_dump() for f in body.filters],
+            filters=[f.model_dump() for f in body.filters] if not body.filter_tree else None,
+            filter_tree=body.filter_tree,
             row_filters={
                 k: [f.model_dump() for f in v]
                 for k, v in body.row_filters.items()

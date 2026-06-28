@@ -36,21 +36,36 @@ class BannerRequest(BaseModel):
     metric: str = "auto"
 
 
-class ProfileRequest(BaseModel):
-    variable_id: str
-    completion_status: str = "complete"
-    filters: list[FilterSpec] = Field(default_factory=list)
-
-
 class ChartRequest(BaseModel):
     variable_id: str
     completion_status: str = "complete"
     filters: list[FilterSpec] = Field(default_factory=list)
+    filter_tree: dict | None = None
     chart_type: str = "auto"
     bins: int = Field(default=10, ge=3, le=50)
     banner_variable_id: str | None = None
     y_variable_id: str | None = None
     z_variable_id: str | None = None
+
+
+class ProfileRequest(BaseModel):
+    variable_id: str
+    completion_status: str = "complete"
+    filters: list[FilterSpec] = Field(default_factory=list)
+    filter_tree: dict | None = None
+
+
+class AdvancedAnalysisRequest(BaseModel):
+    analysis_type: str
+    completion_status: str = "complete"
+    filters: list[FilterSpec] = Field(default_factory=list)
+    filter_tree: dict | None = None
+    variable_ids: list[str] = Field(default_factory=list)
+    dependent_id: str | None = None
+    independent_ids: list[str] = Field(default_factory=list)
+    group_variable_id: str | None = None
+    numeric_variable_id: str | None = None
+    method: str = "pearson"
 
 
 class ProjectStatsRequest(BaseModel):

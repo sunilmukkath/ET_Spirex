@@ -3,6 +3,7 @@ import { BarChart3, ImageDown, Loader2, Palette, RefreshCw } from 'lucide-react'
 import {
   api,
   type BannerResult,
+  type FilterGroup,
   type FilterSpec,
   type ProfileResult,
   type SurveyVariable,
@@ -35,7 +36,9 @@ interface Props {
   selectedId: string | null
   onVariableChange: (id: string) => void
   filters: FilterSpec[]
+  filterTree: FilterGroup | null
   onFiltersChange: (filters: FilterSpec[]) => void
+  onFilterTreeChange: (tree: FilterGroup | null) => void
   schemaLoading: boolean
 }
 
@@ -56,7 +59,9 @@ export function ChartsPanel({
   selectedId,
   onVariableChange,
   filters,
+  filterTree,
   onFiltersChange,
+  onFilterTreeChange,
   schemaLoading,
 }: Props) {
   const chartRef = useRef<HTMLDivElement>(null)
@@ -78,6 +83,8 @@ export function ChartsPanel({
   const chartAbort = useRef<AbortController | null>(null)
   const filtersRef = useRef(filters)
   filtersRef.current = filters
+  const filterTreeRef = useRef(filterTree)
+  filterTreeRef.current = filterTree
 
   const valueVar = useMemo(
     () => variables.find((v) => v.id === valueVariableId) ?? null,
@@ -118,7 +125,7 @@ export function ChartsPanel({
 
   useEffect(() => {
     setFiltersStale(true)
-  }, [filters])
+  }, [filters, filterTree])
 
   const handleSlotChange = useCallback(
     (slot: ChartSlotId, id: string) => {
@@ -168,6 +175,7 @@ export function ChartsPanel({
       const baseQuery = {
         completionStatus,
         filters: filtersRef.current,
+        filterTree: filterTreeRef.current,
         chartType: apiChartType(chartType, valueVar.kind, {
           y: yVariableId || undefined,
           z: zVariableId || undefined,
@@ -442,7 +450,9 @@ export function ChartsPanel({
               completionStatus={completionStatus}
               variables={variables}
               filters={filters}
+              filterTree={filterTree}
               onChange={onFiltersChange}
+              onFilterTreeChange={onFilterTreeChange}
               compact
             />
           </div>

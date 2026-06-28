@@ -161,11 +161,27 @@ export interface FilterSpec {
   values: string[]
 }
 
+export interface FilterCondition {
+  type: 'condition'
+  variable_id: string
+  operator: 'eq' | 'ne' | 'in' | 'not_in'
+  values: string[]
+  negate?: boolean
+}
+
+export interface FilterGroup {
+  type: 'group'
+  logic: 'and' | 'or'
+  negate?: boolean
+  children: (FilterCondition | FilterGroup)[]
+}
+
 export interface BannerRequest {
   row_variable_id: string
   row_variable_ids?: string[]
   banner_variable_ids: string[]
   filters?: FilterSpec[]
+  filter_tree?: FilterGroup | null
   row_filters?: Record<string, FilterSpec[]>
   completion_status?: string
   show_counts?: boolean
@@ -308,6 +324,50 @@ export interface DataQualityResult {
   }
 }
 
+export interface AdvancedAnalysisResult {
+  error?: string
+  analysis_type?: string
+  base_n?: number
+  method?: string
+  pairwise_n?: number
+  variables?: { id: string; label: string }[]
+  matrix?: { variable_id: string; label: string; values: Record<string, number | null> }[]
+  p_values?: Record<string, Record<string, number | null>>
+  n?: number
+  dependent?: { id: string; label: string }
+  independents?: { id: string; label: string }[]
+  r_squared?: number
+  adj_r_squared?: number
+  rmse?: number
+  coefficients?: { name: string; variable_id?: string | null; estimate: number }[]
+  variable_a?: { id: string; label: string }
+  variable_b?: { id: string; label: string }
+  chi2?: number
+  df?: number
+  p_value?: number
+  cramers_v?: number
+  interpretation?: string
+  table?: { row_labels: string[]; col_labels: string[]; counts: number[][] }
+  numeric_variable?: { id: string; label: string }
+  group_variable?: { id: string; label: string }
+  group_a?: { label: string; n: number; mean: number }
+  group_b?: { label: string; n: number; mean: number }
+  t_statistic?: number
+  significant_95?: boolean
+  f_statistic?: number
+  groups?: { label: string; n: number; mean: number; std: number }[]
+  rows?: {
+    variable_id: string
+    label: string
+    n: number
+    mean: number
+    std: number
+    min: number
+    max: number
+    median: number
+  }[]
+}
+
 export interface ConnectionStatus {
   connected: boolean
   configured: boolean
@@ -438,6 +498,7 @@ export const api = {
     completionStatus = 'complete',
     filters: FilterSpec[] = [],
     signal?: AbortSignal,
+    filterTree?: FilterGroup | null,
   ) =>
     fetchJson<ProfileResult>(`/api/projects/${id}/analysis/profile`, {
       method: 'POST',
@@ -445,7 +506,8 @@ export const api = {
       body: JSON.stringify({
         variable_id: variableId,
         completion_status: completionStatus,
-        filters,
+        filters: filterTree ? [] : filters,
+        filter_tree: filterTree ?? null,
       }),
       signal,
     }),
@@ -455,6 +517,7 @@ export const api = {
       variableId: string
       completionStatus?: string
       filters?: FilterSpec[]
+      filterTree?: FilterGroup | null
       chartType?: string
       bins?: number
       bannerVariableId?: string
@@ -469,7 +532,8 @@ export const api = {
       body: JSON.stringify({
         variable_id: query.variableId,
         completion_status: query.completionStatus ?? 'complete',
-        filters: query.filters ?? [],
+        filters: query.filterTree ? [] : (query.filters ?? []),
+        filter_tree: query.filterTree ?? null,
         chart_type: query.chartType ?? 'auto',
         bins: query.bins ?? 10,
         banner_variable_id: query.bannerVariableId || null,
@@ -572,7 +636,30 @@ export const api = {
     fetchJson<BannerResult>(`/api/projects/${id}/analysis/banner`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify({
+        ...request,
+        filters: request.filter_tree ? [] : (request.filters ?? []),
+      }),
+    }),
+  runAdvancedAnalysis: (
+    id: number,
+    body: {
+      analysis_type: string
+      completion_status?: string
+      filters?: FilterSpec[]
+      filter_tree?: FilterGroup | null
+      variable_ids?: string[]
+      dependent_id?: string
+      independent_ids?: string[]
+      group_variable_id?: string
+      numeric_variable_id?: string
+      method?: string
+    },
+  ) =>
+    fetchJson<AdvancedAnalysisResult>(`/api/projects/${id}/analysis/advanced`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     }),
   exportBanner: async (id: number, request: BannerRequest, filename = 'crosstab.xlsx') => {
     const res = await fetch(`/api/projects/${id}/analysis/banner/export`, {

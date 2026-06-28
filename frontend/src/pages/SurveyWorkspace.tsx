@@ -9,6 +9,7 @@ import {
   Layers,
   Loader2,
   ShieldCheck,
+  Sigma,
   SlidersHorizontal,
   Table2,
 } from 'lucide-react'
@@ -17,6 +18,7 @@ import {
   type BannerResult,
   type CustomVariable,
   type DataQualityResult,
+  type FilterGroup,
   type FilterSpec,
   type ProfileResult,
   type ProjectDetail,
@@ -32,6 +34,7 @@ import { CrosstabsResults, ProfileResults } from '../components/analysis/Results
 import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
 import { StatusBadge } from '../components/StatusBadge'
 import { ErrorState, TableSkeleton } from '../components/States'
+import { filterPayload } from '../lib/filterTree'
 
 const DataPanel = lazy(() =>
   import('../components/analysis/DataPanel').then((m) => ({ default: m.DataPanel })),
@@ -42,6 +45,11 @@ const QualityPanel = lazy(() =>
 const ChartsPanel = lazy(() =>
   import('../components/analysis/ChartsPanel').then((m) => ({ default: m.ChartsPanel })),
 )
+const AdvancedAnalysisPanel = lazy(() =>
+  import('../components/analysis/AdvancedAnalysisPanel').then((m) => ({
+    default: m.AdvancedAnalysisPanel,
+  })),
+)
 
 function PanelLoader() {
   return (
@@ -51,7 +59,7 @@ function PanelLoader() {
   )
 }
 
-type Mode = 'explore' | 'charts' | 'crosstabs' | 'quality' | 'variables' | 'data'
+type Mode = 'explore' | 'charts' | 'crosstabs' | 'quality' | 'variables' | 'data' | 'multivariate'
 
 function parseMode(raw: string | null): Mode {
   if (raw === 'crosstabs' || raw === 'compare') return 'crosstabs'
@@ -59,6 +67,7 @@ function parseMode(raw: string | null): Mode {
   if (raw === 'quality') return 'quality'
   if (raw === 'variables') return 'variables'
   if (raw === 'data') return 'data'
+  if (raw === 'multivariate' || raw === 'advanced') return 'multivariate'
   return 'explore'
 }
 
@@ -93,6 +102,7 @@ export function SurveyWorkspace() {
   const [confidenceLevel, setConfidenceLevel] = useState(0.95)
   const [sigEnabled, setSigEnabled] = useState(true)
   const [filters, setFilters] = useState<FilterSpec[]>([])
+  const [filterTree, setFilterTree] = useState<FilterGroup | null>(null)
   const [tableFilters, setTableFilters] = useState<Record<string, FilterSpec[]>>({})
   const [refreshingTableId, setRefreshingTableId] = useState<string | null>(null)
   const [qualityResult, setQualityResult] = useState<DataQualityResult | null>(null)
@@ -146,6 +156,16 @@ export function SurveyWorkspace() {
     }, { replace: true })
   }
 
+  function handleFiltersChange(next: FilterSpec[]) {
+    setFilters(next)
+    if (next.length) setFilterTree(null)
+  }
+
+  function handleFilterTreeChange(tree: FilterGroup | null) {
+    setFilterTree(tree)
+    if (tree) setFilters([])
+  }
+
   function buildBannerRequest() {
     const rowIds = sideRowIds.length > 0 ? sideRowIds : selectedId ? [selectedId] : []
     if (rowIds.length === 0) return null
@@ -164,7 +184,7 @@ export function SurveyWorkspace() {
       show_significance: sigEnabled,
       confidence_level: confidenceLevel,
       metric,
-      filters,
+      ...filterPayload(filters, filterTree),
       row_filters,
     }
   }
@@ -271,14 +291,22 @@ export function SurveyWorkspace() {
   }, [primaryRowVar])
 
   // Auto-run profile when question selected in explore mode
-  const runProfile = useCallback(async (varId: string, activeFilters: FilterSpec[]) => {
+  const runProfile = useCallback(async (varId: string) => {
     profileAbort.current?.abort()
     const ctrl = new AbortController()
     profileAbort.current = ctrl
     setAnalyzing(true)
     setProfileResult(null)
+    const payload = filterPayload(filters, filterTree)
     try {
-      const result = await api.runProfile(surveyId, varId, completionStatus, activeFilters, ctrl.signal)
+      const result = await api.runProfile(
+        surveyId,
+        varId,
+        completionStatus,
+        payload.filters,
+        ctrl.signal,
+        payload.filter_tree,
+      )
       if (!ctrl.signal.aborted) setProfileResult(result)
     } catch (err) {
       if (!ctrl.signal.aborted) {
@@ -287,13 +315,13 @@ export function SurveyWorkspace() {
     } finally {
       if (!ctrl.signal.aborted) setAnalyzing(false)
     }
-  }, [surveyId, completionStatus])
+  }, [surveyId, completionStatus, filters, filterTree])
 
   useEffect(() => {
     if (mode !== 'explore' || !selectedId || schemaLoading) return
-    const t = setTimeout(() => runProfile(selectedId, filters), 300)
+    const t = setTimeout(() => runProfile(selectedId), 300)
     return () => clearTimeout(t)
-  }, [mode, selectedId, schemaLoading, filters, runProfile])
+  }, [mode, selectedId, schemaLoading, filters, filterTree, runProfile])
 
   useEffect(() => {
     if (mode !== 'quality' || !Number.isFinite(surveyId) || surveyId <= 0) return
@@ -514,6 +542,9 @@ export function SurveyWorkspace() {
           <ModeButton active={mode === 'crosstabs'} onClick={() => setMode('crosstabs')} icon={<Table2 size={15} />}>
             Crosstabs
           </ModeButton>
+          <ModeButton active={mode === 'multivariate'} onClick={() => setMode('multivariate')} icon={<Sigma size={15} />}>
+            Multivariate
+          </ModeButton>
           <ModeButton active={mode === 'quality'} onClick={() => setMode('quality')} icon={<ShieldCheck size={15} />}>
             Quality
           </ModeButton>
@@ -538,7 +569,7 @@ export function SurveyWorkspace() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-          {mode !== 'quality' && mode !== 'variables' && mode !== 'data' && mode !== 'charts' && (
+          {mode !== 'quality' && mode !== 'variables' && mode !== 'data' && mode !== 'charts' && mode !== 'multivariate' && (
             <QuestionNavigator
               variables={activeSchema?.variables ?? []}
               groups={activeSchema?.groups ?? []}
@@ -579,7 +610,9 @@ export function SurveyWorkspace() {
                 selectedId={selectedId}
                 onVariableChange={handleSelectQuestion}
                 filters={filters}
-                onFiltersChange={setFilters}
+                filterTree={filterTree}
+                onFilterTreeChange={handleFilterTreeChange}
+                onFiltersChange={handleFiltersChange}
                 schemaLoading={schemaLoading}
               />
             </Suspense>
@@ -596,7 +629,9 @@ export function SurveyWorkspace() {
               questionCount={activeSchema?.question_count ?? activeSchema?.variables.length ?? 0}
               customVarCount={customVariables.length}
               filters={filters}
-              onFiltersChange={setFilters}
+              filterTree={filterTree}
+              onFilterTreeChange={handleFilterTreeChange}
+              onFiltersChange={handleFiltersChange}
               analyzing={analyzing}
               profileResult={profileResult}
               schemaLoading={schemaLoading}
@@ -611,6 +646,20 @@ export function SurveyWorkspace() {
                 loading={qualityLoading}
                 error={qualityError}
                 onRefresh={refreshQuality}
+              />
+            </Suspense>
+          )}
+
+          {mode === 'multivariate' && (
+            <Suspense fallback={<PanelLoader />}>
+              <AdvancedAnalysisPanel
+                surveyId={surveyId}
+                completionStatus={completionStatus}
+                variables={activeSchema?.variables ?? []}
+                filters={filters}
+                filterTree={filterTree}
+                onFiltersChange={handleFiltersChange}
+                onFilterTreeChange={handleFilterTreeChange}
               />
             </Suspense>
           )}
@@ -654,7 +703,9 @@ export function SurveyWorkspace() {
               onClearBanners={clearBanners}
               onAddBanner={addBanner}
               filters={filters}
-              onFiltersChange={setFilters}
+              filterTree={filterTree}
+              onFilterTreeChange={handleFilterTreeChange}
+              onFiltersChange={handleFiltersChange}
               onRemoveBanner={(id) => setBannerIds((p) => p.filter((x) => x !== id))}
               onRemoveSideRow={(id) => setSideRowIds((p) => p.filter((x) => x !== id))}
               metric={metric}
@@ -723,7 +774,9 @@ function ExplorePanel({
   questionCount,
   customVarCount,
   filters,
+  filterTree,
   onFiltersChange,
+  onFilterTreeChange,
   analyzing,
   profileResult,
   schemaLoading,
@@ -738,7 +791,9 @@ function ExplorePanel({
   questionCount: number
   customVarCount: number
   filters: FilterSpec[]
+  filterTree: FilterGroup | null
   onFiltersChange: (filters: FilterSpec[]) => void
+  onFilterTreeChange: (tree: FilterGroup | null) => void
   analyzing: boolean
   profileResult: ProfileResult | null
   schemaLoading: boolean
@@ -796,7 +851,9 @@ function ExplorePanel({
             completionStatus={completionStatus}
             variables={variables}
             filters={filters}
+            filterTree={filterTree}
             onChange={onFiltersChange}
+            onFilterTreeChange={onFilterTreeChange}
             compact
           />
         </div>
@@ -824,7 +881,9 @@ function ExplorePanel({
           completionStatus={completionStatus}
           variables={variables}
           filters={filters}
+          filterTree={filterTree}
           onChange={onFiltersChange}
+          onFilterTreeChange={onFilterTreeChange}
           compact
         />
       </div>
@@ -871,7 +930,9 @@ function CrosstabsPanel({
   onRemoveBanner,
   onRemoveSideRow,
   filters,
+  filterTree,
   onFiltersChange,
+  onFilterTreeChange,
   metric,
   onMetricChange,
   availableMetrics,
@@ -913,7 +974,9 @@ function CrosstabsPanel({
   onRemoveBanner: (id: string) => void
   onRemoveSideRow: (id: string) => void
   filters: FilterSpec[]
+  filterTree: FilterGroup | null
   onFiltersChange: (filters: FilterSpec[]) => void
+  onFilterTreeChange: (tree: FilterGroup | null) => void
   metric: string
   onMetricChange: (m: string) => void
   availableMetrics: string[]
@@ -1066,14 +1129,16 @@ function CrosstabsPanel({
 
         <div className="mt-3">
           <FilterEditor
-          surveyId={surveyId}
-          completionStatus={completionStatus}
-          variables={variables}
-          filters={filters}
-          onChange={onFiltersChange}
-          compact
-          heading="Default filters"
-        />
+            surveyId={surveyId}
+            completionStatus={completionStatus}
+            variables={variables}
+            filters={filters}
+            filterTree={filterTree}
+            onChange={onFiltersChange}
+            onFilterTreeChange={onFilterTreeChange}
+            compact
+            heading="Default filters"
+          />
         </div>
 
         <p className="mt-2 text-xs text-slate-400">

@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Filter, Loader2, Plus, X } from 'lucide-react'
-import { api, type FilterSpec, type SurveyVariable } from '../../api/client'
+import { ChevronDown, Filter, Loader2, Pencil, X } from 'lucide-react'
+import type { FilterGroup, FilterSpec, SurveyVariable } from '../../api/client'
+import {
+  buildDraftTree,
+  collectFilterChips,
+  emptyCondition,
+  emptyGroup,
+  sanitizeFilterTree,
+  summarizeFilterTree,
+} from '../../lib/filterTree'
+import { GroupEditor, schemaFilterOptions } from './FilterRuleEditors'
 
 interface Props {
   surveyId: number
@@ -8,21 +17,13 @@ interface Props {
   variables: SurveyVariable[]
   filters: FilterSpec[]
   onChange: (filters: FilterSpec[]) => void
+  filterTree?: FilterGroup | null
+  onFilterTreeChange?: (tree: FilterGroup | null) => void
   compact?: boolean
   heading?: string
   applyLabel?: string
   onApply?: () => void
   applying?: boolean
-}
-
-function schemaFilterOptions(v: SurveyVariable): { code: string; label: string }[] {
-  if (v.answer_options?.length) {
-    return v.answer_options.map((o) => ({ code: o.code, label: o.label || o.code }))
-  }
-  if (v.subquestions?.length) {
-    return v.subquestions.map((sq) => ({ code: sq.code, label: sq.label || sq.code }))
-  }
-  return []
 }
 
 export function FilterEditor({
@@ -31,6 +32,8 @@ export function FilterEditor({
   variables,
   filters,
   onChange,
+  filterTree = null,
+  onFilterTreeChange,
   compact,
   heading = 'Filters',
   applyLabel,
@@ -38,104 +41,64 @@ export function FilterEditor({
   applying,
 }: Props) {
   const [open, setOpen] = useState(false)
-  const [draftVarId, setDraftVarId] = useState('')
-  const [draftValues, setDraftValues] = useState<string[]>([])
-  const [fetchedOptions, setFetchedOptions] = useState<{ code: string; label: string }[]>([])
-  const [optionsLoading, setOptionsLoading] = useState(false)
-  const [optionsError, setOptionsError] = useState<string | null>(null)
-
-  const filterableVars = useMemo(
-    () =>
-      variables.filter(
-        (v) => v.can_filter && ['single', 'multi', 'numeric'].includes(v.kind),
-      ),
-    [variables],
-  )
+  const [draft, setDraft] = useState<FilterGroup>(() => buildDraftTree(filterTree, filters))
 
   const varMap = useMemo(() => new Map(variables.map((v) => [v.id, v])), [variables])
-  const draftVar = draftVarId ? varMap.get(draftVarId) : null
 
   useEffect(() => {
-    if (!draftVarId || !draftVar) {
-      setFetchedOptions([])
-      setOptionsError(null)
-      return
+    if (open) {
+      setDraft(buildDraftTree(filterTree, filters))
     }
+  }, [open, filterTree, filters])
 
-    const fromSchema = schemaFilterOptions(draftVar)
-    if (fromSchema.length > 0) {
-      setFetchedOptions(fromSchema)
-      setOptionsError(null)
-      return
-    }
-
-    let cancelled = false
-    setOptionsLoading(true)
-    setOptionsError(null)
-    api
-      .getFilterOptions(surveyId, draftVarId, completionStatus)
-      .then((res) => {
-        if (cancelled) return
-        if (res.error && !res.options.length) {
-          setOptionsError(res.error)
-          setFetchedOptions([])
-        } else {
-          setFetchedOptions(
-            res.options.map((o) => ({ code: o.code, label: o.label || o.code })),
-          )
-          setOptionsError(null)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setOptionsError(err instanceof Error ? err.message : 'Could not load options')
-          setFetchedOptions([])
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setOptionsLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [surveyId, completionStatus, draftVarId, draftVar])
-
-  const draftOptions = fetchedOptions
-
-  function removeFilter(index: number) {
-    onChange(filters.filter((_, i) => i !== index))
+  const varLabel = (id: string) => {
+    const v = varMap.get(id)
+    return v ? (v.text || v.code).slice(0, 40) : id
   }
 
-  function addFilter() {
-    if (!draftVarId || draftValues.length === 0) return
-    const existing = filters.findIndex((f) => f.variable_id === draftVarId)
-    const next = [...filters]
-    if (existing >= 0) {
-      next[existing] = { variable_id: draftVarId, values: draftValues }
+  const valueLabel = (varId: string, code: string) => {
+    const v = varMap.get(varId)
+    if (!v) return code
+    const opts = schemaFilterOptions(v)
+    return opts.find((o) => o.code === code)?.label || code
+  }
+
+  const chips = useMemo(
+    () => collectFilterChips(filters, filterTree, varLabel, valueLabel),
+    [filters, filterTree, variables],
+  )
+
+  const hasActiveFilters = chips.length > 0
+  const preview =
+    filterTree && filterTree.children.length
+      ? summarizeFilterTree(filterTree, varLabel, valueLabel)
+      : chips.map((c) => c.text).join(' AND ')
+
+  function handleApply() {
+    if (onFilterTreeChange) {
+      const clean = sanitizeFilterTree(draft)
+      onFilterTreeChange(clean)
+      onChange([])
     } else {
-      next.push({ variable_id: draftVarId, values: draftValues })
+      onChange([])
     }
-    onChange(next)
-    setDraftVarId('')
-    setDraftValues([])
+    setOpen(false)
+    onApply?.()
+  }
+
+  function handleClear() {
+    onChange([])
+    onFilterTreeChange?.(null)
+    setDraft(emptyGroup())
     setOpen(false)
   }
 
-  function toggleDraftValue(code: string) {
-    setDraftValues((prev) =>
-      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code],
-    )
-  }
-
-  function labelForFilter(f: FilterSpec) {
-    const v = varMap.get(f.variable_id)
-    if (!v) return f.variable_id
-    const opts = schemaFilterOptions(v)
-    const labels = f.values.map(
-      (code) => opts.find((o) => o.code === code)?.label || code,
-    )
-    return `${v.text || v.code}: ${labels.join(', ')}`
+  function openPanel() {
+    if (!onFilterTreeChange) return
+    if (!draft.children.length) {
+      setDraft({ ...emptyGroup(), children: [emptyCondition()] })
+    }
+    setOpen(true)
   }
 
   return (
@@ -146,43 +109,46 @@ export function FilterEditor({
           {heading}
         </span>
 
-        {filters.map((f, i) => (
+        {!hasActiveFilters && !open && (
+          <span className="text-xs text-slate-400">No filters — showing all responses</span>
+        )}
+
+        {chips.map((chip) => (
           <span
-            key={`${f.variable_id}-${i}`}
-            className="inline-flex max-w-xs items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-900 ring-1 ring-amber-200"
+            key={chip.id}
+            className={`inline-flex max-w-md items-center gap-1 rounded-full px-2.5 py-1 text-xs ring-1 ${
+              chip.tone === 'advanced'
+                ? 'bg-violet-50 text-violet-900 ring-violet-200'
+                : 'bg-amber-50 text-amber-900 ring-amber-200'
+            }`}
+            title={chip.text}
           >
-            <span className="truncate">{labelForFilter(f)}</span>
-            <button
-              type="button"
-              onClick={() => removeFilter(i)}
-              className="shrink-0 rounded-full hover:bg-amber-100"
-              aria-label="Remove filter"
-            >
-              <X size={12} />
-            </button>
+            <span className="truncate">{chip.text}</span>
           </span>
         ))}
 
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="inline-flex items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-[var(--et-teal)] hover:bg-[var(--et-teal-light)] hover:text-[var(--et-teal-dark)]"
+          onClick={() => (open ? setOpen(false) : openPanel())}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-[var(--et-teal)] hover:bg-[var(--et-teal-light)] hover:text-[var(--et-teal-dark)]"
         >
-          <Plus size={14} />
-          Add filter
+          {hasActiveFilters ? <Pencil size={13} /> : <Filter size={13} />}
+          {hasActiveFilters ? 'Edit filters' : 'Add filters'}
+          <ChevronDown size={13} className={`transition ${open ? 'rotate-180' : ''}`} />
         </button>
 
-        {filters.length > 0 && (
+        {hasActiveFilters && (
           <button
             type="button"
-            onClick={() => onChange([])}
-            className="text-xs text-slate-400 hover:text-slate-600"
+            onClick={handleClear}
+            className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
           >
+            <X size={12} />
             Clear all
           </button>
         )}
 
-        {onApply && (
+        {onApply && !open && (
           <button
             type="button"
             onClick={onApply}
@@ -195,102 +161,62 @@ export function FilterEditor({
         )}
       </div>
 
-      {open && (
-        <div className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-          {filterableVars.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              No filterable questions loaded yet. Wait for the survey to finish loading.
-            </p>
-          ) : (
-            <>
-              <label className="block text-xs">
-                <span className="font-medium text-slate-600">Filter by question</span>
-                <select
-                  value={draftVarId}
-                  onChange={(e) => {
-                    setDraftVarId(e.target.value)
-                    setDraftValues([])
-                  }}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
-                >
-                  <option value="">Choose a question…</option>
-                  {filterableVars.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.code} — {(v.text || v.code).slice(0, 80)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+      {open && onFilterTreeChange && (
+        <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-lg bg-[var(--et-teal-light)]/50 px-3 py-2 text-xs text-[var(--et-teal-dark)]">
+            <strong>Tip:</strong> Pick a question, choose <em>equals</em> or <em>does not equal</em>,
+            then select the answer. Use <em>All rules match</em> when every rule must pass, or{' '}
+            <em>Any rule matches</em> for OR logic.
+          </div>
 
-              {draftVar && optionsLoading && (
-                <div className="flex items-center gap-2 text-sm text-slate-500">
-                  <Loader2 className="animate-spin" size={16} />
-                  Loading answer options…
-                </div>
-              )}
+          <GroupEditor
+            group={draft}
+            onChange={setDraft}
+            variables={variables}
+            surveyId={surveyId}
+            completionStatus={completionStatus}
+          />
 
-              {draftVar && optionsError && !optionsLoading && (
-                <p className="text-sm text-amber-700">{optionsError}</p>
-              )}
-
-              {draftVar && !optionsLoading && draftOptions.length > 0 && (
-                <div>
-                  <p className="mb-2 text-xs font-medium text-slate-600">
-                    Include responses where answer is:
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {draftOptions.map((opt) => {
-                      const checked = draftValues.includes(opt.code)
-                      return (
-                        <label
-                          key={opt.code}
-                          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ring-1 transition ${
-                            checked
-                              ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)] ring-[var(--et-teal)]/30'
-                              : 'bg-white text-slate-700 ring-slate-200 hover:ring-slate-300'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            className="sr-only"
-                            checked={checked}
-                            onChange={() => toggleDraftValue(opt.code)}
-                          />
-                          {opt.label}
-                        </label>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {draftVar && !optionsLoading && draftOptions.length === 0 && !optionsError && (
-                <p className="text-sm text-slate-500">No answer values found for this question.</p>
-              )}
-            </>
+          {preview && (
+            <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Preview
+              </p>
+              <p className="mt-0.5 text-sm text-slate-700">{preview}</p>
+            </div>
           )}
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
             <button
               type="button"
-              onClick={() => {
-                setOpen(false)
-                setDraftVarId('')
-                setDraftValues([])
-              }}
-              className="rounded-lg px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-200"
+              onClick={handleClear}
+              className="text-xs text-slate-500 hover:text-slate-700"
             >
-              Cancel
+              Clear all
             </button>
-            <button
-              type="button"
-              disabled={!draftVarId || draftValues.length === 0}
-              onClick={addFilter}
-              className="rounded-lg bg-[var(--et-teal)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
-            >
-              Apply filter
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-lg px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApply}
+                className="rounded-lg bg-[var(--et-teal)] px-4 py-1.5 text-xs font-medium text-white hover:brightness-110"
+              >
+                Apply filters
+              </button>
+            </div>
           </div>
+        </div>
+      )}
+
+      {open && !onFilterTreeChange && (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Advanced filter rules are not available in this view.
         </div>
       )}
     </div>

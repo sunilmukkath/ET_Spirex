@@ -27,11 +27,13 @@ def run_question_profile(
     *,
     completion_status: str = "complete",
     filters: list[dict[str, Any]] | None = None,
+    filter_tree: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     schema, df_raw = load_filtered_context(
         survey_id,
         completion_status=completion_status,
-        filters=filters,
+        filters=filters if not filter_tree else None,
+        filter_tree=filter_tree,
     )
     variable = get_variable(schema, variable_id)
     if not variable:
@@ -66,6 +68,7 @@ def run_banner_table(
     banner_variable_ids: list[str],
     row_variable_ids: list[str] | None = None,
     filters: list[dict[str, Any]] | None = None,
+    filter_tree: dict[str, Any] | None = None,
     row_filters: dict[str, list[dict[str, Any]]] | None = None,
     completion_status: str = "complete",
     show_counts: bool = True,
@@ -81,6 +84,8 @@ def run_banner_table(
     def _row_filters(rid: str) -> list[dict[str, Any]]:
         if row_filters and rid in row_filters:
             return row_filters[rid]
+        if filter_tree:
+            return []
         return filters or []
 
     if len(row_ids) <= 1:
@@ -90,6 +95,7 @@ def run_banner_table(
             row_variable_id=rid,
             banner_variable_ids=banner_variable_ids,
             filters=_row_filters(rid),
+            filter_tree=filter_tree,
             completion_status=completion_status,
             show_counts=show_counts,
             show_col_pct=show_col_pct,
@@ -99,7 +105,15 @@ def run_banner_table(
             metric=metric,
         )
 
-    schema, df_raw = load_analysis_context(survey_id, completion_status=completion_status)
+    if filter_tree or filters:
+        schema, df_raw = load_filtered_context(
+            survey_id,
+            completion_status=completion_status,
+            filters=filters if not filter_tree else None,
+            filter_tree=filter_tree,
+        )
+    else:
+        schema, df_raw = load_analysis_context(survey_id, completion_status=completion_status)
     tables = []
     for rid in row_ids:
         table = _build_banner_table(
@@ -107,6 +121,7 @@ def run_banner_table(
             row_variable_id=rid,
             banner_variable_ids=banner_variable_ids,
             filters=_row_filters(rid),
+            filter_tree=None,
             completion_status=completion_status,
             show_counts=show_counts,
             show_col_pct=show_col_pct,
@@ -140,6 +155,7 @@ def _build_banner_table(
     row_variable_id: str,
     banner_variable_ids: list[str],
     filters: list[dict[str, Any]] | None = None,
+    filter_tree: dict[str, Any] | None = None,
     completion_status: str = "complete",
     show_counts: bool = True,
     show_col_pct: bool = True,
@@ -154,7 +170,8 @@ def _build_banner_table(
         schema, df = load_filtered_context(
             survey_id,
             completion_status=completion_status,
-            filters=filters,
+            filters=filters if not filter_tree else None,
+            filter_tree=filter_tree,
         )
     else:
         df = _apply_filters(df_raw, schema, filters or [])
@@ -1029,6 +1046,7 @@ def run_chart_data(
     *,
     completion_status: str = "complete",
     filters: list[dict[str, Any]] | None = None,
+    filter_tree: dict[str, Any] | None = None,
     chart_type: str = "auto",
     bins: int = 10,
     banner_variable_id: str | None = None,
@@ -1043,7 +1061,8 @@ def run_chart_data(
             y_variable_id=y_variable_id,
             z_variable_id=z_variable_id if chart_type == "bubble" else None,
             completion_status=completion_status,
-            filters=filters,
+            filters=filters if not filter_tree else None,
+            filter_tree=filter_tree,
             chart_type=chart_type,
         )
 
@@ -1053,7 +1072,8 @@ def run_chart_data(
             row_variable_id=variable_id,
             row_variable_ids=[variable_id],
             banner_variable_ids=[banner_variable_id],
-            filters=filters,
+            filters=filters if not filter_tree else None,
+            filter_tree=filter_tree,
             completion_status=completion_status,
             show_significance=False,
             metric="auto",
@@ -1068,7 +1088,8 @@ def run_chart_data(
             survey_id,
             variable_id,
             completion_status=completion_status,
-            filters=filters,
+            filters=filters if not filter_tree else None,
+            filter_tree=filter_tree,
             bins=bins,
         )
 
@@ -1076,7 +1097,8 @@ def run_chart_data(
         survey_id,
         variable_id,
         completion_status=completion_status,
-        filters=filters,
+        filters=filters if not filter_tree else None,
+        filter_tree=filter_tree,
     )
     if profile.get("error"):
         return profile
@@ -1090,12 +1112,14 @@ def _numeric_histogram(
     *,
     completion_status: str = "complete",
     filters: list[dict[str, Any]] | None = None,
+    filter_tree: dict[str, Any] | None = None,
     bins: int = 10,
 ) -> dict[str, Any]:
     schema, df = load_filtered_context(
         survey_id,
         completion_status=completion_status,
         filters=filters,
+        filter_tree=filter_tree,
     )
     variable = get_variable(schema, variable_id)
     if not variable:
@@ -1197,12 +1221,14 @@ def _scatter_chart_data(
     z_variable_id: str | None = None,
     completion_status: str = "complete",
     filters: list[dict[str, Any]] | None = None,
+    filter_tree: dict[str, Any] | None = None,
     chart_type: str = "scatter_xy",
 ) -> dict[str, Any]:
     schema, df = load_filtered_context(
         survey_id,
         completion_status=completion_status,
         filters=filters,
+        filter_tree=filter_tree,
     )
     x_var = get_variable(schema, x_variable_id)
     y_var = get_variable(schema, y_variable_id)
