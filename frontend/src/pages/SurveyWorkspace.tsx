@@ -359,10 +359,23 @@ export function SurveyWorkspace() {
 
   function addAllSideRows() {
     const ids = (activeSchema?.variables ?? [])
-      .filter((v) => v.can_banner && !bannerIdSet.has(v.id))
+      .filter((v) => v.can_banner)
       .map((v) => v.id)
     setSideRowIds(ids)
     if (ids.length > 0) setSelectedId(ids[0])
+    setBannerResult(null)
+  }
+
+  function addAllBanners() {
+    const ids = (activeSchema?.variables ?? [])
+      .filter((v) => v.can_banner)
+      .map((v) => v.id)
+    setBannerIds(ids)
+    setBannerResult(null)
+  }
+
+  function copySideRowsToBanners() {
+    setBannerIds((prev) => [...new Set([...prev, ...sideRowIds])])
     setBannerResult(null)
   }
 
@@ -543,6 +556,8 @@ export function SurveyWorkspace() {
               bannerIds={bannerIds}
               onAddSideRow={addSideRow}
               onAddAllSideRows={addAllSideRows}
+              onAddAllBanners={addAllBanners}
+              onCopySideRowsToBanners={copySideRowsToBanners}
               onClearSideRows={clearSideRows}
               onClearBanners={clearBanners}
               onAddBanner={addBanner}
@@ -719,6 +734,8 @@ function CrosstabsPanel({
   bannerIds,
   onAddSideRow,
   onAddAllSideRows,
+  onAddAllBanners,
+  onCopySideRowsToBanners,
   onClearSideRows,
   onClearBanners,
   onAddBanner,
@@ -755,6 +772,8 @@ function CrosstabsPanel({
   bannerIds: string[]
   onAddSideRow: (id: string) => void
   onAddAllSideRows: () => void
+  onAddAllBanners: () => void
+  onCopySideRowsToBanners: () => void
   onClearSideRows: () => void
   onClearBanners: () => void
   onAddBanner: (id: string) => void
@@ -800,7 +819,6 @@ function CrosstabsPanel({
               <BannerPicker
                 variables={variables}
                 selectedIds={sideRowIds}
-                excludeIds={bannerIds}
                 onAdd={onAddSideRow}
                 onRemove={onRemoveSideRow}
                 onAddAll={onAddAllSideRows}
@@ -825,9 +843,16 @@ function CrosstabsPanel({
               <BannerPicker
                 variables={variables}
                 selectedIds={bannerIds}
-                excludeIds={sideRowIds}
                 onAdd={onAddBanner}
                 onRemove={onRemoveBanner}
+                onAddAll={onAddAllBanners}
+                onAddSideRowsAsBanners={onCopySideRowsToBanners}
+                sideRowCount={sideRowIds.length}
+                label="Add banner column"
+                pickerTitle="Banner columns"
+                emptyMessage="No banner questions available"
+                variant="banner"
+                showAddAll
               />
             </div>
           </div>
@@ -914,7 +939,7 @@ function CrosstabsPanel({
         </div>
 
         <p className="mt-3 text-xs text-slate-400">
-          Use <strong>Add side row</strong> or <strong>Add banner column</strong> above, or click questions in the sidebar · <strong>+</strong> = banner · <strong>S</strong> = side row.
+          Use <strong>Add side row</strong> or <strong>Add banner column</strong> above, or click questions in the sidebar · <strong>+</strong> = banner · <strong>S</strong> = side row · a question can be both row and banner.
         </p>
       </div>
 

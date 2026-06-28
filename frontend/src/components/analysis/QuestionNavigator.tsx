@@ -144,7 +144,7 @@ export const QuestionNavigator = memo(function QuestionNavigator({
                     const isBanner = compareSet.has(v.id)
                     const isSideRow = sideRowSet.has(v.id)
                     const isPrimarySideRow = compareMode && primarySideRowId === v.id
-                    const canAddBanner = compareMode && onCompareToggle && !sideRowSet.has(v.id) && v.can_banner
+                    const canAddBanner = compareMode && onCompareToggle && v.can_banner
 
                     return (
                       <li key={v.id}>
@@ -181,7 +181,7 @@ export const QuestionNavigator = memo(function QuestionNavigator({
                               {v.text || v.code}
                             </p>
                           </button>
-                          {compareMode && onSideRowToggle && !compareSet.has(v.id) && v.can_banner && (
+                          {compareMode && onSideRowToggle && v.can_banner && (
                             <button
                               type="button"
                               title={isSideRow ? 'Remove side row' : 'Add as side row'}

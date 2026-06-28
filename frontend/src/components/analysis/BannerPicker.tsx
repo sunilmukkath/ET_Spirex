@@ -11,6 +11,8 @@ interface Props {
   onAdd: (id: string) => void
   onRemove?: (id: string) => void
   onAddAll?: () => void
+  onAddSideRowsAsBanners?: () => void
+  sideRowCount?: number
   label?: string
   pickerTitle?: string
   emptyMessage?: string
@@ -52,6 +54,8 @@ export function BannerPicker({
   onAdd,
   onRemove,
   onAddAll,
+  onAddSideRowsAsBanners,
+  sideRowCount = 0,
   label = 'Add banner column',
   pickerTitle,
   emptyMessage = 'No questions available',
@@ -125,6 +129,19 @@ export function BannerPicker({
                 className="w-full rounded-lg border border-slate-200 py-2 pl-8 pr-3 text-sm outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
               />
             </div>
+            {variant === 'banner' && onAddSideRowsAsBanners && sideRowCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  onAddSideRowsAsBanners()
+                  setSearch('')
+                }}
+                className={`mt-2 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${styles.addAll}`}
+              >
+                <Layers size={14} />
+                Add side rows as banners ({sideRowCount})
+              </button>
+            )}
             {showAddAll && onAddAll && addAllCount > 0 && (
               <button
                 type="button"
