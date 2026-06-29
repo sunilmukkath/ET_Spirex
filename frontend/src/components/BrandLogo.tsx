@@ -15,7 +15,7 @@ export function BrandLogo({ size = 'md', showTagline = true, variant = 'dark' }:
         src="/scout-mark.png"
         alt=""
         aria-hidden
-        className={`${markSize} shrink-0 rounded-lg object-contain`}
+        className={`${markSize} shrink-0 object-contain`}
       />
       <div className="min-w-0">
         <div className="flex items-baseline gap-0.5">
