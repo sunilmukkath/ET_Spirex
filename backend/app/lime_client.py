@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import io
+import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import lru_cache
-from typing import Any
+from typing import Any, TypeVar
 
 import pandas as pd
 from citric import Client
+from citric.exceptions import LimeSurveyApiError
 
 from app.config import settings
 from app.services.survey_text import clean_survey_text
+
+T = TypeVar("T")
+
+_lime_client: Client | None = None
+_lime_client_lock = threading.Lock()
 
 
 class LimeSurveyError(Exception):
@@ -21,21 +28,57 @@ class LimeSurveyNotConfiguredError(LimeSurveyError):
     pass
 
 
-@lru_cache(maxsize=1)
-def get_client() -> Client:
+def is_stale_session_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        "invalid session" in text
+        or "session key" in text
+        or "session expired" in text
+        or (isinstance(exc, LimeSurveyApiError) and "session" in text)
+    )
+
+
+def invalidate_lime_client() -> None:
+    global _lime_client
+    with _lime_client_lock:
+        _lime_client = None
+
+
+def get_client(*, force_new: bool = False) -> Client:
+    global _lime_client
     if not settings.is_configured:
         raise LimeSurveyNotConfiguredError(
             "LimeSurvey credentials are not configured. Copy .env.example to .env and fill in your details."
         )
-    return Client(
-        settings.limesurvey_url,
-        settings.limesurvey_username,
-        settings.limesurvey_password,
-    )
+    with _lime_client_lock:
+        if force_new or _lime_client is None:
+            _lime_client = Client(
+                settings.limesurvey_url,
+                settings.limesurvey_username,
+                settings.limesurvey_password,
+            )
+        return _lime_client
+
+
+def execute_lime(operation: Callable[[Client], T]) -> T:
+    """Run a LimeSurvey RPC call, re-authenticating once if the session key expired."""
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            client = get_client(force_new=attempt > 0)
+            return operation(client)
+        except Exception as exc:
+            last_error = exc
+            if attempt == 0 and is_stale_session_error(exc):
+                invalidate_lime_client()
+                continue
+            raise
+    assert last_error is not None
+    raise last_error
 
 
 def clear_client_cache() -> None:
-    get_client.cache_clear()
+    invalidate_lime_client()
     _survey_list_cache.clear()
     _projects_cache.clear()
     _stats_cache.clear()
@@ -61,9 +104,11 @@ def _survey_list_index() -> dict[int, dict[str, Any]]:
         if now - cached_at < _SURVEY_LIST_TTL:
             return index
 
-    client = get_client()
-    surveys = client.list_surveys(username)
-    index = {int(s["sid"]): s for s in surveys}
+    def load_surveys(client: Client) -> dict[int, dict[str, Any]]:
+        surveys = client.list_surveys(username)
+        return {int(s["sid"]): s for s in surveys}
+
+    index = execute_lime(load_surveys)
     _survey_list_cache[cache_key] = (now, index)
     return index
 
@@ -105,27 +150,24 @@ def _fetch_project_meta(survey_id: int) -> dict[str, Any]:
     if cached and time.time() - cached[0] < _PROJECTS_TTL:
         return cached[1]
 
-    client = Client(
-        settings.limesurvey_url,
-        settings.limesurvey_username,
-        settings.limesurvey_password,
-    )
-    summary = client.get_summary(survey_id) or {}
-    datecreated = None
-    try:
-        props = client.get_survey_properties(
-            survey_id, properties=["datecreated"]
-        )
-        datecreated = props.get("datecreated") or None
-    except Exception:
-        pass
+    def load_meta(active_client: Client) -> dict[str, Any]:
+        summary = active_client.get_summary(survey_id) or {}
+        datecreated = None
+        try:
+            props = active_client.get_survey_properties(
+                survey_id, properties=["datecreated"]
+            )
+            datecreated = props.get("datecreated") or None
+        except Exception:
+            pass
+        return {
+            "completed": int(summary.get("completed_responses") or 0),
+            "incomplete": int(summary.get("incomplete_responses") or 0),
+            "total": int(summary.get("count_total") or 0),
+            "datecreated": datecreated,
+        }
 
-    meta = {
-        "completed": int(summary.get("completed_responses") or 0),
-        "incomplete": int(summary.get("incomplete_responses") or 0),
-        "total": int(summary.get("count_total") or 0),
-        "datecreated": datecreated,
-    }
+    meta = execute_lime(load_meta)
     _stats_cache[survey_id] = (time.time(), meta)
     return meta
 
@@ -188,34 +230,36 @@ def list_projects(*, include_stats: bool = False) -> list[dict[str, Any]]:
         if now - cached_at < _PROJECTS_TTL:
             return cached
 
-    client = get_client()
-    surveys = client.list_surveys(username)
+    def load_projects(client: Client) -> list[dict[str, Any]]:
+        surveys = client.list_surveys(username)
+        projects: list[dict[str, Any]] = []
+        for survey in surveys:
+            sid = int(survey["sid"])
+            projects.append(
+                {
+                    "id": sid,
+                    "title": survey.get("surveyls_title", "Untitled"),
+                    "language": survey.get("language", ""),
+                    "owner": survey.get("owner_id", ""),
+                    "status": _survey_status(
+                        survey.get("active"),
+                        survey.get("expires"),
+                    ),
+                    "active": survey.get("active") == "Y",
+                    "start_date": survey.get("startdate") or None,
+                    "expire_date": survey.get("expires") or None,
+                    "created_date": survey.get("datecreated") or None,
+                    "responses": {
+                        "completed": 0,
+                        "incomplete": 0,
+                        "total": 0,
+                        "loaded": False,
+                    },
+                }
+            )
+        return projects
 
-    projects: list[dict[str, Any]] = []
-    for survey in surveys:
-        sid = int(survey["sid"])
-        projects.append(
-            {
-                "id": sid,
-                "title": survey.get("surveyls_title", "Untitled"),
-                "language": survey.get("language", ""),
-                "owner": survey.get("owner_id", ""),
-                "status": _survey_status(
-                    survey.get("active"),
-                    survey.get("expires"),
-                ),
-                "active": survey.get("active") == "Y",
-                "start_date": survey.get("startdate") or None,
-                "expire_date": survey.get("expires") or None,
-                "created_date": survey.get("datecreated") or None,
-                "responses": {
-                    "completed": 0,
-                    "incomplete": 0,
-                    "total": 0,
-                    "loaded": False,
-                },
-            }
-        )
+    projects = execute_lime(load_projects)
 
     if include_stats:
         _enrich_projects_parallel(projects)
@@ -233,58 +277,62 @@ def list_projects(*, include_stats: bool = False) -> list[dict[str, Any]]:
 
 
 def get_project_detail(survey_id: int) -> dict[str, Any]:
-    client = get_client()
     listing = _survey_list_index().get(survey_id, {})
-    props = client.get_survey_properties(
-        survey_id,
-        properties=["active", "expires", "startdate", "language"],
-    )
-    summary = client.get_summary(survey_id) or {}
 
-    active = props.get("active") or listing.get("active")
-    expires = props.get("expires") if props.get("expires") is not None else listing.get("expires")
-    startdate = props.get("startdate") or listing.get("startdate")
+    def load_detail(client: Client) -> dict[str, Any]:
+        props = client.get_survey_properties(
+            survey_id,
+            properties=["active", "expires", "startdate", "language"],
+        )
+        summary = client.get_summary(survey_id) or {}
 
-    return {
-        "id": survey_id,
-        "title": _survey_title(survey_id, props),
-        "description": listing.get("surveyls_description") or "",
-        "status": _survey_status(active, expires),
-        "active": active == "Y",
-        "start_date": startdate or None,
-        "expire_date": expires or None,
-        "language": props.get("language") or listing.get("language") or "",
-        "responses": {
-            "completed": int(summary.get("completed_responses") or 0),
-            "incomplete": int(summary.get("incomplete_responses") or 0),
-            "total": int(summary.get("count_total") or 0),
-            "loaded": True,
-        },
-        "summary": summary,
-    }
+        active = props.get("active") or listing.get("active")
+        expires = props.get("expires") if props.get("expires") is not None else listing.get("expires")
+        startdate = props.get("startdate") or listing.get("startdate")
+
+        return {
+            "id": survey_id,
+            "title": _survey_title(survey_id, props),
+            "description": listing.get("surveyls_description") or "",
+            "status": _survey_status(active, expires),
+            "active": active == "Y",
+            "start_date": startdate or None,
+            "expire_date": expires or None,
+            "language": props.get("language") or listing.get("language") or "",
+            "responses": {
+                "completed": int(summary.get("completed_responses") or 0),
+                "incomplete": int(summary.get("incomplete_responses") or 0),
+                "total": int(summary.get("count_total") or 0),
+                "loaded": True,
+            },
+            "summary": summary,
+        }
+
+    return execute_lime(load_detail)
 
 
 def get_survey_questions(survey_id: int) -> list[dict[str, Any]]:
-    client = get_client()
-    groups = client.list_groups(survey_id)
-    questions: list[dict[str, Any]] = []
+    def load_questions(client: Client) -> list[dict[str, Any]]:
+        groups = client.list_groups(survey_id)
+        questions: list[dict[str, Any]] = []
 
-    for group in groups:
-        group_id = int(group["gid"])
-        group_title = group.get("group_name", "")
-        for q in client.list_questions(survey_id, group_id):
-            questions.append(
-                {
-                    "id": q.get("qid"),
-                    "code": q.get("title", ""),
-                    "text": clean_survey_text(str(q.get("question", "") or "")),
-                    "type": q.get("type", ""),
-                    "group_id": group_id,
-                    "group_title": group_title,
-                }
-            )
+        for group in groups:
+            group_id = int(group["gid"])
+            group_title = group.get("group_name", "")
+            for q in client.list_questions(survey_id, group_id):
+                questions.append(
+                    {
+                        "id": q.get("qid"),
+                        "code": q.get("title", ""),
+                        "text": clean_survey_text(str(q.get("question", "") or "")),
+                        "type": q.get("type", ""),
+                        "group_id": group_id,
+                        "group_title": group_title,
+                    }
+                )
+        return questions
 
-    return questions
+    return execute_lime(load_questions)
 
 
 def export_responses_dataframe(
@@ -295,16 +343,18 @@ def export_responses_dataframe(
 ) -> pd.DataFrame:
     from app.services.qc_filter import normalize_export_status
 
-    client = get_client()
-    raw = client.export_responses(
-        survey_id,
-        file_format="csv",
-        completion_status=normalize_export_status(completion_status),
-        fields=fields,
-    )
-    df = pd.read_csv(io.BytesIO(raw), delimiter=";", low_memory=False)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+    def load_export(client: Client) -> pd.DataFrame:
+        raw = client.export_responses(
+            survey_id,
+            file_format="csv",
+            completion_status=normalize_export_status(completion_status),
+            fields=fields,
+        )
+        df = pd.read_csv(io.BytesIO(raw), delimiter=";", low_memory=False)
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
+
+    return execute_lime(load_export)
 
 
 def get_connection_status() -> dict[str, Any]:
@@ -316,17 +366,19 @@ def get_connection_status() -> dict[str, Any]:
         }
 
     try:
-        client = get_client()
-        version = client.get_server_version()
-        username = settings.limesurvey_filter_user or settings.limesurvey_username
-        survey_count = len(client.list_surveys(username))
-        return {
-            "connected": True,
-            "configured": True,
-            "version": version,
-            "survey_count": survey_count,
-            "url": settings.limesurvey_url,
-        }
+        def check_connection(client: Client) -> dict[str, Any]:
+            version = client.get_server_version()
+            username = settings.limesurvey_filter_user or settings.limesurvey_username
+            survey_count = len(client.list_surveys(username))
+            return {
+                "connected": True,
+                "configured": True,
+                "version": version,
+                "survey_count": survey_count,
+                "url": settings.limesurvey_url,
+            }
+
+        return execute_lime(check_connection)
     except Exception as exc:
         return {
             "connected": False,

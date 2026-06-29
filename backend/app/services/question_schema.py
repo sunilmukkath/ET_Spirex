@@ -6,7 +6,7 @@ from typing import Any
 
 from app.config import settings
 
-from app.lime_client import get_client
+from app.lime_client import execute_lime
 from app.services.answer_labels import builtin_scale_options
 from app.services.location_detect import apply_location_kind
 from app.services.question_types import (
@@ -125,19 +125,24 @@ def _resolve_variable_columns(
 
 
 def _fetch_question_props(qid: int) -> dict[str, Any]:
-    client = get_client()
-    return dict(
-        client.get_question_properties(
-            qid,
-            settings=["answeroptions", "available_answers", "subquestions", "type", "title"],
+    def load_props(client) -> dict[str, Any]:
+        return dict(
+            client.get_question_properties(
+                qid,
+                settings=["answeroptions", "available_answers", "subquestions", "type", "title"],
+            )
         )
-    )
+
+    return execute_lime(load_props)
 
 
 def _response_count(survey_id: int) -> int:
     try:
-        summary = get_client().get_summary(survey_id) or {}
-        return int(summary.get("count_total") or 0)
+        def load_count(client) -> int:
+            summary = client.get_summary(survey_id) or {}
+            return int(summary.get("count_total") or 0)
+
+        return execute_lime(load_count)
     except Exception:
         return 0
 
@@ -209,98 +214,99 @@ def build_survey_schema(
                 light=light,
             )
 
-    client = get_client()
-    groups = client.list_groups(survey_id)
-    groups_sorted = sorted(groups, key=lambda g: int(g.get("group_order") or 0))
-    response_count = _response_count_for_status(survey_id, completion_status)
+    def build_from_lime(client) -> dict[str, Any]:
+        groups = client.list_groups(survey_id)
+        groups_sorted = sorted(groups, key=lambda g: int(g.get("group_order") or 0))
+        response_count = _response_count_for_status(survey_id, completion_status)
 
-    variables: list[SurveyVariable] = []
-    group_summaries: list[dict[str, Any]] = []
-    enrich_queue: list[tuple[SurveyVariable, int]] = []
+        variables: list[SurveyVariable] = []
+        group_summaries: list[dict[str, Any]] = []
+        enrich_queue: list[tuple[SurveyVariable, int]] = []
 
-    for group in groups_sorted:
-        gid = int(group["gid"])
-        group_title = _strip_html(str(group.get("group_name", "")))
-        group_order = int(group.get("group_order") or 0)
-        questions = client.list_questions(survey_id, gid)
-        questions_sorted = sorted(questions, key=lambda q: int(q.get("question_order") or 0))
-        group_vars: list[str] = []
+        for group in groups_sorted:
+            gid = int(group["gid"])
+            group_title = _strip_html(str(group.get("group_name", "")))
+            group_order = int(group.get("group_order") or 0)
+            questions = client.list_questions(survey_id, gid)
+            questions_sorted = sorted(questions, key=lambda q: int(q.get("question_order") or 0))
+            group_vars: list[str] = []
 
-        for q in questions_sorted:
-            qid = int(q["qid"])
-            parent_qid = int(q.get("parent_qid") or 0)
-            # Subquestions / answer rows are returned as separate entries — keep parent only
-            if parent_qid > 0:
-                continue
+            for q in questions_sorted:
+                qid = int(q["qid"])
+                parent_qid = int(q.get("parent_qid") or 0)
+                if parent_qid > 0:
+                    continue
 
-            ls_type = str(q.get("type") or "")
-            info = get_type_info(ls_type)
-            if info.kind == "display":
-                continue
+                ls_type = str(q.get("type") or "")
+                info = get_type_info(ls_type)
+                if info.kind == "display":
+                    continue
 
-            title = str(q.get("title") or f"Q{qid}")
-            text = _strip_html(str(q.get("question") or title))
-            var_id = f"q{qid}"
+                title = str(q.get("title") or f"Q{qid}")
+                text = _strip_html(str(q.get("question") or title))
+                var_id = f"q{qid}"
 
-            variable = SurveyVariable(
-                id=var_id,
-                qid=qid,
-                code=title,
-                text=text,
-                ls_type=ls_type,
-                kind=info.kind,
-                type_label=info.label,
-                group_id=gid,
-                group_title=group_title,
-                group_order=group_order,
-                question_order=int(q.get("question_order") or 0),
-                columns=[title],
-                metrics=list(info.metrics),
-                can_banner=info.can_banner,
-                can_filter=info.can_filter,
-                parent_qid=parent_qid,
-            )
-            variables.append(variable)
-            group_vars.append(var_id)
+                variable = SurveyVariable(
+                    id=var_id,
+                    qid=qid,
+                    code=title,
+                    text=text,
+                    ls_type=ls_type,
+                    kind=info.kind,
+                    type_label=info.label,
+                    group_id=gid,
+                    group_title=group_title,
+                    group_order=group_order,
+                    question_order=int(q.get("question_order") or 0),
+                    columns=[title],
+                    metrics=list(info.metrics),
+                    can_banner=info.can_banner,
+                    can_filter=info.can_filter,
+                    parent_qid=parent_qid,
+                )
+                variables.append(variable)
+                group_vars.append(var_id)
 
-            if not light and info.kind in _ENRICH_KINDS:
-                enrich_queue.append((variable, qid))
+                if not light and info.kind in _ENRICH_KINDS:
+                    enrich_queue.append((variable, qid))
 
-        if group_vars:
-            group_summaries.append(
-                {
-                    "id": gid,
-                    "title": group_title,
-                    "order": group_order,
-                    "variable_ids": group_vars,
-                }
-            )
+            if group_vars:
+                group_summaries.append(
+                    {
+                        "id": gid,
+                        "title": group_title,
+                        "order": group_order,
+                        "variable_ids": group_vars,
+                    }
+                )
 
-    df_columns: list[str] = []
-    if not light:
-        try:
-            from app.services.response_store import get_responses
+        df_columns: list[str] = []
+        if not light:
+            try:
+                from app.services.response_store import get_responses
 
-            df_columns = list(
-                get_responses(survey_id, completion_status=completion_status).dataframe.columns
-            )
-        except Exception:
-            pass
+                df_columns = list(
+                    get_responses(survey_id, completion_status=completion_status).dataframe.columns
+                )
+            except Exception:
+                pass
 
-    if not light and enrich_queue:
-        _enrich_variables_parallel(enrich_queue, df_columns)
+        if not light and enrich_queue:
+            _enrich_variables_parallel(enrich_queue, df_columns)
 
-    if not light and df_columns:
-        apply_location_kind(variables, df_columns)
+        if not light and df_columns:
+            apply_location_kind(variables, df_columns)
 
-    result = {
-        "survey_id": survey_id,
-        "response_count": response_count,
-        "question_count": len(variables),
-        "enriched": not light,
-        "variables": [_variable_to_dict(v) for v in variables],
-        "groups": group_summaries,
-    }
+        return {
+            "survey_id": survey_id,
+            "response_count": response_count,
+            "question_count": len(variables),
+            "enriched": not light,
+            "variables": [_variable_to_dict(v) for v in variables],
+            "groups": group_summaries,
+        }
+
+    result = execute_lime(build_from_lime)
     _SCHEMA_CACHE[cache_key] = (now, result)
     return _finalize_schema(survey_id, result, completion_status=completion_status, light=light)
 

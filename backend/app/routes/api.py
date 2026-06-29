@@ -8,6 +8,7 @@ from app.lime_client import (
     get_connection_status,
     get_project_detail,
     get_survey_questions,
+    is_stale_session_error,
     list_projects,
 )
 from app.models.analysis import (
@@ -64,10 +65,15 @@ router = APIRouter(prefix="/api")
 def _handle_lime_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LimeSurveyNotConfiguredError):
         return HTTPException(status_code=503, detail=str(exc))
+    if is_stale_session_error(exc):
+        return HTTPException(
+            status_code=503,
+            detail="LimeSurvey session expired. Please try again — the app will reconnect automatically.",
+        )
     if isinstance(exc, LimeSurveyError):
         return HTTPException(status_code=502, detail=str(exc))
     exc_name = type(exc).__name__
-    if exc_name in {"LimeSurveyStatusError", "LimeSurveyRPCError", "LimeSurveyInvalidSessionError"}:
+    if exc_name in {"LimeSurveyStatusError", "LimeSurveyRPCError"}:
         return HTTPException(status_code=502, detail=str(exc))
     return HTTPException(status_code=500, detail=str(exc))
 
