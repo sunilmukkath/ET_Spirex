@@ -11,7 +11,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { BrandLockup } from '../components/BrandLockup'
+import { BrandLogo } from '../components/BrandLogo'
 import { SignInForm } from '../components/SignInForm'
 import { LoadingState } from '../components/States'
 
@@ -83,7 +83,7 @@ export function LandingPage() {
       </div>
 
       <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <BrandLockup size="lg" variant="light" />
+        <BrandLogo size="lg" variant="light" />
         <a
           href="#signin"
           className="rounded-full border border-white/20 bg-white/5 px-5 py-2 text-sm font-medium backdrop-blur-sm transition hover:bg-white/10"
@@ -130,9 +130,6 @@ export function LandingPage() {
       </main>
 
       <footer className="relative z-10 border-t border-white/10 py-6 text-center text-xs text-white/40">
-        <div className="mx-auto mb-3 flex justify-center">
-          <BrandLockup size="md" variant="light" showTagline={false} />
-        </div>
         ET Scout · Elastic Tree Consumer Insights
       </footer>
     </div>

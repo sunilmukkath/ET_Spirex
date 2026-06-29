@@ -29,7 +29,7 @@ import {
   type WeightConfig,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { BrandLockup } from '../components/BrandLockup'
+import { BrandLogo } from '../components/BrandLogo'
 import { BannerPicker } from '../components/analysis/BannerPicker'
 import { BannerLayerEditor } from '../components/analysis/BannerLayerEditor'
 import { FilterEditor } from '../components/analysis/FilterEditor'
@@ -616,7 +616,7 @@ export function SurveyWorkspace() {
           </Link>
           <div className="hidden h-6 w-px bg-slate-200 md:block" />
           <Link to="/dashboard" className="hidden shrink-0 rounded-lg transition hover:opacity-90 md:block">
-            <BrandLockup size="sm" showTagline={false} />
+            <BrandLogo size="sm" showTagline={false} />
           </Link>
           <div className="hidden h-6 w-px bg-slate-200 lg:block" />
 
