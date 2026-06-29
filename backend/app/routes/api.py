@@ -131,9 +131,9 @@ def connection():
 
 
 @router.get("/projects")
-def projects():
+def projects(limit: int | None = None, include_stats: bool = False):
     try:
-        return {"projects": list_projects(include_stats=False)}
+        return {"projects": list_projects(include_stats=include_stats, limit=limit)}
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
 

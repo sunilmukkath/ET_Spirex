@@ -538,7 +538,13 @@ export const api = {
     ),
   getAuthUsers: () => fetchJson<{ users: string[] }>('/api/auth/users'),
   getConnection: () => fetchJson<ConnectionStatus>('/api/connection'),
-  getProjects: () => fetchJson<{ projects: Project[] }>('/api/projects'),
+  getProjects: (opts?: { limit?: number; includeStats?: boolean }) => {
+    const params = new URLSearchParams()
+    if (opts?.limit != null) params.set('limit', String(opts.limit))
+    if (opts?.includeStats) params.set('include_stats', 'true')
+    const qs = params.toString()
+    return fetchJson<{ projects: Project[] }>(`/api/projects${qs ? `?${qs}` : ''}`)
+  },
   getProjectStats: (ids: number[]) =>
     fetchJson<{
       stats: Record<

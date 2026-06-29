@@ -220,7 +220,7 @@ def _enrich_projects_parallel(projects: list[dict[str, Any]]) -> None:
         }
 
 
-def list_projects(*, include_stats: bool = False) -> list[dict[str, Any]]:
+def list_projects(*, include_stats: bool = False, limit: int | None = None) -> list[dict[str, Any]]:
     username = settings.limesurvey_filter_user or settings.limesurvey_username
     cache_key = username or ""
     now = time.time()
@@ -228,7 +228,10 @@ def list_projects(*, include_stats: bool = False) -> list[dict[str, Any]]:
     if not include_stats and cache_key in _projects_cache:
         cached_at, cached = _projects_cache[cache_key]
         if now - cached_at < _PROJECTS_TTL:
-            return cached
+            projects = cached
+            if limit is not None:
+                return projects[: max(1, min(limit, 100))]
+            return projects
 
     def load_projects(client: Client) -> list[dict[str, Any]]:
         surveys = client.list_surveys(username)
@@ -260,20 +263,19 @@ def list_projects(*, include_stats: bool = False) -> list[dict[str, Any]]:
         return projects
 
     projects = execute_lime(load_projects)
-
-    if include_stats:
-        _enrich_projects_parallel(projects)
+    projects.sort(key=lambda p: p["id"], reverse=True)
 
     if not include_stats:
-        projects.sort(key=lambda p: p["id"], reverse=True)
         _projects_cache[cache_key] = (now, projects)
-    else:
-        projects.sort(
-            key=lambda p: (_parse_timestamp(p.get("created_date")), p["id"]),
-            reverse=True,
-        )
 
-    return projects
+    result = projects
+    if limit is not None:
+        result = projects[: max(1, min(limit, 100))]
+
+    if include_stats:
+        _enrich_projects_parallel(result)
+
+    return result
 
 
 def get_project_detail(survey_id: int) -> dict[str, Any]:

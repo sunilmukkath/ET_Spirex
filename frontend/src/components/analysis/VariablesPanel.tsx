@@ -104,6 +104,24 @@ function optionsForVariable(v: SurveyVariable): { code: string; label: string }[
   return []
 }
 
+function labelForTrackedCode(variables: SurveyVariable[], sourceIds: string[], code: string): string {
+  for (const id of sourceIds) {
+    const v = variables.find((x) => x.id === id)
+    if (!v) continue
+    for (const opt of optionsForVariable(v)) {
+      if (opt.code === code && opt.label && opt.label !== code) return opt.label
+    }
+  }
+  for (const id of sourceIds) {
+    const v = variables.find((x) => x.id === id)
+    if (!v) continue
+    for (const opt of optionsForVariable(v)) {
+      if (opt.code === code && opt.label) return opt.label
+    }
+  }
+  return code
+}
+
 function typeLabel(v: CustomVariable): string {
   if (v.variable_type === 'combine') return 'Combined'
   if (v.variable_type === 'net_score') return 'Net score'
@@ -188,16 +206,23 @@ export function VariablesPanel({
   )
 
   const trackedOptions = useMemo(() => {
+    const sourceIds = form.source_variable_ids
     if (inferredSharedCodes.length > 0) {
-      return inferredSharedCodes.map((code) => ({ code, label: code }))
+      return inferredSharedCodes.map((code) => ({
+        code,
+        label: labelForTrackedCode(combineCandidates, sourceIds, code),
+      }))
     }
     const codes = new Set<string>()
-    for (const id of form.source_variable_ids) {
+    for (const id of sourceIds) {
       const v = combineCandidates.find((x) => x.id === id)
       if (!v) continue
       for (const opt of optionsForVariable(v)) codes.add(opt.code)
     }
-    return [...codes].sort().map((code) => ({ code, label: code }))
+    return [...codes].sort().map((code) => ({
+      code,
+      label: labelForTrackedCode(combineCandidates, sourceIds, code),
+    }))
   }, [combineCandidates, form.source_variable_ids, inferredSharedCodes])
 
   function openCreate() {
@@ -907,9 +932,13 @@ function VariableCard({
   )
 }
 
-export function customVariableToSurvey(v: CustomVariable): SurveyVariable {
+export function customVariableToSurvey(
+  v: CustomVariable,
+  baseVariables: SurveyVariable[] = [],
+): SurveyVariable {
   if (v.variable_type === 'combine') {
     const codes = v.tracked_codes ?? []
+    const sourceIds = v.source_variable_ids ?? []
     return {
       id: v.id,
       qid: 0,
@@ -924,7 +953,7 @@ export function customVariableToSurvey(v: CustomVariable): SurveyVariable {
       answer_options: [],
       subquestions: codes.map((code, i) => ({
         code,
-        label: code,
+        label: labelForTrackedCode(baseVariables, sourceIds, code),
         column: `_cv_${v.id}_${code}`,
         sort_order: i,
       })),

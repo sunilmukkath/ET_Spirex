@@ -11,7 +11,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { BrandLogo } from '../components/BrandLogo'
+import { BrandLockup } from '../components/BrandLockup'
 import { SignInForm } from '../components/SignInForm'
 import { LoadingState } from '../components/States'
 
@@ -83,7 +83,7 @@ export function LandingPage() {
       </div>
 
       <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <BrandLogo size="lg" variant="light" />
+        <BrandLockup size="lg" variant="light" />
         <a
           href="#signin"
           className="rounded-full border border-white/20 bg-white/5 px-5 py-2 text-sm font-medium backdrop-blur-sm transition hover:bg-white/10"

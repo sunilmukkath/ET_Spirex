@@ -39,11 +39,11 @@ def apply_custom_variables(
         if isinstance(computed, dict):
             for col_name, series in computed.items():
                 df[col_name] = series
-            variables.append(_custom_to_schema_var(cv, list(computed.keys()), computed))
+            variables.append(_custom_to_schema_var(cv, list(computed.keys()), computed, schema))
         else:
             col_name = custom_column_name(cv.id)
             df[col_name] = computed
-            variables.append(_custom_to_schema_var(cv, [col_name], {col_name: computed}))
+            variables.append(_custom_to_schema_var(cv, [col_name], {col_name: computed}, schema))
 
         custom_ids.append(cv.id)
 
@@ -78,9 +78,16 @@ def preview_custom_variable(
     if isinstance(computed, dict):
         total = int(len(df))
         rows = []
-        for code, series in computed.items():
+        tracked = [str(c).strip() for c in (cv.tracked_codes or []) if str(c).strip()]
+        if not tracked:
+            tracked = _codes_from_columns(cv, list(computed.keys()))
+        for code in tracked:
+            col_name = custom_column_name(cv.id, code)
+            series = computed.get(col_name)
+            if series is None:
+                continue
             yes = int(series.astype(str).isin(["Y", "1", "yes", "Yes"]).sum())
-            label = code.replace(f"_cv_{cv.id}_", "").replace(f"{cv.code}_", "")
+            label = _label_for_tracked_code(schema, cv.source_variable_ids or [], code)
             rows.append(
                 {
                     "label": label,
@@ -316,10 +323,41 @@ def _is_checkbox_yes(value: Any) -> bool:
     return str(value).strip().lower() in _CHECKBOX_YES
 
 
+def _label_for_tracked_code(
+    schema: dict[str, Any],
+    source_ids: list[str],
+    code: str,
+) -> str:
+    code = str(code).strip()
+    fallback = code
+    for var_id in source_ids:
+        var = get_variable(schema, var_id)
+        if not var:
+            continue
+        for sq in var.get("subquestions") or []:
+            if str(sq.get("code", "")).strip() != code:
+                continue
+            label = str(sq.get("label") or "").strip()
+            if label and label.lower() != code.lower():
+                return label
+            if label:
+                fallback = label
+        for opt in var.get("answer_options") or []:
+            if str(opt.get("code", "")).strip() != code:
+                continue
+            label = str(opt.get("label") or "").strip()
+            if label and label.lower() != code.lower():
+                return label
+            if label:
+                fallback = label
+    return fallback
+
+
 def _custom_to_schema_var(
     cv: CustomVariable,
     columns: list[str],
     series_by_col: dict[str, pd.Series],
+    schema: dict[str, Any],
 ) -> dict[str, Any]:
     if cv.variable_type == "combine":
         subquestions = []
@@ -330,7 +368,7 @@ def _custom_to_schema_var(
             subquestions.append(
                 {
                     "code": code,
-                    "label": code,
+                    "label": _label_for_tracked_code(schema, cv.source_variable_ids or [], code),
                     "column": col,
                     "sort_order": len(subquestions),
                 }

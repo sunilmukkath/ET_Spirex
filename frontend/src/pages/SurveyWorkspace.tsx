@@ -168,7 +168,7 @@ export function SurveyWorkspace() {
   const mergedSchema = useMemo((): SurveySchema | null => {
     if (!schema) return null
     if (!customVariables.length) return schema
-    const customVars = customVariables.map(customVariableToSurvey)
+    const customVars = customVariables.map((cv) => customVariableToSurvey(cv, schema.variables))
     const customGroup = {
       id: -1,
       title: 'Custom variables',
