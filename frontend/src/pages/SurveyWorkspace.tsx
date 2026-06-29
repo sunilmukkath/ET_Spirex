@@ -30,6 +30,7 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { BannerPicker } from '../components/analysis/BannerPicker'
+import { BannerLayerEditor } from '../components/analysis/BannerLayerEditor'
 import { FilterEditor } from '../components/analysis/FilterEditor'
 import { QuestionNavigator } from '../components/analysis/QuestionNavigator'
 import { SurveyOverviewBar } from '../components/analysis/SurveyOverviewBar'
@@ -104,7 +105,7 @@ export function SurveyWorkspace() {
   const completionStatus = searchParams.get('responses') || 'complete'
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [bannerIds, setBannerIds] = useState<string[]>([])
+  const [bannerLayers, setBannerLayers] = useState<string[][]>([[]])
   const [sideRowIds, setSideRowIds] = useState<string[]>([])
   const [profileResult, setProfileResult] = useState<ProfileResult | null>(null)
   const [bannerResult, setBannerResult] = useState<BannerResult | null>(null)
@@ -192,7 +193,11 @@ export function SurveyWorkspace() {
   const loadCrosstabBookmark = useCallback((bm: AnalysisBookmark) => {
     const cfg = bm.config
     if (Array.isArray(cfg.side_row_ids)) setSideRowIds(cfg.side_row_ids as string[])
-    if (Array.isArray(cfg.banner_ids)) setBannerIds(cfg.banner_ids as string[])
+    if (Array.isArray(cfg.banner_layers)) {
+      setBannerLayers(cfg.banner_layers as string[][])
+    } else if (Array.isArray(cfg.banner_ids)) {
+      setBannerLayers([cfg.banner_ids as string[]])
+    }
     if (typeof cfg.metric === 'string') setMetric(cfg.metric)
     if (typeof cfg.show_counts === 'boolean') setShowCounts(cfg.show_counts)
     if (typeof cfg.show_col_pct === 'boolean') setShowColPct(cfg.show_col_pct)
@@ -236,6 +241,8 @@ export function SurveyWorkspace() {
   function buildBannerRequest() {
     const rowIds = sideRowIds.length > 0 ? sideRowIds : selectedId ? [selectedId] : []
     if (rowIds.length === 0) return null
+    const layers = bannerLayers.filter((layer) => layer.length > 0)
+    const flatBannerIds = layers.flat()
     const row_filters: Record<string, FilterSpec[]> = {}
     for (const id of rowIds) {
       row_filters[id] = tableFilters[id] ?? filters
@@ -243,7 +250,8 @@ export function SurveyWorkspace() {
     return {
       row_variable_id: rowIds[0],
       row_variable_ids: rowIds,
-      banner_variable_ids: bannerIds,
+      banner_variable_ids: flatBannerIds,
+      banner_layers: layers.length > 0 ? layers : undefined,
       completion_status: completionStatus,
       show_counts: showCounts,
       show_col_pct: showColPct,
@@ -288,7 +296,7 @@ export function SurveyWorkspace() {
         setSideRowIds([first.id])
       }
       const banner = data.variables.find((v) => v.kind === 'single' && v.id !== first?.id)
-      if (banner) setBannerIds([banner.id])
+      if (banner) setBannerLayers([[banner.id]])
     }
 
     // Phase 1: fast question list (~1s) — sidebar usable immediately
@@ -333,6 +341,8 @@ export function SurveyWorkspace() {
     () => activeSchema?.variables.find((v) => v.id === selectedId) ?? null,
     [activeSchema, selectedId],
   )
+
+  const bannerIds = useMemo(() => [...new Set(bannerLayers.flat())], [bannerLayers])
 
   const bannerIdSet = useMemo(() => new Set(bannerIds), [bannerIds])
 
@@ -457,7 +467,12 @@ export function SurveyWorkspace() {
   }
 
   function addBanner(id: string) {
-    setBannerIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
+    setBannerLayers((prev) => {
+      const layers = prev.length > 0 ? prev : [[]]
+      const layer0 = layers[0] ?? []
+      if (layer0.includes(id)) return prev
+      return [[...layer0, id], ...layers.slice(1)]
+    })
   }
 
   function addSideRow(id: string) {
@@ -479,12 +494,18 @@ export function SurveyWorkspace() {
     const ids = (activeSchema?.variables ?? [])
       .filter((v) => v.can_banner)
       .map((v) => v.id)
-    setBannerIds(ids)
+    setBannerLayers([ids])
     setBannerResult(null)
   }
 
-  function copySideRowsToBanners() {
-    setBannerIds((prev) => [...new Set([...prev, ...sideRowIds])])
+  function copySideRowsToBannerLayer(layerIndex: number) {
+    setBannerLayers((prev) => {
+      const layers = prev.length > 0 ? [...prev] : [[]]
+      while (layers.length <= layerIndex) layers.push([])
+      const existing = new Set(layers[layerIndex])
+      layers[layerIndex] = [...layers[layerIndex], ...sideRowIds.filter((id) => !existing.has(id))]
+      return layers
+    })
     setBannerResult(null)
   }
 
@@ -502,7 +523,7 @@ export function SurveyWorkspace() {
   }
 
   function clearBanners() {
-    setBannerIds([])
+    setBannerLayers([[]])
     setBannerResult(null)
   }
 
@@ -620,7 +641,12 @@ export function SurveyWorkspace() {
               compareMode={mode === 'crosstabs'}
               compareIds={bannerIds}
               onCompareToggle={addBanner}
-              onCompareRemove={(id) => setBannerIds((p) => p.filter((x) => x !== id))}
+              onCompareRemove={(id) =>
+                setBannerLayers((prev) => {
+                  const next = prev.map((layer) => layer.filter((x) => x !== id))
+                  return next.some((layer) => layer.length > 0) ? next : [[]]
+                })
+              }
               sideRowIds={sideRowIds}
               onSideRowToggle={toggleSideRow}
             />
@@ -709,10 +735,12 @@ export function SurveyWorkspace() {
           {mode === 'quality' && (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <Suspense fallback={<PanelLoader />}>
-                <ResponseQCPanel
-                  surveyId={surveyId}
-                  onUseQcApproved={() => setCompletionStatus('qc_approved')}
-                />
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <ResponseQCPanel
+                    surveyId={surveyId}
+                    onUseQcApproved={() => setCompletionStatus('qc_approved')}
+                  />
+                </div>
               </Suspense>
             </div>
           )}
@@ -762,19 +790,21 @@ export function SurveyWorkspace() {
               sideRowVars={sideRowVars}
               sideRowIds={sideRowIds}
               bannerVars={bannerVars}
-              bannerIds={bannerIds}
+              bannerLayers={bannerLayers}
+              onBannerLayersChange={(layers) => {
+                setBannerLayers(layers)
+                setBannerResult(null)
+              }}
               onAddSideRow={addSideRow}
               onAddAllSideRows={addAllSideRows}
               onAddAllBanners={addAllBanners}
-              onCopySideRowsToBanners={copySideRowsToBanners}
+              onCopySideRowsToBannerLayer={copySideRowsToBannerLayer}
               onClearSideRows={clearSideRows}
               onClearBanners={clearBanners}
-              onAddBanner={addBanner}
               filters={filters}
               filterTree={filterTree}
               onFilterTreeChange={handleFilterTreeChange}
               onFiltersChange={handleFiltersChange}
-              onRemoveBanner={(id) => setBannerIds((p) => p.filter((x) => x !== id))}
               onRemoveSideRow={(id) => setSideRowIds((p) => p.filter((x) => x !== id))}
               metric={metric}
               onMetricChange={setMetric}
@@ -804,10 +834,11 @@ export function SurveyWorkspace() {
               buildBookmarkConfig={() => {
                 const req = buildBannerRequest()
                 return {
-                  name: `Compare ${sideRowIds.length}×${bannerIds.length}`,
+                  name: `Compare ${sideRowIds.length}×${bannerIds.length}${bannerLayers.filter((l) => l.length > 0).length > 1 ? ` (${bannerLayers.filter((l) => l.length > 0).length} layers)` : ''}`,
                   config: {
                     side_row_ids: sideRowIds,
                     banner_ids: bannerIds,
+                    banner_layers: bannerLayers.filter((layer) => layer.length > 0),
                     metric,
                     show_counts: showCounts,
                     show_col_pct: showColPct,
@@ -1046,15 +1077,14 @@ function CrosstabsPanel({
   sideRowVars,
   sideRowIds,
   bannerVars,
-  bannerIds,
+  bannerLayers,
+  onBannerLayersChange,
   onAddSideRow,
   onAddAllSideRows,
   onAddAllBanners,
-  onCopySideRowsToBanners,
+  onCopySideRowsToBannerLayer,
   onClearSideRows,
   onClearBanners,
-  onAddBanner,
-  onRemoveBanner,
   onRemoveSideRow,
   filters,
   filterTree,
@@ -1095,15 +1125,14 @@ function CrosstabsPanel({
   sideRowVars: SurveyVariable[]
   sideRowIds: string[]
   bannerVars: SurveyVariable[]
-  bannerIds: string[]
+  bannerLayers: string[][]
+  onBannerLayersChange: (layers: string[][]) => void
   onAddSideRow: (id: string) => void
   onAddAllSideRows: () => void
   onAddAllBanners: () => void
-  onCopySideRowsToBanners: () => void
+  onCopySideRowsToBannerLayer: (layerIndex: number) => void
   onClearSideRows: () => void
   onClearBanners: () => void
-  onAddBanner: (id: string) => void
-  onRemoveBanner: (id: string) => void
   onRemoveSideRow: (id: string) => void
   filters: FilterSpec[]
   filterTree: FilterGroup | null
@@ -1169,27 +1198,43 @@ function CrosstabsPanel({
           </div>
 
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Banners (columns)</p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <SelectionChips
-                vars={bannerVars}
-                onRemove={onRemoveBanner}
-                onClearAll={onClearBanners}
-                chipClassName="inline-flex max-w-[200px] items-center gap-1 rounded-full bg-[var(--et-teal-light)] px-2.5 py-1 text-xs font-medium text-[var(--et-teal-dark)] ring-1 ring-[var(--et-teal)]/25"
-              />
-              <BannerPicker
-                variables={variables}
-                selectedIds={bannerIds}
-                onAdd={onAddBanner}
-                onRemove={onRemoveBanner}
-                onAddAll={onAddAllBanners}
-                onAddSideRowsAsBanners={onCopySideRowsToBanners}
-                sideRowCount={sideRowIds.length}
-                label="Add banner column"
-                pickerTitle="Banner columns"
-                emptyMessage="No banner questions available"
-                variant="banner"
-                showAddAll
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Banners (columns)</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onAddAllBanners}
+                  className="text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
+                >
+                  Add all
+                </button>
+                {sideRowIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onCopySideRowsToBannerLayer(0)}
+                    className="text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
+                  >
+                    Copy side rows
+                  </button>
+                )}
+                {bannerLayers.some((layer) => layer.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={onClearBanners}
+                    className="text-[10px] font-medium text-slate-500 hover:text-red-600"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="mt-1.5">
+              <BannerLayerEditor
+                variables={variables.filter((v) => v.can_banner)}
+                layers={bannerLayers}
+                onChange={onBannerLayersChange}
+                sideRowIds={sideRowIds}
+                onCopySideRowsToLayer={onCopySideRowsToBannerLayer}
               />
             </div>
           </div>

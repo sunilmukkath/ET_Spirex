@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 import re
 from collections import Counter
@@ -145,6 +146,7 @@ def run_banner_table(
     *,
     row_variable_id: str,
     banner_variable_ids: list[str],
+    banner_layers: list[list[str]] | None = None,
     row_variable_ids: list[str] | None = None,
     filters: list[dict[str, Any]] | None = None,
     filter_tree: dict[str, Any] | None = None,
@@ -173,6 +175,7 @@ def run_banner_table(
             survey_id,
             row_variable_id=rid,
             banner_variable_ids=banner_variable_ids,
+            banner_layers=banner_layers,
             filters=_row_filters(rid),
             filter_tree=filter_tree,
             completion_status=completion_status,
@@ -199,6 +202,7 @@ def run_banner_table(
             survey_id,
             row_variable_id=rid,
             banner_variable_ids=banner_variable_ids,
+            banner_layers=banner_layers,
             filters=_row_filters(rid),
             filter_tree=None,
             completion_status=completion_status,
@@ -233,6 +237,7 @@ def _build_banner_table(
     *,
     row_variable_id: str,
     banner_variable_ids: list[str],
+    banner_layers: list[list[str]] | None = None,
     filters: list[dict[str, Any]] | None = None,
     filter_tree: dict[str, Any] | None = None,
     completion_status: str = "complete",
@@ -261,14 +266,17 @@ def _build_banner_table(
     if not row_var["can_banner"]:
         return {"error": f"'{row_var['text']}' cannot be used as a banner row"}
 
-    banner_vars = []
-    for bid in banner_variable_ids:
-        bvar = get_variable(schema, bid)
-        if not bvar:
-            return {"error": f"Banner variable '{bid}' not found"}
-        if not bvar["can_banner"]:
-            return {"error": f"'{bvar['text']}' cannot be used as a banner break"}
-        banner_vars.append(bvar)
+    banner_setup = _resolve_banner_columns(
+        schema,
+        banner_variable_ids=banner_variable_ids,
+        banner_layers=banner_layers,
+        df=df,
+    )
+    if banner_setup.get("error"):
+        return banner_setup
+    banner_columns = banner_setup["columns"]
+    header_rows = banner_setup.get("header_rows")
+    banner_vars = banner_setup["banner_vars"]
 
     if df.empty:
         return {"error": "No responses match the selected filters"}
@@ -276,7 +284,6 @@ def _build_banner_table(
     resolved_metric = metric if metric != "auto" else _default_metric(row_var)
     base_n = len(df)
 
-    banner_columns = _build_banner_columns(banner_vars, df)
     if not banner_columns:
         return {"error": "Banner variables have no valid data columns"}
 
@@ -310,6 +317,14 @@ def _build_banner_table(
                 _apply_row_pcts(section)
         else:
             _apply_row_pcts(table)
+
+    if header_rows:
+        table["header_rows"] = header_rows
+        table["banner_layer_count"] = len(banner_setup.get("layer_specs_list") or [])
+        if table.get("sections"):
+            for section in table["sections"]:
+                section["header_rows"] = header_rows
+                section["banner_layer_count"] = table["banner_layer_count"]
 
     return {
         "row_variable": _var_summary(row_var),
@@ -490,47 +505,219 @@ def get_filter_options(
     return {"options": options}
 
 
+def _specs_for_banner_var(bvar: dict[str, Any], df: pd.DataFrame) -> list[dict[str, Any]]:
+    columns: list[dict[str, Any]] = []
+    if bvar["kind"] == "single":
+        col = bvar["columns"][0] if bvar["columns"] else bvar["code"]
+        if col not in df.columns:
+            return columns
+        categories = _ordered_categories(bvar, df[col])
+        for cat in categories:
+            label = _label_for_code(bvar, cat)
+            columns.append(
+                {
+                    "banner_id": bvar["id"],
+                    "banner_text": bvar["text"],
+                    "category_code": cat,
+                    "category_label": label,
+                    "header": label,
+                    "filter_col": col,
+                    "filter_value": cat,
+                }
+            )
+    elif bvar["kind"] == "multi":
+        for sq in bvar["subquestions"]:
+            col = sq["column"]
+            if col not in df.columns:
+                continue
+            columns.append(
+                {
+                    "banner_id": bvar["id"],
+                    "banner_text": bvar["text"],
+                    "category_code": sq["code"],
+                    "category_label": sq["label"],
+                    "header": sq["label"],
+                    "filter_col": col,
+                    "filter_value": "Y",
+                    "is_checkbox": True,
+                }
+            )
+    return columns
+
+
+def _normalize_banner_layers(
+    banner_variable_ids: list[str],
+    banner_layers: list[list[str]] | None,
+) -> list[list[str]]:
+    layers = [layer for layer in (banner_layers or []) if layer]
+    if layers:
+        return layers
+    if banner_variable_ids:
+        return [banner_variable_ids]
+    return []
+
+
+def _resolve_banner_columns(
+    schema: dict[str, Any],
+    *,
+    banner_variable_ids: list[str],
+    banner_layers: list[list[str]] | None,
+    df: pd.DataFrame,
+) -> dict[str, Any]:
+    layers_ids = _normalize_banner_layers(banner_variable_ids, banner_layers)
+    if not layers_ids:
+        return {"error": "No banner variables selected", "columns": [], "banner_vars": []}
+
+    layer_specs_list: list[list[dict[str, Any]]] = []
+    banner_vars: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for layer_ids in layers_ids:
+        layer_specs: list[dict[str, Any]] = []
+        for bid in layer_ids:
+            bvar = get_variable(schema, bid)
+            if not bvar:
+                return {"error": f"Banner variable '{bid}' not found", "columns": [], "banner_vars": []}
+            if not bvar["can_banner"]:
+                return {
+                    "error": f"'{bvar['text']}' cannot be used as a banner break",
+                    "columns": [],
+                    "banner_vars": [],
+                }
+            layer_specs.extend(_specs_for_banner_var(bvar, df))
+            if bid not in seen:
+                banner_vars.append(bvar)
+                seen.add(bid)
+        if not layer_specs:
+            return {"error": "Banner layer has no valid data columns", "columns": [], "banner_vars": []}
+        layer_specs_list.append(layer_specs)
+
+    if len(layer_specs_list) == 1:
+        combined: list[dict[str, Any]] = []
+        for spec in layer_specs_list[0]:
+            entry = dict(spec)
+            entry["filters"] = [
+                {
+                    "filter_col": spec["filter_col"],
+                    "filter_value": spec["filter_value"],
+                    "is_checkbox": spec.get("is_checkbox", False),
+                }
+            ]
+            entry["layer_labels"] = [spec["category_label"]]
+            combined.append(entry)
+    else:
+        combined = []
+        for combo in itertools.product(*layer_specs_list):
+            filters = []
+            layer_labels = []
+            key_parts = []
+            for spec in combo:
+                filters.append(
+                    {
+                        "filter_col": spec["filter_col"],
+                        "filter_value": spec["filter_value"],
+                        "is_checkbox": spec.get("is_checkbox", False),
+                    }
+                )
+                layer_labels.append(spec["category_label"])
+                key_parts.append(f"{spec['banner_id']}_{spec['category_code']}")
+            last = combo[-1]
+            combined.append(
+                {
+                    "banner_id": last["banner_id"],
+                    "banner_text": " × ".join(s["banner_text"] for s in combo),
+                    "category_code": "__".join(key_parts),
+                    "category_label": " / ".join(layer_labels),
+                    "header": " / ".join(layer_labels),
+                    "layer_labels": layer_labels,
+                    "filters": filters,
+                    "filter_col": last["filter_col"],
+                    "filter_value": last["filter_value"],
+                    "is_checkbox": last.get("is_checkbox"),
+                }
+            )
+
+    header_rows = _build_header_rows(combined, layer_specs_list)
+    return {
+        "columns": combined,
+        "banner_vars": banner_vars,
+        "layer_specs_list": layer_specs_list,
+        "header_rows": header_rows,
+    }
+
+
+def _build_header_rows(
+    combined_columns: list[dict[str, Any]],
+    layer_specs_list: list[list[dict[str, Any]]],
+) -> list[list[dict[str, Any]]] | None:
+    if not combined_columns:
+        return None
+
+    n_layers = len(layer_specs_list)
+    if n_layers > 1:
+        rows: list[list[dict[str, Any]]] = []
+        for layer_idx in range(n_layers):
+            row: list[dict[str, Any]] = []
+            i = 0
+            while i < len(combined_columns):
+                label = combined_columns[i]["layer_labels"][layer_idx]
+                j = i + 1
+                while (
+                    j < len(combined_columns)
+                    and combined_columns[j]["layer_labels"][layer_idx] == label
+                ):
+                    j += 1
+                row.append({"label": label, "colspan": j - i, "banner_id": None, "layer": layer_idx})
+                i = j
+            rows.append(row)
+        return rows
+
+    banner_ids = list(dict.fromkeys(s["banner_id"] for s in layer_specs_list[0]))
+    if len(banner_ids) <= 1:
+        return None
+
+    row0: list[dict[str, Any]] = []
+    for bid in banner_ids:
+        count = sum(1 for c in combined_columns if c["banner_id"] == bid)
+        text = next(s["banner_text"] for s in layer_specs_list[0] if s["banner_id"] == bid)
+        row0.append({"label": text, "colspan": count, "banner_id": bid, "layer": 0})
+    row1 = [
+        {
+            "label": c["category_label"],
+            "colspan": 1,
+            "banner_id": c["banner_id"],
+            "layer": 0,
+        }
+        for c in combined_columns
+    ]
+    return [row0, row1]
+
+
+def _filter_df_by_banner(df: pd.DataFrame, banner: dict[str, Any]) -> pd.DataFrame:
+    subset = df
+    filters = banner.get("filters")
+    if filters:
+        for f in filters:
+            col = f["filter_col"]
+            if f.get("is_checkbox"):
+                subset = subset[subset[col].astype(str).isin(["Y", "1", "yes", "Yes"])]
+            else:
+                subset = subset[subset[col].astype(str) == str(f["filter_value"])]
+        return subset
+
+    col = banner["filter_col"]
+    if banner.get("is_checkbox"):
+        return subset[subset[col].astype(str).isin(["Y", "1", "yes", "Yes"])]
+    return subset[subset[col].astype(str) == str(banner["filter_value"])]
+
+
 def _build_banner_columns(
     banner_vars: list[dict[str, Any]],
     df: pd.DataFrame,
 ) -> list[dict[str, Any]]:
     columns: list[dict[str, Any]] = []
     for bvar in banner_vars:
-        if bvar["kind"] == "single":
-            col = bvar["columns"][0] if bvar["columns"] else bvar["code"]
-            if col not in df.columns:
-                continue
-            categories = _ordered_categories(bvar, df[col])
-            for cat in categories:
-                label = _label_for_code(bvar, cat)
-                columns.append(
-                    {
-                        "banner_id": bvar["id"],
-                        "banner_text": bvar["text"],
-                        "category_code": cat,
-                        "category_label": label,
-                        "header": label,
-                        "filter_col": col,
-                        "filter_value": cat,
-                    }
-                )
-        elif bvar["kind"] == "multi":
-            for sq in bvar["subquestions"]:
-                col = sq["column"]
-                if col not in df.columns:
-                    continue
-                columns.append(
-                    {
-                        "banner_id": bvar["id"],
-                        "banner_text": bvar["text"],
-                        "category_code": sq["code"],
-                        "category_label": sq["label"],
-                        "header": sq["label"],
-                        "filter_col": col,
-                        "filter_value": "Y",
-                        "is_checkbox": True,
-                    }
-                )
+        columns.extend(_specs_for_banner_var(bvar, df))
     return columns
 
 
@@ -635,11 +822,7 @@ def _distribution_cells(
     cells.append(_cell(df, category))
 
     for banner in banner_columns:
-        bcol = banner["filter_col"]
-        if banner.get("is_checkbox"):
-            subset = df[df[bcol].astype(str).isin(["Y", "1", "yes", "Yes"])]
-        else:
-            subset = df[df[bcol].astype(str) == str(banner["filter_value"])]
+        subset = _filter_df_by_banner(df, banner)
         cells.append(_cell(subset, category))
 
     return cells
@@ -666,10 +849,7 @@ def _banner_multi(
             }
         )
         for banner in banner_columns:
-            if banner.get("is_checkbox"):
-                subset = df[df[banner["filter_col"]].astype(str).isin(["Y", "1", "yes", "Yes"])]
-            else:
-                subset = df[df[banner["filter_col"]].astype(str) == str(banner["filter_value"])]
+            subset = _filter_df_by_banner(df, banner)
             n = len(subset)
             yes = int(subset[col].astype(str).isin(["Y", "1", "yes", "Yes"]).sum()) if n else 0
             cells.append(
@@ -797,10 +977,7 @@ def _metric_cells(
 ) -> list[dict[str, Any]]:
     cells = [_compute_metric(df, col, metric, row_var)]
     for banner in banner_columns:
-        if banner.get("is_checkbox"):
-            subset = df[df[banner["filter_col"]].astype(str).isin(["Y", "1", "yes", "Yes"])]
-        else:
-            subset = df[df[banner["filter_col"]].astype(str) == str(banner["filter_value"])]
+        subset = _filter_df_by_banner(df, banner)
         cells.append(_compute_metric(subset, col, metric, row_var))
     return cells
 

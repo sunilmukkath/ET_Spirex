@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Filter, X } from 'lucide-react'
-import type { SurveyVariable } from '../../api/client'
+import type { FilterSpec, SurveyVariable } from '../../api/client'
 import {
   buildDraftTree,
+  emptyCondition,
   sanitizeFilterTree,
   summarizeFilterTree,
   type FilterGroup,
@@ -16,6 +17,7 @@ interface Props {
   completionStatus: string
   variables: SurveyVariable[]
   value: FilterGroup | null
+  filters?: FilterSpec[]
   onApply: (tree: FilterGroup | null) => void
 }
 
@@ -27,13 +29,19 @@ export function AdvancedFilterBuilder({
   completionStatus,
   variables,
   value,
+  filters = [],
   onApply,
 }: Props) {
-  const [draft, setDraft] = useState<FilterGroup>(() => buildDraftTree(value, []))
+  const [draft, setDraft] = useState<FilterGroup>(() => buildDraftTree(value, filters))
 
   useEffect(() => {
-    if (open) setDraft(buildDraftTree(value, []))
-  }, [open, value])
+    if (!open) return
+    const next = buildDraftTree(value, filters)
+    if (!next.children.length) {
+      next.children = [emptyCondition()]
+    }
+    setDraft(next)
+  }, [open, value, filters])
 
   const varMap = useMemo(() => new Map(variables.map((v) => [v.id, v])), [variables])
   const preview = summarizeFilterTree(

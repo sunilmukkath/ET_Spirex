@@ -53,6 +53,31 @@ _EMPTY_VALUES = {"", "nan", "none", "null", "na", "n/a"}
 _MAX_FLAGS = 150
 
 
+def _sanitize_for_json(value: Any) -> Any:
+    """Convert numpy/pandas scalars and non-JSON floats for API responses."""
+    if isinstance(value, dict):
+        return {k: _sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_for_json(v) for v in value]
+    if isinstance(value, tuple):
+        return [_sanitize_for_json(v) for v in value]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        f = float(value)
+        if math.isnan(f) or math.isinf(f):
+            return None
+        return f
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return value
+
+
 def invalidate_quality_cache(survey_id: int) -> None:
     _QUALITY_CACHE.pop(survey_id, None)
 
@@ -77,7 +102,7 @@ def run_data_quality(
         dataset = get_responses(survey_id, completion_status=scan_status)
     except Exception as exc:
         if _is_no_data_error(exc):
-            result = _empty_result()
+            result = _sanitize_for_json(_empty_result())
             result["message"] = "No response data available for this survey yet."
             _QUALITY_CACHE[survey_id] = (now, result)
             return result
@@ -85,7 +110,7 @@ def run_data_quality(
 
     df = dataset.dataframe
     if df.empty:
-        result = _empty_result()
+        result = _sanitize_for_json(_empty_result())
         _QUALITY_CACHE[survey_id] = (now, result)
         return result
 
@@ -126,7 +151,7 @@ def run_data_quality(
         {"id": "gibberish", "title": "Gibberish text", "count": gibberish.get("count", 0), "severity": "low"},
     ]
 
-    result = {
+    result = _sanitize_for_json({
         "total_responses": int(len(df)),
         "flagged_count": len(flagged_ids),
         "clean_estimate": clean_estimate,
@@ -137,7 +162,7 @@ def run_data_quality(
         "duplicate_phones": duplicate_phones,
         "straight_liners": straight_liners,
         "gibberish": gibberish,
-    }
+    })
     _QUALITY_CACHE[survey_id] = (now, result)
     return result
 
@@ -523,14 +548,14 @@ def _detect_straight_liners(
         straight_rows = (non_empty >= _MIN_ARRAY_ITEMS) & (unique_counts == 1)
 
         for idx in subset.index[straight_rows]:
-            values = [v for v in subset.loc[idx] if v is not None]
+            values = [v for v in subset.loc[idx] if not _is_missing(v)]
             if len(values) < _MIN_ARRAY_ITEMS:
                 continue
             flags.append({
                 "response_id": safe_response_id(df.at[idx, id_col] if id_col else None, idx),
                 "variable_id": str(var.get("id") or ""),
                 "question": _question_label(var),
-                "value": values[0],
+                "value": str(values[0]),
                 "items": len(values),
                 "reason": "Same answer on all grid items",
             })

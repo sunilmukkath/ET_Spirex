@@ -594,15 +594,35 @@ def advanced_analysis(survey_id: int, body: AdvancedAnalysisRequest):
         raise _handle_lime_error(exc) from exc
 
 
+def _flatten_banner_layers(
+    banner_variable_ids: list[str],
+    banner_layers: list[list[str]],
+) -> tuple[list[str], list[list[str]]]:
+    layers = [layer for layer in banner_layers if layer]
+    if not layers and banner_variable_ids:
+        layers = [banner_variable_ids]
+    flat: list[str] = []
+    for layer in layers:
+        for bid in layer:
+            if bid not in flat:
+                flat.append(bid)
+    return flat, layers
+
+
 @router.post("/projects/{survey_id}/analysis/banner")
 def banner_analysis(survey_id: int, body: BannerRequest):
     try:
         row_ids = body.row_variable_ids or [body.row_variable_id]
+        banner_ids, banner_layers = _flatten_banner_layers(
+            body.banner_variable_ids,
+            body.banner_layers,
+        )
         return run_banner_table(
             survey_id,
             row_variable_id=body.row_variable_id,
             row_variable_ids=row_ids,
-            banner_variable_ids=body.banner_variable_ids,
+            banner_variable_ids=banner_ids,
+            banner_layers=banner_layers,
             filters=[f.model_dump() for f in body.filters] if not body.filter_tree else None,
             filter_tree=body.filter_tree,
             row_filters={
@@ -625,11 +645,16 @@ def banner_analysis(survey_id: int, body: BannerRequest):
 def banner_export(survey_id: int, body: BannerRequest):
     try:
         row_ids = body.row_variable_ids or [body.row_variable_id]
+        banner_ids, banner_layers = _flatten_banner_layers(
+            body.banner_variable_ids,
+            body.banner_layers,
+        )
         result = run_banner_table(
             survey_id,
             row_variable_id=body.row_variable_id,
             row_variable_ids=row_ids,
-            banner_variable_ids=body.banner_variable_ids,
+            banner_variable_ids=banner_ids,
+            banner_layers=banner_layers,
             filters=[f.model_dump() for f in body.filters] if not body.filter_tree else None,
             filter_tree=body.filter_tree,
             row_filters={

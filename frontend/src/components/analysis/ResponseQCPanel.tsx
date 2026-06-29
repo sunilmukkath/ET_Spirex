@@ -37,7 +37,7 @@ function loadCached(surveyId: number): { result: DataQualityResult; at: number }
     if (!raw) return null
     const parsed = JSON.parse(raw) as { result: DataQualityResult; at: number }
     if (!parsed?.result) return null
-    return parsed
+    return { result: normalizeQcResult(parsed.result), at: parsed.at }
   } catch {
     return null
   }

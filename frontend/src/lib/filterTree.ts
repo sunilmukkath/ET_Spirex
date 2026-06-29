@@ -71,6 +71,35 @@ export function buildDraftTree(
   return emptyGroup()
 }
 
+/** Flatten a filter tree to legacy FilterSpec[] (AND rules at top level). */
+export function treeToFlatFilters(tree: FilterGroup | null): FilterSpec[] {
+  if (!tree?.children?.length) return []
+
+  const specs: FilterSpec[] = []
+
+  function addCondition(cond: FilterCondition) {
+    if (!cond.variable_id) return
+    const values = cond.values.map((v) => v.trim()).filter(Boolean)
+    if (!values.length) return
+    if (cond.operator === 'eq' || cond.operator === 'ne') {
+      specs.push({ variable_id: cond.variable_id, values: [values[0]] })
+      return
+    }
+    specs.push({ variable_id: cond.variable_id, values })
+  }
+
+  function walk(node: FilterNode) {
+    if (isFilterGroup(node)) {
+      for (const child of node.children) walk(child)
+      return
+    }
+    addCondition(node)
+  }
+
+  for (const child of tree.children) walk(child)
+  return specs
+}
+
 export function countConditions(tree: FilterGroup | null): number {
   if (!tree) return 0
   let n = 0

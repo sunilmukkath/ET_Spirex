@@ -205,6 +205,7 @@ export interface BannerRequest {
   row_variable_id: string
   row_variable_ids?: string[]
   banner_variable_ids: string[]
+  banner_layers?: string[][]
   filters?: FilterSpec[]
   filter_tree?: FilterGroup | null
   row_filters?: Record<string, FilterSpec[]>
@@ -244,6 +245,8 @@ export interface BannerResult {
   row_header?: string
   subquestion?: string
   headers?: { key: string; label: string; banner_id: string | null }[]
+  header_rows?: { label: string; colspan: number; banner_id?: string | null; layer?: number }[][]
+  banner_layer_count?: number
   rows?: TableRow[]
   sections?: BannerResult[]
   tables?: BannerResult[]

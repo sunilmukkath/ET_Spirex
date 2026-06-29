@@ -24,6 +24,7 @@ class BannerRequest(BaseModel):
     row_variable_id: str
     row_variable_ids: list[str] = Field(default_factory=list)
     banner_variable_ids: list[str] = Field(default_factory=list)
+    banner_layers: list[list[str]] = Field(default_factory=list)
     filters: list[FilterSpec] = Field(default_factory=list)
     filter_tree: dict | None = None
     row_filters: dict[str, list[FilterSpec]] = Field(default_factory=dict)

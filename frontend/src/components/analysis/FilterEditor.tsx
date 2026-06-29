@@ -1,17 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ChevronDown, Filter, Loader2, Pencil, X } from 'lucide-react'
 import type { FilterGroup, FilterSpec, SurveyVariable } from '../../api/client'
 import {
-  buildDraftTree,
   collectFilterChips,
-  emptyCondition,
-  emptyGroup,
-  sanitizeFilterTree,
   summarizeFilterTree,
+  treeToFlatFilters,
 } from '../../lib/filterTree'
-import { GroupEditor, schemaFilterOptions } from './FilterRuleEditors'
+import { schemaFilterOptions } from './FilterRuleEditors'
 import { FilterPresetMenu } from './FilterPresetMenu'
 import type { FilterPreset } from '../../api/client'
+import { AdvancedFilterBuilder } from './AdvancedFilterBuilder'
 
 interface Props {
   surveyId: number
@@ -47,15 +45,8 @@ export function FilterEditor({
   onPresetApply,
 }: Props) {
   const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState<FilterGroup>(() => buildDraftTree(filterTree, filters))
 
   const varMap = useMemo(() => new Map(variables.map((v) => [v.id, v])), [variables])
-
-  useEffect(() => {
-    if (open) {
-      setDraft(buildDraftTree(filterTree, filters))
-    }
-  }, [open, filterTree, filters])
 
   const varLabel = (id: string) => {
     const v = varMap.get(id)
@@ -80,13 +71,12 @@ export function FilterEditor({
       ? summarizeFilterTree(filterTree, varLabel, valueLabel)
       : chips.map((c) => c.text).join(' AND ')
 
-  function handleApply() {
+  function handleModalApply(tree: FilterGroup | null) {
     if (onFilterTreeChange) {
-      const clean = sanitizeFilterTree(draft)
-      onFilterTreeChange(clean)
+      onFilterTreeChange(tree)
       onChange([])
     } else {
-      onChange([])
+      onChange(treeToFlatFilters(tree))
     }
     setOpen(false)
     onApply?.()
@@ -95,16 +85,7 @@ export function FilterEditor({
   function handleClear() {
     onChange([])
     onFilterTreeChange?.(null)
-    setDraft(emptyGroup())
     setOpen(false)
-  }
-
-  function openPanel() {
-    if (!onFilterTreeChange) return
-    if (!draft.children.length) {
-      setDraft({ ...emptyGroup(), children: [emptyCondition()] })
-    }
-    setOpen(true)
   }
 
   return (
@@ -115,7 +96,7 @@ export function FilterEditor({
           {heading}
         </span>
 
-        {!hasActiveFilters && !open && (
+        {!hasActiveFilters && (
           <span className="text-xs text-slate-400">No filters — showing all responses</span>
         )}
 
@@ -135,12 +116,12 @@ export function FilterEditor({
 
         <button
           type="button"
-          onClick={() => (open ? setOpen(false) : openPanel())}
+          onClick={() => setOpen(true)}
           className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-[var(--et-teal)] hover:bg-[var(--et-teal-light)] hover:text-[var(--et-teal-dark)]"
         >
           {hasActiveFilters ? <Pencil size={13} /> : <Filter size={13} />}
           {hasActiveFilters ? 'Edit filters' : 'Add filters'}
-          <ChevronDown size={13} className={`transition ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown size={13} />
         </button>
 
         {hasActiveFilters && (
@@ -154,7 +135,7 @@ export function FilterEditor({
           </button>
         )}
 
-        {onApply && !open && (
+        {onApply && (
           <button
             type="button"
             onClick={onApply}
@@ -167,6 +148,13 @@ export function FilterEditor({
         )}
       </div>
 
+      {preview && hasActiveFilters && (
+        <p className="mt-2 text-xs text-slate-500" title={preview}>
+          <span className="font-medium text-slate-600">Active: </span>
+          <span className="line-clamp-2">{preview}</span>
+        </p>
+      )}
+
       {showPresets && onPresetApply && (
         <div className="mt-2 border-t border-slate-100 pt-2">
           <FilterPresetMenu
@@ -178,64 +166,16 @@ export function FilterEditor({
         </div>
       )}
 
-      {open && onFilterTreeChange && (
-        <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="rounded-lg bg-[var(--et-teal-light)]/50 px-3 py-2 text-xs text-[var(--et-teal-dark)]">
-            <strong>Tip:</strong> Pick a question, choose <em>equals</em> or <em>does not equal</em>,
-            then select the answer. Use <em>All rules match</em> when every rule must pass, or{' '}
-            <em>Any rule matches</em> for OR logic.
-          </div>
-
-          <GroupEditor
-            group={draft}
-            onChange={setDraft}
-            variables={variables}
-            surveyId={surveyId}
-            completionStatus={completionStatus}
-          />
-
-          {preview && (
-            <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                Preview
-              </p>
-              <p className="mt-0.5 text-sm text-slate-700">{preview}</p>
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
-            <button
-              type="button"
-              onClick={handleClear}
-              className="text-xs text-slate-500 hover:text-slate-700"
-            >
-              Clear all
-            </button>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-lg px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleApply}
-                className="rounded-lg bg-[var(--et-teal)] px-4 py-1.5 text-xs font-medium text-white hover:brightness-110"
-              >
-                Apply filters
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {open && !onFilterTreeChange && (
-        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Advanced filter rules are not available in this view.
-        </div>
-      )}
+      <AdvancedFilterBuilder
+        open={open}
+        onClose={() => setOpen(false)}
+        surveyId={surveyId}
+        completionStatus={completionStatus}
+        variables={variables}
+        value={filterTree}
+        filters={onFilterTreeChange ? [] : filters}
+        onApply={handleModalApply}
+      />
     </div>
   )
 }

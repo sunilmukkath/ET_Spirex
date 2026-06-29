@@ -431,6 +431,8 @@ export function BannerTable({ result }: { result: BannerResult }) {
   const showColPct = result.show_col_pct !== false
   const showRowPct = Boolean(result.show_row_pct)
   const conf = result.confidence_level ?? 0.95
+  const headerRows = result.header_rows
+  const hasNestedHeaders = Boolean(headerRows && headerRows.length > 0)
 
   return (
     <div className="space-y-4">
@@ -438,16 +440,53 @@ export function BannerTable({ result }: { result: BannerResult }) {
       <div className="overflow-x-auto rounded-xl border border-slate-200">
         <table className="min-w-full text-left text-xs">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50">
-              <th className="sticky left-0 z-10 min-w-[180px] bg-slate-50 px-3 py-2.5 font-semibold text-slate-700">
-                {result.row_header}
-              </th>
-              {result.headers.map((h) => (
-                <th key={h.key} className="min-w-[90px] px-3 py-2.5 font-semibold text-slate-700">
-                  {h.label}
+            {hasNestedHeaders ? (
+              <>
+                {headerRows!.map((row, ri) => (
+                  <tr
+                    key={ri}
+                    className={`border-b border-slate-200 ${ri < headerRows!.length - 1 ? 'bg-slate-100/80' : 'bg-slate-50'}`}
+                  >
+                    {ri === 0 && (
+                      <th
+                        rowSpan={headerRows!.length}
+                        className="sticky left-0 z-10 min-w-[180px] border-r border-slate-200 bg-slate-50 px-3 py-2.5 align-bottom font-semibold text-slate-700"
+                      >
+                        {result.row_header}
+                      </th>
+                    )}
+                    {ri === 0 && (
+                      <th
+                        rowSpan={headerRows!.length}
+                        className="min-w-[90px] border-r border-slate-200 bg-slate-50 px-3 py-2.5 align-bottom font-semibold text-slate-700"
+                      >
+                        Total
+                      </th>
+                    )}
+                    {row.map((cell, ci) => (
+                      <th
+                        key={`${ri}-${ci}`}
+                        colSpan={cell.colspan}
+                        className="min-w-[90px] border-l border-slate-200 px-3 py-2 text-center font-semibold text-slate-700"
+                      >
+                        {cell.label}
+                      </th>
+                    ))}
+                  </tr>
+                ))}
+              </>
+            ) : (
+              <tr className="border-b border-slate-200 bg-slate-50">
+                <th className="sticky left-0 z-10 min-w-[180px] bg-slate-50 px-3 py-2.5 font-semibold text-slate-700">
+                  {result.row_header}
                 </th>
-              ))}
-            </tr>
+                {result.headers.map((h) => (
+                  <th key={h.key} className="min-w-[90px] px-3 py-2.5 font-semibold text-slate-700">
+                    {h.label}
+                  </th>
+                ))}
+              </tr>
+            )}
           </thead>
           <tbody>
             {result.rows.map((row) => (
@@ -535,6 +574,11 @@ function BannerMeta({ result }: { result: BannerResult }) {
       {result.metric && (
         <span>
           Metric: <strong>{result.metric.replace('_', ' ')}</strong>
+        </span>
+      )}
+      {result.banner_layer_count && result.banner_layer_count > 1 && (
+        <span className="rounded-full bg-[var(--et-teal-light)] px-2 py-0.5 text-xs text-[var(--et-teal-dark)]">
+          {result.banner_layer_count} banner layers
         </span>
       )}
       {result.banner_variables?.map((b) => (
