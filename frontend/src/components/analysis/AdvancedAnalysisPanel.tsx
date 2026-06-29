@@ -17,7 +17,7 @@ import {
   type SurveyVariable,
 } from '../../api/client'
 import { filterPayload, type FilterGroup } from '../../lib/filterTree'
-import { canRunAnalysis } from '../../lib/multivariateHelpers'
+import { canRunAnalysis, categoricalVariablesForStatistics, numericVariablesForStatistics } from '../../lib/multivariateHelpers'
 import { ErrorState } from '../States'
 import { FilterEditor } from './FilterEditor'
 import {
@@ -122,14 +122,8 @@ export function AdvancedAnalysisPanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const numericVars = useMemo(
-    () => variables.filter((v) => v.kind === 'numeric' || v.metrics.includes('mean')),
-    [variables],
-  )
-  const categoricalVars = useMemo(
-    () => variables.filter((v) => ['single', 'multi'].includes(v.kind) && v.can_filter),
-    [variables],
-  )
+  const numericVars = useMemo(() => numericVariablesForStatistics(variables), [variables])
+  const categoricalVars = useMemo(() => categoricalVariablesForStatistics(variables), [variables])
 
   const activeType = ANALYSIS_TYPES.find((t) => t.id === analysisType)!
 
@@ -209,7 +203,8 @@ export function AdvancedAnalysisPanel({
           <div className="border-b border-slate-100 px-5 py-4">
             <h2 className="text-base font-semibold text-slate-900">Multivariate analysis</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Choose a statistical test, select variables, then run on your filtered sample.
+              Choose a statistical test, select variables, then run on your filtered sample. Scales, arrays, ranks, and
+              single-choice questions are included.
             </p>
           </div>
 
@@ -268,7 +263,7 @@ export function AdvancedAnalysisPanel({
                     onChange={setVariableIds}
                     mode="multi"
                     max={analysisType === 'correlation' ? 12 : 20}
-                    emptyMessage="No numeric variables in this survey"
+                    emptyMessage="No numeric or scale variables in this survey"
                   />
                   {analysisType === 'correlation' && (
                     <label className="mt-2 block text-xs">

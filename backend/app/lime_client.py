@@ -135,11 +135,12 @@ def _survey_status(active: str | None, expires: str | None) -> str:
     return "active"
 
 
-def _project_dashboard_sort_key(project: dict[str, Any]) -> tuple[int, float, int]:
-    """Active surveys first, then newest created, then highest survey id."""
-    status_rank = 0 if project.get("status") == "active" else 1
+def _project_dashboard_sort_key(project: dict[str, Any]) -> tuple[float, int]:
+    """Newest created first; fall back to survey id when creation date is missing."""
     created = _parse_timestamp(project.get("created_date"))
-    return (status_rank, -created, -int(project["id"]))
+    if created <= 0:
+        return (0.0, -int(project["id"]))
+    return (-created, -int(project["id"]))
 
 
 def _sort_projects_for_dashboard(projects: list[dict[str, Any]]) -> None:

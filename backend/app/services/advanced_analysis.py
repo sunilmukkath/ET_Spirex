@@ -14,6 +14,34 @@ from app.services.question_schema import get_variable
 from app.services.variable_columns import find_variable_column as _find_column
 
 
+def _resolve_stats_variable(schema: dict[str, Any], variable_id: str) -> dict[str, Any] | None:
+    """Resolve parent variables and array subquestion composite ids (parentId#sqCode)."""
+    if "#" not in variable_id:
+        return get_variable(schema, variable_id)
+
+    parent_id, sq_code = variable_id.split("#", 1)
+    parent = get_variable(schema, parent_id)
+    if not parent:
+        return None
+    sq = next(
+        (s for s in parent.get("subquestions") or [] if str(s.get("code", "")) == sq_code),
+        None,
+    )
+    if not sq or not sq.get("column"):
+        return None
+    label = str(sq.get("label") or sq_code)
+    return {
+        **parent,
+        "id": variable_id,
+        "code": f"{parent.get('code', '')}_{sq_code}",
+        "text": f"{parent.get('text', '')} — {label}",
+        "kind": "single",
+        "columns": [sq["column"]],
+        "subquestions": [],
+        "type_label": f"Array item · {parent.get('type_label', 'Array')}",
+    }
+
+
 def run_advanced_analysis(
     survey_id: int,
     *,
@@ -65,14 +93,14 @@ def run_advanced_analysis(
 
 
 def _numeric_series(schema: dict[str, Any], df: pd.DataFrame, variable_id: str) -> pd.Series | None:
-    var = get_variable(schema, variable_id)
+    var = _resolve_stats_variable(schema, variable_id)
     if not var:
         return None
     return _value_series_for_chart(var, df)
 
 
 def _categorical_series(schema: dict[str, Any], df: pd.DataFrame, variable_id: str) -> pd.Series | None:
-    var = get_variable(schema, variable_id)
+    var = _resolve_stats_variable(schema, variable_id)
     if not var:
         return None
     col = _find_column(var, df)
@@ -85,7 +113,7 @@ def _categorical_series(schema: dict[str, Any], df: pd.DataFrame, variable_id: s
 
 
 def _var_label(schema: dict[str, Any], variable_id: str) -> str:
-    var = get_variable(schema, variable_id)
+    var = _resolve_stats_variable(schema, variable_id)
     return var["text"] if var else variable_id
 
 

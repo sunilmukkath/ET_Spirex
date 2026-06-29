@@ -38,10 +38,12 @@ export function SignInForm({ onSuccess, compact }: Props) {
           src="/scout-mark.png"
           alt=""
           aria-hidden
-          className="h-10 w-10 shrink-0 object-contain"
+          className="et-scout-mark-light h-10 w-10 shrink-0 object-contain"
         />
         <div>
-          <h2 className="text-lg font-semibold text-white">Sign in to ET Scout</h2>
+          <h2 className="text-lg font-semibold text-white">
+            Sign in to ET <span className="text-[var(--et-yellow-bright)]">Scout</span>
+          </h2>
           <p className="text-xs text-white/60">Elastic Tree team access</p>
         </div>
       </div>

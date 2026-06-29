@@ -3,6 +3,7 @@ import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   BarChart3,
+  ClipboardList,
   Database,
   Download,
   Info,
@@ -38,6 +39,7 @@ import { SurveyOverviewBar } from '../components/analysis/SurveyOverviewBar'
 import { CrosstabsResults, ProfileResults } from '../components/analysis/Results'
 import { AnalysisBookmarkMenu } from '../components/analysis/AnalysisBookmarkMenu'
 import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
+import { FieldManagementPanel } from '../components/analysis/FieldManagementPanel'
 import { SuggestedCharts } from '../components/analysis/SuggestedCharts'
 import { StatusBadge } from '../components/StatusBadge'
 import { ErrorState, TableSkeleton } from '../components/States'
@@ -72,13 +74,14 @@ function PanelLoader() {
   )
 }
 
-type Mode = 'explore' | 'charts' | 'crosstabs' | 'quality' | 'variables' | 'data' | 'multivariate'
+type Mode = 'explore' | 'charts' | 'crosstabs' | 'quality' | 'variables' | 'fields' | 'data' | 'multivariate'
 
 function parseMode(raw: string | null): Mode {
   if (raw === 'crosstabs' || raw === 'compare') return 'crosstabs'
   if (raw === 'charts') return 'charts'
   if (raw === 'quality') return 'quality'
   if (raw === 'variables') return 'variables'
+  if (raw === 'fields' || raw === 'quotas' || raw === 'field-management') return 'fields'
   if (raw === 'data') return 'data'
   if (raw === 'multivariate' || raw === 'advanced' || raw === 'statistics') return 'multivariate'
   if (raw === 'explore' || raw === 'questions') return 'explore'
@@ -92,6 +95,7 @@ function modeLabel(mode: Mode): string {
   if (mode === 'charts') return 'Charts'
   if (mode === 'quality') return 'Response QC'
   if (mode === 'variables') return 'Setup'
+  if (mode === 'fields') return 'Fields'
   return 'Data'
 }
 
@@ -711,6 +715,9 @@ export function SurveyWorkspace() {
             <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
               Setup
             </ModeButton>
+            <ModeButton active={mode === 'fields'} onClick={() => setMode('fields')} icon={<ClipboardList size={15} />}>
+              Fields
+            </ModeButton>
             <ModeButton active={mode === 'quality'} onClick={() => setMode('quality')} icon={<ShieldCheck size={15} />}>
               Quality
             </ModeButton>
@@ -722,7 +729,7 @@ export function SurveyWorkspace() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-          {mode !== 'quality' && mode !== 'variables' && mode !== 'data' && mode !== 'charts' && mode !== 'multivariate' && (
+          {mode !== 'quality' && mode !== 'variables' && mode !== 'fields' && mode !== 'data' && mode !== 'charts' && mode !== 'multivariate' && (
             <QuestionNavigator
               variables={activeSchema?.variables ?? []}
               groups={activeSchema?.groups ?? []}
@@ -867,6 +874,13 @@ export function SurveyWorkspace() {
               focusQuestionId={focusQuestionId}
               onFocusQuestionConsumed={() => setFocusQuestionId(null)}
               onChanged={reloadCustomVariables}
+            />
+          )}
+
+          {mode === 'fields' && (
+            <FieldManagementPanel
+              surveyId={surveyId}
+              variables={activeSchema?.variables ?? []}
             />
           )}
 

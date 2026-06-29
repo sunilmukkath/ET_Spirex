@@ -179,6 +179,98 @@ export interface WeightConfig {
   variable_id: string | null
 }
 
+export interface QuotaCellTarget {
+  code: string
+  target: number
+  min_value?: number | null
+  max_value?: number | null
+}
+
+export interface QuotaFieldConfig {
+  variable_id: string
+  quota_type: 'count' | 'percent'
+  cells: QuotaCellTarget[]
+}
+
+export interface QuotaLayerCellTarget {
+  codes: Record<string, string>
+  target: number
+  min_value?: number | null
+  max_value?: number | null
+}
+
+export interface QuotaLayerConfig {
+  id: string
+  name: string
+  variable_ids: string[]
+  quota_type: 'count' | 'percent'
+  cells: QuotaLayerCellTarget[]
+}
+
+export interface QuotaConfig {
+  basis: 'complete' | 'qc_approved'
+  tolerance_count: number
+  tolerance_pct: number
+  fields: QuotaFieldConfig[]
+  layers: QuotaLayerConfig[]
+}
+
+export interface QuotaCheckCell {
+  code?: string
+  codes?: Record<string, string>
+  label: string
+  target: number
+  min_value: number | null
+  max_value: number | null
+  actual: number
+  actual_pct: number
+  gap: number
+  status: 'met' | 'under' | 'over' | 'empty'
+}
+
+export interface QuotaCheckField {
+  variable_id: string
+  code: string
+  label: string
+  quota_type: 'count' | 'percent'
+  cells: QuotaCheckCell[]
+  status: string
+  error?: string
+}
+
+export interface QuotaCheckLayer {
+  id: string
+  name: string
+  variable_ids: string[]
+  labels: Record<string, string>
+  quota_type: 'count' | 'percent'
+  cells: QuotaCheckCell[]
+  status: string
+  error?: string
+}
+
+export interface QuotaCheckResult {
+  basis: string
+  checked_at: string
+  total_completes: number
+  tolerance_count: number
+  tolerance_pct: number
+  fields: QuotaCheckField[]
+  layers: QuotaCheckLayer[]
+  summary: {
+    fields_ok: number
+    fields_under: number
+    fields_over: number
+    fields_mixed: number
+    fields_empty: number
+    layers_ok: number
+    layers_under: number
+    layers_over: number
+    layers_mixed: number
+    layers_empty: number
+  }
+}
+
 export interface FilterSpec {
   variable_id: string
   values: string[]
@@ -684,6 +776,17 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  getQuotaConfig: (id: number) => fetchJson<QuotaConfig>(`/api/projects/${id}/quota/config`),
+  setQuotaConfig: (id: number, body: QuotaConfig) =>
+    fetchJson<QuotaConfig>(`/api/projects/${id}/quota/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  checkQuotas: (id: number, completionStatus?: string) => {
+    const qs = completionStatus ? `?completion_status=${encodeURIComponent(completionStatus)}` : ''
+    return fetchJson<QuotaCheckResult>(`/api/projects/${id}/quota/check${qs}`, { method: 'POST' })
+  },
   getCustomVariables: (id: number) =>
     fetchJson<{ variables: CustomVariable[] }>(`/api/projects/${id}/variables/custom`),
   createCustomVariable: (id: number, body: CustomVariableInput) =>

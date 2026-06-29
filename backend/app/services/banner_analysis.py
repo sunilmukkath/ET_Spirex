@@ -1544,6 +1544,25 @@ def _value_series_for_chart(var: dict[str, Any], df: pd.DataFrame) -> pd.Series:
             count = count + checked.astype(float)
         return count
 
+    if kind == "array":
+        subquestions = var.get("subquestions") or []
+        cols = [sq["column"] for sq in subquestions if sq.get("column") in df.columns]
+        if cols:
+            nums = df[cols].apply(pd.to_numeric, errors="coerce")
+            if nums.notna().any().any():
+                return nums.mean(axis=1)
+        col = _find_column(var, df)
+        if col and col in df.columns:
+            raw = df[col].astype(str).str.strip()
+            numeric = pd.to_numeric(raw.replace({"": pd.NA, "nan": pd.NA}), errors="coerce")
+            if numeric.notna().sum() >= max(3, int(len(df) * 0.3)):
+                return numeric
+            options = var.get("answer_options") or builtin_scale_options(var)
+            if options:
+                code_to_idx = {str(o["code"]): float(i + 1) for i, o in enumerate(options)}
+                canonical = raw.map(lambda v: canonical_answer_code(var, v))
+                return canonical.map(code_to_idx)
+
     return pd.Series(index=df.index, dtype=float)
 
 

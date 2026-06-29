@@ -43,6 +43,9 @@ from app.services.analysis_bookmark_store import (
 )
 from app.services.weight_config_store import get_weight_config, set_weight_config
 from app.services.qc_config_store import QcConfig, get_qc_config, set_qc_config
+from app.models.quota_config import QuotaConfig
+from app.services.quota_config_store import get_quota_config, set_quota_config
+from app.services.quota_check import check_quotas, quota_eligible_variables
 from app.models.workspace_prefs import (
     AnalysisBookmarkCreate,
     FilterPresetCreate,
@@ -229,6 +232,33 @@ def get_qc_summary_route(survey_id: int):
 @router.put("/projects/{survey_id}/qc/config")
 def put_qc_config_route(survey_id: int, config: QcConfig):
     return set_qc_config(survey_id, config).model_dump()
+
+
+@router.get("/projects/{survey_id}/quota/config")
+def get_quota_config_route(survey_id: int):
+    return get_quota_config(survey_id).model_dump()
+
+
+@router.put("/projects/{survey_id}/quota/config")
+def put_quota_config_route(survey_id: int, config: QuotaConfig):
+    return set_quota_config(survey_id, config).model_dump()
+
+
+@router.post("/projects/{survey_id}/quota/check")
+def post_quota_check_route(survey_id: int, completion_status: str | None = None):
+    try:
+        return check_quotas(survey_id, completion_status=completion_status)
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/quota/eligible")
+def get_quota_eligible_route(survey_id: int, completion_status: str = "complete"):
+    try:
+        schema = build_survey_schema(survey_id, completion_status=completion_status, light=True)
+        return {"variables": quota_eligible_variables(schema)}
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
 
 
 @router.get("/projects/{survey_id}/variables/{variable_id}/filter-options")

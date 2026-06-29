@@ -1,4 +1,59 @@
-import type { AdvancedAnalysisResult } from '../api/client'
+import type { AdvancedAnalysisResult, SurveyVariable } from '../api/client'
+
+const NUMERIC_METRICS = new Set(['mean', 'top2box', 'bottom2box', 'net_score', 'rank_avg', 'checkbox_rate'])
+
+export function isNumericForStatistics(v: SurveyVariable): boolean {
+  if (v.kind === 'numeric') return true
+  if (v.metrics.some((m) => NUMERIC_METRICS.has(m))) return true
+  if (v.kind === 'array') return true
+  if (v.kind === 'multi' && ((v.subquestions?.length ?? 0) > 0 || (v.answer_options?.length ?? 0) > 0)) {
+    return true
+  }
+  if ((v.kind === 'single' || v.kind === 'rank' || v.custom) && (v.answer_options?.length ?? 0) > 0) {
+    return true
+  }
+  return false
+}
+
+export function isCategoricalForStatistics(v: SurveyVariable): boolean {
+  if ((v.kind === 'single' || v.kind === 'rank' || v.custom) && (v.answer_options?.length ?? 0) > 0) {
+    return true
+  }
+  return false
+}
+
+/** Include array subquestions as separate selectable variables for statistics. */
+export function expandVariablesForStatistics(variables: SurveyVariable[]): SurveyVariable[] {
+  const out: SurveyVariable[] = []
+  for (const v of variables) {
+    if (v.kind === 'array' && (v.subquestions?.length ?? 0) > 0) {
+      for (const sq of v.subquestions) {
+        if (!sq.column) continue
+        out.push({
+          ...v,
+          id: `${v.id}#${sq.code}`,
+          code: `${v.code}_${sq.code}`,
+          text: `${v.text} — ${sq.label || sq.code}`,
+          kind: 'single',
+          columns: [sq.column],
+          subquestions: [],
+          type_label: `Array item · ${v.type_label}`,
+        })
+      }
+      continue
+    }
+    out.push(v)
+  }
+  return out
+}
+
+export function numericVariablesForStatistics(variables: SurveyVariable[]): SurveyVariable[] {
+  return expandVariablesForStatistics(variables).filter(isNumericForStatistics)
+}
+
+export function categoricalVariablesForStatistics(variables: SurveyVariable[]): SurveyVariable[] {
+  return expandVariablesForStatistics(variables).filter(isCategoricalForStatistics)
+}
 
 export function formatPValue(p: number | null | undefined): string {
   if (p == null || Number.isNaN(p)) return '—'

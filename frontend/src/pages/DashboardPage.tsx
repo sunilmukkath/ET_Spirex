@@ -14,10 +14,10 @@ function parseCreated(value: string | null | undefined): number {
   return Number.isNaN(t) ? 0 : t
 }
 
-function projectSortKey(project: Project): [number, number, number] {
-  const statusRank = project.status === 'active' ? 0 : 1
+function projectSortKey(project: Project): [number, number] {
   const created = parseCreated(project.created_date)
-  return [statusRank, -created, -project.id]
+  if (created > 0) return [-created, -project.id]
+  return [0, -project.id]
 }
 
 function sortProjectsForDashboard(projects: Project[]): Project[] {
@@ -75,20 +75,22 @@ export function DashboardPage() {
           const { stats } = await api.getProjectStats(batch)
           if (cancelled) break
           setProjects((prev) =>
-            prev.map((p) => {
-              const meta = stats[String(p.id)]
-              if (!meta) return p
-              return {
-                ...p,
-                created_date: meta.created_date ?? p.created_date,
-                responses: {
-                  completed: meta.completed,
-                  incomplete: meta.incomplete,
-                  total: meta.total,
-                  loaded: true,
-                },
-              }
-            }),
+            sortProjectsForDashboard(
+              prev.map((p) => {
+                const meta = stats[String(p.id)]
+                if (!meta) return p
+                return {
+                  ...p,
+                  created_date: meta.created_date ?? p.created_date,
+                  responses: {
+                    completed: meta.completed,
+                    incomplete: meta.incomplete,
+                    total: meta.total,
+                    loaded: true,
+                  },
+                }
+              }),
+            ),
           )
         } catch {
           // continue with next batch
@@ -134,7 +136,7 @@ export function DashboardPage() {
           </div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Your surveys</h2>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">
-            Active surveys first, newest at the top. Open a survey to explore questions, build charts, run crosstabs, or review quality.
+            Newest surveys first. Open a survey to explore questions, build charts, run crosstabs, or review quality.
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             {connection && (

@@ -10,6 +10,8 @@
   --et-teal-light: #e0f2f1;
   --et-gold: #c5a572;
   --et-gold-light: #f5efe6;
+  --et-yellow: #e8b923;
+  --et-yellow-bright: #fde047;
 
   --sidebar-bg: #0c2340;
   --sidebar-hover: #132f52;
@@ -50,6 +52,16 @@ body {
     linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
   background-size: 48px 48px;
+}
+
+.et-scout-mark {
+  filter: brightness(0) saturate(100%) invert(79%) sepia(74%) saturate(560%) hue-rotate(359deg)
+    brightness(101%) contrast(94%);
+}
+
+.et-scout-mark-light {
+  filter: brightness(0) saturate(100%) invert(93%) sepia(48%) saturate(746%) hue-rotate(359deg)
+    brightness(107%) contrast(98%);
 }
 
 .et-canvas-dots {
