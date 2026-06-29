@@ -1,13 +1,12 @@
 interface BrandLogoProps {
   size?: 'sm' | 'md' | 'lg'
-  showTagline?: boolean
   variant?: 'light' | 'dark'
 }
 
-export function BrandLogo({ size = 'md', showTagline = true, variant = 'dark' }: BrandLogoProps) {
+export function BrandLogo({ size = 'md', variant = 'dark' }: BrandLogoProps) {
   const isLight = variant === 'light'
-  const markSize = size === 'sm' ? 'h-8 w-8' : size === 'lg' ? 'h-11 w-11' : 'h-9 w-9'
-  const titleClass = size === 'lg' ? 'text-lg' : size === 'sm' ? 'text-sm' : 'text-base'
+  const markSize = size === 'sm' ? 'h-9 w-9' : size === 'lg' ? 'h-12 w-12' : 'h-10 w-10'
+  const titleClass = size === 'lg' ? 'text-2xl' : size === 'sm' ? 'text-base' : 'text-lg'
 
   return (
     <div className="flex items-center gap-3">
@@ -17,32 +16,21 @@ export function BrandLogo({ size = 'md', showTagline = true, variant = 'dark' }:
         aria-hidden
         className={`${isLight ? 'et-scout-mark-light' : 'et-scout-mark'} ${markSize} shrink-0 object-contain`}
       />
-      <div className="min-w-0">
-        <div className="flex items-baseline gap-0.5">
-          <span
-            className={`font-bold tracking-tight ${titleClass} ${
-              isLight ? 'text-white' : 'text-[var(--et-navy)]'
-            }`}
-          >
-            ET
-          </span>
-          <span
-            className={`font-bold tracking-tight ${titleClass} ${
-              isLight ? 'text-[var(--et-yellow-bright)]' : 'text-[var(--et-yellow)]'
-            }`}
-          >
-            Scout
-          </span>
-        </div>
-        {showTagline && (
-          <p
-            className={`truncate text-[10px] font-semibold uppercase tracking-[0.18em] ${
-              isLight ? 'text-[var(--et-teal-light)]/80' : 'text-slate-500'
-            }`}
-          >
-            Elastic Tree Analytics
-          </p>
-        )}
+      <div className="flex items-baseline gap-0.5">
+        <span
+          className={`font-bold tracking-tight ${titleClass} ${
+            isLight ? 'text-white' : 'text-[var(--et-navy)]'
+          }`}
+        >
+          ET
+        </span>
+        <span
+          className={`font-bold tracking-tight ${titleClass} ${
+            isLight ? 'text-[var(--et-yellow-bright)]' : 'text-[var(--et-yellow)]'
+          }`}
+        >
+          Scout
+        </span>
       </div>
     </div>
   )

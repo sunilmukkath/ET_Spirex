@@ -12,7 +12,7 @@ import { api, setAuthToken } from '../api/client'
 const STORAGE_KEY = 'et_scout_auth'
 const LEGACY_STORAGE_KEY = 'et_spirex_auth'
 
-export const TEAM_USERS = ['Sunil', 'Tony', 'Ravi', 'Aneena', 'Shilaja'] as const
+export const TEAM_USERS = ['Sunil', 'Tony', 'Ravi', 'Aneena', 'Shilaja', 'Palani'] as const
 
 interface AuthState {
   username: string

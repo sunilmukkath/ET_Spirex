@@ -36,6 +36,8 @@ interface Props {
   onCompareRemove?: (id: string) => void
   sideRowIds?: string[]
   onSideRowToggle?: (id: string) => void
+  onAfterSelect?: () => void
+  className?: string
 }
 
 export const QuestionNavigator = memo(function QuestionNavigator({
@@ -50,6 +52,8 @@ export const QuestionNavigator = memo(function QuestionNavigator({
   onCompareRemove,
   sideRowIds = [],
   onSideRowToggle,
+  onAfterSelect,
+  className = '',
 }: Props) {
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search)
@@ -80,7 +84,7 @@ export const QuestionNavigator = memo(function QuestionNavigator({
 
   if (loading) {
     return (
-      <aside className="et-sidebar">
+      <aside className={`et-sidebar ${className}`.trim()}>
         <div className="et-sidebar-header">
           <div className="skeleton h-9 rounded-lg" />
         </div>
@@ -94,7 +98,7 @@ export const QuestionNavigator = memo(function QuestionNavigator({
   }
 
   return (
-    <aside className="et-sidebar">
+    <aside className={`et-sidebar ${className}`.trim()}>
       <div className="et-sidebar-header">
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
           {compareMode ? 'Side / Banners' : 'Questions'}
@@ -162,7 +166,10 @@ export const QuestionNavigator = memo(function QuestionNavigator({
                         >
                           <button
                             type="button"
-                            onClick={() => onSelect(v.id)}
+                            onClick={() => {
+                              onSelect(v.id)
+                              onAfterSelect?.()
+                            }}
                             className="min-w-0 flex-1 px-3 py-2.5 text-left"
                           >
                             <div className="flex items-center gap-2">

@@ -32,7 +32,7 @@ export function AppShell() {
       <header className="sticky top-0 z-20 border-b border-[var(--et-teal)]/10 bg-white/90 shadow-sm backdrop-blur-md">
         <div className="et-page et-page-wide flex items-center justify-between gap-4 py-3.5">
           <Link to="/dashboard" className="rounded-lg transition hover:opacity-90">
-            <BrandLogo size="sm" showTagline={false} />
+            <BrandLogo size="sm" />
           </Link>
 
           <nav className="hidden items-center gap-1 sm:flex">

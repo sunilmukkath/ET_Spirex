@@ -5,10 +5,10 @@ import {
   BarChart3,
   ClipboardList,
   Database,
-  Download,
   Info,
   Layers,
   Loader2,
+  PanelLeft,
   ShieldCheck,
   Sigma,
   SlidersHorizontal,
@@ -31,13 +31,11 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { BrandLogo } from '../components/BrandLogo'
-import { BannerPicker } from '../components/analysis/BannerPicker'
-import { BannerLayerEditor } from '../components/analysis/BannerLayerEditor'
+import { CrosstabsPanel } from '../components/analysis/CrosstabsPanel'
 import { FilterEditor } from '../components/analysis/FilterEditor'
 import { QuestionNavigator } from '../components/analysis/QuestionNavigator'
 import { SurveyOverviewBar } from '../components/analysis/SurveyOverviewBar'
-import { CrosstabsResults, ProfileResults } from '../components/analysis/Results'
-import { AnalysisBookmarkMenu } from '../components/analysis/AnalysisBookmarkMenu'
+import { ProfileResults } from '../components/analysis/Results'
 import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
 import { FieldManagementPanel } from '../components/analysis/FieldManagementPanel'
 import { SuggestedCharts } from '../components/analysis/SuggestedCharts'
@@ -145,6 +143,7 @@ export function SurveyWorkspace() {
     excluded_count: number
     has_review: boolean
   } | null>(null)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   const reloadQcSummary = useCallback(async () => {
     if (!surveyId) return
@@ -168,6 +167,10 @@ export function SurveyWorkspace() {
     if (!surveyId) return
     reloadQcSummary()
   }, [surveyId, schemaVersion, reloadQcSummary])
+
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [mode])
 
   const mergedSchema = useMemo((): SurveySchema | null => {
     if (!schema) return null
@@ -598,6 +601,7 @@ export function SurveyWorkspace() {
 
   function handleSelectQuestion(id: string) {
     setSelectedId(id)
+    setMobileNavOpen(false)
     if (mode === 'crosstabs') {
       setSideRowIds((prev) => {
         const rest = prev.filter((x) => x !== id)
@@ -606,6 +610,14 @@ export function SurveyWorkspace() {
       setBannerResult(null)
     }
   }
+
+  const showsQuestionNav =
+    mode !== 'quality' &&
+    mode !== 'variables' &&
+    mode !== 'fields' &&
+    mode !== 'data' &&
+    mode !== 'charts' &&
+    mode !== 'multivariate'
 
   return (
     <div className="flex h-screen flex-col bg-[var(--canvas)]">
@@ -620,7 +632,7 @@ export function SurveyWorkspace() {
           </Link>
           <div className="hidden h-6 w-px bg-slate-200 md:block" />
           <Link to="/dashboard" className="hidden shrink-0 rounded-lg transition hover:opacity-90 md:block">
-            <BrandLogo size="sm" showTagline={false} />
+            <BrandLogo size="sm" />
           </Link>
           <div className="hidden h-6 w-px bg-slate-200 lg:block" />
 
@@ -691,7 +703,17 @@ export function SurveyWorkspace() {
           </div>
         </div>
 
-        <div className="et-toolbar-scroll flex items-center gap-3 border-t border-slate-100 bg-slate-50/90 px-4 py-2">
+        <div className="et-toolbar-scroll flex items-center gap-2 border-t border-slate-100 bg-slate-50/90 px-3 py-2 sm:gap-3 sm:px-4">
+          {showsQuestionNav && (
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 md:hidden"
+            >
+              <PanelLeft size={15} />
+              {mode === 'crosstabs' ? 'Rows & banners' : 'Questions'}
+            </button>
+          )}
           <span className="hidden shrink-0 et-kicker lg:inline">Analyze</span>
           <div className="et-segment">
             <ModeButton active={mode === 'explore'} onClick={() => setMode('explore')} icon={<Layers size={15} />}>
@@ -728,26 +750,44 @@ export function SurveyWorkspace() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-          {mode !== 'quality' && mode !== 'variables' && mode !== 'fields' && mode !== 'data' && mode !== 'charts' && mode !== 'multivariate' && (
-            <QuestionNavigator
-              variables={activeSchema?.variables ?? []}
-              groups={activeSchema?.groups ?? []}
-              selectedId={selectedId}
-              onSelect={handleSelectQuestion}
-              loading={schemaLoading}
-              compareMode={mode === 'crosstabs'}
-              compareIds={bannerIds}
-              onCompareToggle={addBanner}
-              onCompareRemove={(id) =>
-                setBannerLayers((prev) => {
-                  const next = prev.map((layer) => layer.filter((x) => x !== id))
-                  return next.some((layer) => layer.length > 0) ? next : [[]]
-                })
-              }
-              sideRowIds={sideRowIds}
-              onSideRowToggle={toggleSideRow}
+      <div className="relative flex min-h-0 flex-1">
+          {showsQuestionNav && mobileNavOpen && (
+            <button
+              type="button"
+              aria-label="Close question panel"
+              className="fixed inset-0 z-40 bg-slate-900/50 md:hidden"
+              onClick={() => setMobileNavOpen(false)}
             />
+          )}
+          {showsQuestionNav && (
+            <div
+              className={`${
+                mobileNavOpen
+                  ? 'fixed inset-y-0 left-0 z-50 flex shadow-2xl md:relative md:z-auto md:shadow-none'
+                  : 'hidden md:flex'
+              }`}
+            >
+              <QuestionNavigator
+                variables={activeSchema?.variables ?? []}
+                groups={activeSchema?.groups ?? []}
+                selectedId={selectedId}
+                onSelect={handleSelectQuestion}
+                loading={schemaLoading}
+                compareMode={mode === 'crosstabs'}
+                compareIds={bannerIds}
+                onCompareToggle={addBanner}
+                onCompareRemove={(id) =>
+                  setBannerLayers((prev) => {
+                    const next = prev.map((layer) => layer.filter((x) => x !== id))
+                    return next.some((layer) => layer.length > 0) ? next : [[]]
+                  })
+                }
+                sideRowIds={sideRowIds}
+                onSideRowToggle={toggleSideRow}
+                onAfterSelect={() => setMobileNavOpen(false)}
+                className="h-full max-h-screen md:max-h-none"
+              />
+            </div>
           )}
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -1192,381 +1232,6 @@ function ExplorePanel({
   )
 }
 
-function CrosstabsPanel({
-  surveyId,
-  completionStatus,
-  variables,
-  sideRowVars,
-  sideRowIds,
-  bannerVars,
-  bannerLayers,
-  onBannerLayersChange,
-  onAddSideRow,
-  onAddAllSideRows,
-  onAddAllBanners,
-  onCopySideRowsToBannerLayer,
-  onClearSideRows,
-  onClearBanners,
-  onRemoveSideRow,
-  filters,
-  filterTree,
-  onFiltersChange,
-  onFilterTreeChange,
-  metric,
-  onMetricChange,
-  availableMetrics,
-  showCounts,
-  onShowCountsChange,
-  showColPct,
-  onShowColPctChange,
-  showRowPct,
-  onShowRowPctChange,
-  sigEnabled,
-  onSigEnabledChange,
-  confidenceLevel,
-  onConfidenceLevelChange,
-  analyzing,
-  exporting,
-  onRun,
-  onExport,
-  bannerResult,
-  schemaLoading,
-  tableFilters,
-  onTableFiltersChange,
-  onRefreshTable,
-  refreshingTableId,
-  onPresetApply,
-  onLoadBookmark,
-  buildBookmarkConfig,
-  onExportReport,
-  exportingReport,
-}: {
-  surveyId: number
-  completionStatus: string
-  variables: SurveyVariable[]
-  sideRowVars: SurveyVariable[]
-  sideRowIds: string[]
-  bannerVars: SurveyVariable[]
-  bannerLayers: string[][]
-  onBannerLayersChange: (layers: string[][]) => void
-  onAddSideRow: (id: string) => void
-  onAddAllSideRows: () => void
-  onAddAllBanners: () => void
-  onCopySideRowsToBannerLayer: (layerIndex: number) => void
-  onClearSideRows: () => void
-  onClearBanners: () => void
-  onRemoveSideRow: (id: string) => void
-  filters: FilterSpec[]
-  filterTree: FilterGroup | null
-  onFiltersChange: (filters: FilterSpec[]) => void
-  onFilterTreeChange: (tree: FilterGroup | null) => void
-  metric: string
-  onMetricChange: (m: string) => void
-  availableMetrics: string[]
-  showCounts: boolean
-  onShowCountsChange: (v: boolean) => void
-  showColPct: boolean
-  onShowColPctChange: (v: boolean) => void
-  showRowPct: boolean
-  onShowRowPctChange: (v: boolean) => void
-  sigEnabled: boolean
-  onSigEnabledChange: (v: boolean) => void
-  confidenceLevel: number
-  onConfidenceLevelChange: (v: number) => void
-  analyzing: boolean
-  exporting: boolean
-  onRun: () => void
-  onExport: () => void
-  bannerResult: BannerResult | null
-  schemaLoading: boolean
-  tableFilters: Record<string, FilterSpec[]>
-  onTableFiltersChange: (rowId: string, filters: FilterSpec[]) => void
-  onRefreshTable: (rowId: string, tableIndex: number) => void
-  refreshingTableId: string | null
-  onPresetApply: (preset: FilterPreset) => void
-  onLoadBookmark: (bm: AnalysisBookmark) => void
-  buildBookmarkConfig: () => { name: string; config: Record<string, unknown> }
-  onExportReport: (format: 'pdf' | 'pptx') => void
-  exportingReport: boolean
-}) {
-  const canRun = sideRowVars.length > 0 && bannerVars.length > 0 && !schemaLoading
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="max-h-[45vh] shrink-0 overflow-y-auto border-b border-slate-200 bg-white px-6 py-4">
-        <div className="flex flex-wrap items-start gap-4">
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Side (rows)</p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <SelectionChips
-                vars={sideRowVars}
-                onRemove={onRemoveSideRow}
-                onClearAll={onClearSideRows}
-                chipClassName="inline-flex max-w-[200px] items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-800 ring-1 ring-indigo-200"
-              />
-              <BannerPicker
-                variables={variables}
-                selectedIds={sideRowIds}
-                onAdd={onAddSideRow}
-                onRemove={onRemoveSideRow}
-                onAddAll={onAddAllSideRows}
-                label="Add side row"
-                pickerTitle="Side rows"
-                emptyMessage="No side row questions available"
-                variant="side"
-                showAddAll
-              />
-            </div>
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Banners (columns)</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={onAddAllBanners}
-                  className="text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
-                >
-                  Add all
-                </button>
-                {sideRowIds.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => onCopySideRowsToBannerLayer(0)}
-                    className="text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
-                  >
-                    Copy side rows
-                  </button>
-                )}
-                {bannerLayers.some((layer) => layer.length > 0) && (
-                  <button
-                    type="button"
-                    onClick={onClearBanners}
-                    className="text-[10px] font-medium text-slate-500 hover:text-red-600"
-                  >
-                    Clear all
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="mt-1.5">
-              <BannerLayerEditor
-                variables={variables.filter((v) => v.can_banner)}
-                layers={bannerLayers}
-                onChange={onBannerLayersChange}
-                sideRowIds={sideRowIds}
-                onCopySideRowsToLayer={onCopySideRowsToBannerLayer}
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="text-xs">
-              <span className="font-medium text-slate-500">Metric</span>
-              <select value={metric} onChange={(e) => onMetricChange(e.target.value)} className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
-                {availableMetrics.map((m) => (
-                  <option key={m} value={m}>{metricLabel(m)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs">
-              <span className="font-medium text-slate-500">Sig. level</span>
-              <select
-                value={sigEnabled ? String(confidenceLevel) : 'off'}
-                onChange={(e) => {
-                  if (e.target.value === 'off') {
-                    onSigEnabledChange(false)
-                  } else {
-                    onSigEnabledChange(true)
-                    onConfidenceLevelChange(Number(e.target.value))
-                  }
-                }}
-                className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-              >
-                <option value="off">Off</option>
-                <option value="0.9">90%</option>
-                <option value="0.95">95%</option>
-                <option value="0.99">99%</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-slate-600">
-          <span className="font-medium text-slate-500">Show:</span>
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={showCounts} onChange={(e) => onShowCountsChange(e.target.checked)} />
-            Counts
-          </label>
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={showColPct} onChange={(e) => onShowColPctChange(e.target.checked)} />
-            Column %
-          </label>
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={showRowPct} onChange={(e) => onShowRowPctChange(e.target.checked)} />
-            Row %
-          </label>
-          <div className="ml-auto flex gap-2">
-            <button
-              type="button"
-              onClick={onRun}
-              disabled={!canRun || analyzing}
-              className="inline-flex items-center gap-2 rounded-lg bg-[var(--et-teal)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
-            >
-              {analyzing ? <Loader2 className="animate-spin" size={16} /> : <Table2 size={16} />}
-              Build crosstab
-            </button>
-            {bannerResult && !bannerResult.error && (
-              <>
-                <button
-                  type="button"
-                  onClick={onExport}
-                  disabled={exporting}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                >
-                  {exporting ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
-                  Export Excel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onExportReport('pdf')}
-                  disabled={exportingReport}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                >
-                  PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onExportReport('pptx')}
-                  disabled={exportingReport}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                >
-                  PPT
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-3 space-y-2">
-          <AnalysisBookmarkMenu
-            surveyId={surveyId}
-            kind="crosstab"
-            onSave={buildBookmarkConfig}
-            onLoad={onLoadBookmark}
-          />
-          <FilterEditor
-            surveyId={surveyId}
-            completionStatus={completionStatus}
-            variables={variables}
-            filters={filters}
-            filterTree={filterTree}
-            onChange={onFiltersChange}
-            onFilterTreeChange={onFilterTreeChange}
-            showPresets
-            onPresetApply={onPresetApply}
-            compact
-            heading="Default filters"
-          />
-        </div>
-
-        <p className="mt-2 text-xs text-slate-400">
-          Default filters apply to all tables on build. Override filters per table in each table section below.
-        </p>
-
-        <p className="mt-1 text-xs text-slate-400">
-          Use <strong>Add side row</strong> or <strong>Add banner column</strong> above, or click questions in the sidebar · <strong>+</strong> = banner · <strong>S</strong> = side row · a question can be both row and banner.
-        </p>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto p-6">
-        {!bannerResult && !analyzing && (
-          <EmptyCanvas
-            icon={<Table2 size={40} />}
-            title="Advanced crosstabs"
-            description="Add side row and banner column questions, choose table format options, then build the crosstab."
-          />
-        )}
-        {analyzing && (
-          <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
-            <Loader2 className="animate-spin text-[var(--et-teal)]" size={32} />
-            <p className="text-sm font-medium text-slate-700">Building crosstab…</p>
-            <p className="max-w-sm text-xs text-slate-500">
-              First run can take up to 2–3 minutes while response data loads from LimeSurvey.
-            </p>
-          </div>
-        )}
-        {bannerResult && !analyzing && (
-          <div className="animate-fade-in rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
-            <CrosstabsResults
-              result={bannerResult}
-              multiControls={{
-                surveyId,
-                completionStatus,
-                variables,
-                globalFilters: filters,
-                tableFilters,
-                onTableFiltersChange: onTableFiltersChange,
-                onRefreshTable: onRefreshTable,
-                refreshingTableId,
-              }}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function SelectionChips({
-  vars,
-  onRemove,
-  onClearAll,
-  chipClassName,
-  maxVisible = 3,
-}: {
-  vars: SurveyVariable[]
-  onRemove: (id: string) => void
-  onClearAll: () => void
-  chipClassName: string
-  maxVisible?: number
-}) {
-  if (vars.length === 0) return null
-
-  const visible = vars.slice(0, maxVisible)
-  const hiddenCount = vars.length - visible.length
-
-  return (
-    <>
-      {vars.length > maxVisible && (
-        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-          {vars.length} selected
-        </span>
-      )}
-      {visible.map((v) => (
-        <span key={v.id} className={chipClassName}>
-          <span className="truncate">{v.text || v.code}</span>
-          <button type="button" onClick={() => onRemove(v.id)} className="ml-0.5 rounded-full hover:opacity-70">
-            ×
-          </button>
-        </span>
-      ))}
-      {hiddenCount > 0 && (
-        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200">
-          +{hiddenCount} more
-        </span>
-      )}
-      <button
-        type="button"
-        onClick={onClearAll}
-        className="text-xs font-medium text-slate-400 hover:text-red-600"
-      >
-        Clear all
-      </button>
-    </>
-  )
-}
 
 function EmptyCanvas({
   icon,
@@ -1584,16 +1249,4 @@ function EmptyCanvas({
       <p className="mt-2 max-w-sm text-sm leading-relaxed text-slate-500">{description}</p>
     </div>
   )
-}
-
-function metricLabel(m: string) {
-  const labels: Record<string, string> = {
-    auto: 'Auto',
-    distribution: 'Distribution %',
-    checkbox_rate: '% Selected',
-    mean: 'Mean',
-    top2box: 'Top 2 box %',
-    bottom2box: 'Bottom 2 box %',
-  }
-  return labels[m] || m
 }

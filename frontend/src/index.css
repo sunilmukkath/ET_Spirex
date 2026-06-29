@@ -327,12 +327,18 @@ body {
 /* ── Sidebar ── */
 .et-sidebar {
   display: flex;
-  width: 18rem;
+  width: min(100vw - 3rem, 18rem);
   flex-shrink: 0;
   flex-direction: column;
   background: linear-gradient(180deg, var(--sidebar-bg) 0%, #0a1c33 100%);
   color: white;
   box-shadow: 4px 0 24px rgb(12 35 64 / 0.12);
+}
+
+@media (min-width: 768px) {
+  .et-sidebar {
+    width: 18rem;
+  }
 }
 
 .et-sidebar-header {

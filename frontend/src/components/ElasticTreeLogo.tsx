@@ -4,9 +4,9 @@ interface ElasticTreeLogoProps {
 }
 
 const HEIGHT: Record<NonNullable<ElasticTreeLogoProps['size']>, string> = {
-  sm: 'h-7',
-  md: 'h-9',
-  lg: 'h-11',
+  sm: 'h-5',
+  md: 'h-6',
+  lg: 'h-7',
 }
 
 export function ElasticTreeLogo({ size = 'md', className = '' }: ElasticTreeLogoProps) {
