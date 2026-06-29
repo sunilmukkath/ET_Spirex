@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { BarChart3, ChevronRight, Search, Sparkles, Wifi, WifiOff } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
@@ -6,28 +6,50 @@ import { api, type ConnectionStatus, type Project } from '../api/client'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
-const SURVEY_LIMIT = 12
+const STATS_BATCH = 40
+
+function parseCreated(value: string | null | undefined): number {
+  if (!value || value.startsWith('0000')) return 0
+  const t = Date.parse(value)
+  return Number.isNaN(t) ? 0 : t
+}
+
+function projectSortKey(project: Project): [number, number, number] {
+  const statusRank = project.status === 'active' ? 0 : 1
+  const created = parseCreated(project.created_date)
+  return [statusRank, -created, -project.id]
+}
+
+function sortProjectsForDashboard(projects: Project[]): Project[] {
+  return [...projects].sort((a, b) => {
+    const ka = projectSortKey(a)
+    const kb = projectSortKey(b)
+    for (let i = 0; i < ka.length; i += 1) {
+      if (ka[i] !== kb[i]) return ka[i] - kb[i]
+    }
+    return 0
+  })
+}
 
 export function DashboardPage() {
   const { user } = useAuth()
   const [connection, setConnection] = useState<ConnectionStatus | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  const [statsLoading, setStatsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const statsStarted = useRef(false)
 
   useEffect(() => {
     async function load() {
       try {
         setLoading(true)
         setError(null)
-        const [conn, data] = await Promise.all([
-          api.getConnection(),
-          api.getProjects({ limit: SURVEY_LIMIT, includeStats: true }),
-        ])
+        const [conn, data] = await Promise.all([api.getConnection(), api.getProjects()])
         setConnection(conn)
-        setProjects(data.projects)
+        setProjects(sortProjectsForDashboard(data.projects))
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load projects')
       } finally {
@@ -37,6 +59,50 @@ export function DashboardPage() {
     load()
   }, [])
 
+  useEffect(() => {
+    if (loading || !projects.length || statsStarted.current) return
+    statsStarted.current = true
+
+    let cancelled = false
+    const pending = projects.map((p) => p.id)
+
+    async function loadStats() {
+      setStatsLoading(true)
+      for (let i = 0; i < pending.length; i += STATS_BATCH) {
+        if (cancelled) break
+        const batch = pending.slice(i, i + STATS_BATCH)
+        try {
+          const { stats } = await api.getProjectStats(batch)
+          if (cancelled) break
+          setProjects((prev) =>
+            prev.map((p) => {
+              const meta = stats[String(p.id)]
+              if (!meta) return p
+              return {
+                ...p,
+                created_date: meta.created_date ?? p.created_date,
+                responses: {
+                  completed: meta.completed,
+                  incomplete: meta.incomplete,
+                  total: meta.total,
+                  loaded: true,
+                },
+              }
+            }),
+          )
+        } catch {
+          // continue with next batch
+        }
+      }
+      if (!cancelled) setStatsLoading(false)
+    }
+
+    loadStats()
+    return () => {
+      cancelled = true
+    }
+  }, [loading, projects.length])
+
   const filtered = useMemo(() => {
     return projects.filter((p) => {
       const matchesSearch = p.title.toLowerCase().includes(search.toLowerCase())
@@ -45,12 +111,15 @@ export function DashboardPage() {
     })
   }, [projects, search, statusFilter])
 
-  const counts = useMemo(() => ({
-    all: projects.length,
-    active: projects.filter((p) => p.status === 'active').length,
-    inactive: projects.filter((p) => p.status === 'inactive').length,
-    expired: projects.filter((p) => p.status === 'expired').length,
-  }), [projects])
+  const counts = useMemo(
+    () => ({
+      all: projects.length,
+      active: projects.filter((p) => p.status === 'active').length,
+      inactive: projects.filter((p) => p.status === 'inactive').length,
+      expired: projects.filter((p) => p.status === 'expired').length,
+    }),
+    [projects],
+  )
 
   if (loading) return <LoadingState message="Loading surveys..." />
   if (error) return <ErrorState message={error} />
@@ -65,7 +134,7 @@ export function DashboardPage() {
           </div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Your surveys</h2>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">
-            Your {SURVEY_LIMIT} most recent surveys. Open one to explore questions, build charts, run crosstabs, or review quality.
+            Active surveys first, newest at the top. Open a survey to explore questions, build charts, run crosstabs, or review quality.
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             {connection && (
@@ -82,6 +151,9 @@ export function DashboardPage() {
                   : connection.message || 'Not connected'}
               </div>
             )}
+            {statsLoading && (
+              <span className="text-xs text-white/50">Refreshing response counts…</span>
+            )}
           </div>
         </div>
         <div className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full bg-[var(--et-teal)]/20 blur-2xl" />
@@ -90,7 +162,7 @@ export function DashboardPage() {
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: 'Shown', value: counts.all, tone: 'text-slate-900' },
+          { label: 'Total', value: counts.all, tone: 'text-slate-900' },
           { label: 'Active', value: counts.active, tone: 'text-emerald-700' },
           { label: 'Inactive', value: counts.inactive, tone: 'text-slate-600' },
           { label: 'Expired', value: counts.expired, tone: 'text-amber-700' },
@@ -153,7 +225,7 @@ export function DashboardPage() {
                   >
                     {project.responses.loaded
                       ? `${project.responses.completed.toLocaleString()} completed`
-                      : '—'}
+                      : '… loading'}
                   </span>
                 </div>
                 <span className="text-xs text-slate-400">#{project.id}</span>

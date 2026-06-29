@@ -135,6 +135,17 @@ def _survey_status(active: str | None, expires: str | None) -> str:
     return "active"
 
 
+def _project_dashboard_sort_key(project: dict[str, Any]) -> tuple[int, float, int]:
+    """Active surveys first, then newest created, then highest survey id."""
+    status_rank = 0 if project.get("status") == "active" else 1
+    created = _parse_timestamp(project.get("created_date"))
+    return (status_rank, -created, -int(project["id"]))
+
+
+def _sort_projects_for_dashboard(projects: list[dict[str, Any]]) -> None:
+    projects.sort(key=_project_dashboard_sort_key)
+
+
 def _parse_timestamp(value: str | None) -> float:
     if not value or str(value).startswith("0000"):
         return 0.0
@@ -263,7 +274,7 @@ def list_projects(*, include_stats: bool = False, limit: int | None = None) -> l
         return projects
 
     projects = execute_lime(load_projects)
-    projects.sort(key=lambda p: p["id"], reverse=True)
+    _sort_projects_for_dashboard(projects)
 
     if not include_stats:
         _projects_cache[cache_key] = (now, projects)
