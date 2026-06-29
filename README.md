@@ -2,6 +2,8 @@
 
 Survey intelligence platform for Elastic Tree, powered by LimeSurvey.
 
+**Live app:** [https://et-spirex.onrender.com/](https://et-spirex.onrender.com/)
+
 ## Features
 
 - **Project overview** — List all surveys with status (active / inactive / expired), response counts, and expiry dates
@@ -64,8 +66,8 @@ Use **Render** (free tier) or any Docker host instead:
 3. Set **Runtime** to **Docker** (uses the root `Dockerfile`)
 4. Add environment variables from `backend/.env.example`:
    - `LIMESURVEY_URL`, `LIMESURVEY_USERNAME`, `LIMESURVEY_PASSWORD`
-   - `CORS_ORIGINS=*` (or your Render URL)
-5. Deploy — one URL serves both the dashboard UI and `/api` routes
+   - `CORS_ORIGINS=https://et-spirex.onrender.com`
+5. Deploy — production URL: **https://et-spirex.onrender.com/** (UI + `/api` on one host)
 
 Alternatively, run locally in production mode:
 

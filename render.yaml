@@ -5,11 +5,11 @@
 # 2. Render → New → Web Service → connect sunilmukkath/ET_Spirex
 # 3. Runtime: Docker | Branch: main
 # 4. Add environment variables (see backend/.env.example)
-# 5. Deploy — your app will be at https://et-scout.onrender.com (or similar)
+# 5. Production URL: https://et-spirex.onrender.com/
 
 services:
   - type: web
-    name: et-scout
+    name: et-spirex
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile
@@ -22,4 +22,4 @@ services:
       - key: LIMESURVEY_PASSWORD
         sync: false
       - key: CORS_ORIGINS
-        value: "*"
+        value: "https://et-spirex.onrender.com"
