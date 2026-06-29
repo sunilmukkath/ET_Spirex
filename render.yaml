@@ -1,15 +1,15 @@
-# Deploy ET Spirex on Render (https://render.com) — free tier available.
+# Deploy ET Scout on Render (https://render.com) — free tier available.
 # Streamlit Community Cloud cannot host this app (React + FastAPI stack).
 #
 # 1. Push repo to GitHub
 # 2. Render → New → Web Service → connect sunilmukkath/ET_Spirex
 # 3. Runtime: Docker | Branch: main
 # 4. Add environment variables (see backend/.env.example)
-# 5. Deploy — your app will be at https://et-spirex.onrender.com (or similar)
+# 5. Deploy — your app will be at https://et-scout.onrender.com (or similar)
 
 services:
   - type: web
-    name: et-spirex
+    name: et-scout
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile

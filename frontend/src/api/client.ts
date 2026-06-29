@@ -63,6 +63,8 @@ export interface SurveyVariable {
   lng_column?: string
   custom?: boolean
   source_variable_id?: string
+  treat_as_categorical?: boolean
+  original_kind?: string
 }
 
 export interface CategoryMapping {
@@ -154,6 +156,29 @@ export interface SurveySchema {
   enriched?: boolean
   variables: SurveyVariable[]
   groups: { id: number; title: string; order: number; variable_ids: string[] }[]
+}
+
+export interface FilterPreset {
+  id: string
+  name: string
+  filter_tree: FilterGroup | null
+  filters: FilterSpec[]
+  created_at: number
+  updated_at: number
+}
+
+export interface AnalysisBookmark {
+  id: string
+  name: string
+  kind: 'crosstab' | 'chart' | 'filter'
+  config: Record<string, unknown>
+  created_at: number
+  updated_at: number
+}
+
+export interface WeightConfig {
+  enabled: boolean
+  variable_id: string | null
 }
 
 export interface FilterSpec {
@@ -254,6 +279,14 @@ export interface ProfileResult {
   line_values?: { code: string; label: string; count: number; percentage: number }[]
   y_variable?: { id: string; code: string; text: string; kind: string; type_label: string }
   z_variable?: { id: string; code: string; text: string; kind: string; type_label: string }
+  scale_metrics?: {
+    top2box_pct?: number
+    bottom2box_pct?: number
+    net_pct?: number
+    nps?: number
+    mean?: number
+    base?: number
+  }
 }
 
 export interface DataQualityResult {
@@ -422,7 +455,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new Error(
-        'Cannot reach the ET Spirex server. If running locally, start the backend on port 8000.',
+        'Cannot reach the ET Scout server. If running locally, start the backend on port 8000.',
       )
     }
     if (err instanceof TypeError) {
@@ -441,6 +474,16 @@ const SCHEMA_CACHE_MS = 90_000
 
 function schemaCacheKey(id: number, completionStatus: string, light: boolean) {
   return `${id}:${completionStatus}:${light}`
+}
+
+export function invalidateSchemaCache(surveyId?: number) {
+  if (surveyId == null) {
+    schemaCache.clear()
+    return
+  }
+  for (const key of schemaCache.keys()) {
+    if (key.startsWith(`${surveyId}:`)) schemaCache.delete(key)
+  }
 }
 
 export const api = {
@@ -591,6 +634,81 @@ export const api = {
         body: JSON.stringify({ variables }),
       },
     ),
+  getKindOverrides: (id: number) =>
+    fetchJson<{ overrides: Record<string, boolean> }>(`/api/projects/${id}/variables/kind-overrides`),
+  setKindOverride: (id: number, variableId: string, treatAsCategorical: boolean) =>
+    fetchJson<{ overrides: Record<string, boolean>; saved: boolean }>(
+      `/api/projects/${id}/variables/${variableId}/kind-override`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ treat_as_categorical: treatAsCategorical }),
+      },
+    ),
+  getFilterPresets: (id: number) =>
+    fetchJson<{ presets: FilterPreset[] }>(`/api/projects/${id}/filters/presets`),
+  createFilterPreset: (
+    id: number,
+    body: { name: string; filter_tree?: FilterGroup | null; filters?: FilterSpec[] },
+  ) =>
+    fetchJson<FilterPreset>(`/api/projects/${id}/filters/presets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteFilterPreset: (id: number, presetId: string) =>
+    fetchJson<{ ok: boolean }>(`/api/projects/${id}/filters/presets/${presetId}`, { method: 'DELETE' }),
+  getBookmarks: (id: number) =>
+    fetchJson<{ bookmarks: AnalysisBookmark[] }>(`/api/projects/${id}/bookmarks`),
+  createBookmark: (id: number, body: { name: string; kind: string; config: Record<string, unknown> }) =>
+    fetchJson<AnalysisBookmark>(`/api/projects/${id}/bookmarks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteBookmark: (id: number, bookmarkId: string) =>
+    fetchJson<{ ok: boolean }>(`/api/projects/${id}/bookmarks/${bookmarkId}`, { method: 'DELETE' }),
+  getWeightConfig: (id: number) =>
+    fetchJson<WeightConfig>(`/api/projects/${id}/weight-config`),
+  setWeightConfig: (id: number, config: WeightConfig) =>
+    fetchJson<WeightConfig & { saved: boolean }>(`/api/projects/${id}/weight-config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    }),
+  exportReport: async (
+    id: number,
+    body: {
+      format: 'pdf' | 'pptx'
+      report_type: 'profile' | 'banner'
+      variable_id?: string
+      completion_status?: string
+      filters?: FilterSpec[]
+      filter_tree?: FilterGroup | null
+      banner_request?: BannerRequest
+    },
+    filename = 'report.pdf',
+  ) => {
+    const res = await fetch(`/api/projects/${id}/analysis/report`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...body,
+        filters: body.filter_tree ? [] : (body.filters ?? []),
+      }),
+    })
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      throw new Error(errBody.detail || `Export failed (${res.status})`)
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  },
   getRawData: (id: number, query: RawDataQuery = {}, signal?: AbortSignal) => {
     const {
       completionStatus = 'complete',

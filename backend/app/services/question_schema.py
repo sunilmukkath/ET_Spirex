@@ -186,6 +186,8 @@ def _variable_to_dict(v: SurveyVariable) -> dict[str, Any]:
         "can_filter": v.can_filter,
         "lat_column": v.lat_column,
         "lng_column": v.lng_column,
+        "treat_as_categorical": getattr(v, "treat_as_categorical", False),
+        "original_kind": getattr(v, "original_kind", None),
     }
 
 
@@ -200,7 +202,12 @@ def build_survey_schema(
     if cache_key in _SCHEMA_CACHE:
         cached_at, data = _SCHEMA_CACHE[cache_key]
         if now - cached_at < _SCHEMA_TTL:
-            return data
+            return _finalize_schema(
+                survey_id,
+                data,
+                completion_status=completion_status,
+                light=light,
+            )
 
     client = get_client()
     groups = client.list_groups(survey_id)
@@ -295,7 +302,27 @@ def build_survey_schema(
         "groups": group_summaries,
     }
     _SCHEMA_CACHE[cache_key] = (now, result)
-    return result
+    return _finalize_schema(survey_id, result, completion_status=completion_status, light=light)
+
+
+def _finalize_schema(
+    survey_id: int,
+    result: dict[str, Any],
+    *,
+    completion_status: str,
+    light: bool,
+) -> dict[str, Any]:
+    df = None
+    if not light:
+        try:
+            from app.services.response_store import get_responses
+
+            df = get_responses(survey_id, completion_status=completion_status).dataframe
+        except Exception:
+            pass
+    from app.services.variable_kind_overrides import apply_kind_overrides
+
+    return apply_kind_overrides(survey_id, result, df)
 
 
 def _enrich_variables_parallel(

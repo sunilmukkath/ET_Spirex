@@ -9,7 +9,8 @@ import {
 } from 'react'
 import { api, setAuthToken } from '../api/client'
 
-const STORAGE_KEY = 'et_spirex_auth'
+const STORAGE_KEY = 'et_scout_auth'
+const LEGACY_STORAGE_KEY = 'et_spirex_auth'
 
 export const TEAM_USERS = ['Sunil', 'Tony', 'Ravi', 'Aneena', 'Shilaja'] as const
 
@@ -31,7 +32,14 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 function loadStored(): AuthState | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    let raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) {
+      raw = localStorage.getItem(LEGACY_STORAGE_KEY)
+      if (raw) {
+        localStorage.setItem(STORAGE_KEY, raw)
+        localStorage.removeItem(LEGACY_STORAGE_KEY)
+      }
+    }
     if (!raw) return null
     const parsed = JSON.parse(raw) as AuthState
     if (parsed?.token && parsed?.username) return parsed

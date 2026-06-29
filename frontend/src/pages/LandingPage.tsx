@@ -65,7 +65,7 @@ export function LandingPage() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--et-navy)]">
-        <LoadingState message="Loading ET Spirex…" />
+        <LoadingState message="Loading ET Scout…" />
       </div>
     )
   }
@@ -102,7 +102,7 @@ export function LandingPage() {
             Analytics that feel as sharp as your research.
           </h1>
           <p className="mt-5 max-w-lg text-base leading-relaxed text-white/70 sm:text-lg">
-            ET Spirex turns LimeSurvey data into explore charts, custom visualisations,
+            ET Scout turns LimeSurvey data into explore charts, custom visualisations,
             advanced crosstabs, quality scans, and export-ready tables — built for the Elastic Tree team.
           </p>
 
@@ -127,7 +127,7 @@ export function LandingPage() {
 
       <footer className="relative z-10 border-t border-white/10 py-6 text-center text-xs text-white/40">
         <BarChart3 className="mx-auto mb-2 opacity-40" size={18} />
-        ET Spirex · Elastic Tree Consumer Insights
+        ET Scout · Elastic Tree Consumer Insights
       </footer>
     </div>
   )

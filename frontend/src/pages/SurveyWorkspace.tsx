@@ -15,15 +15,19 @@ import {
 } from 'lucide-react'
 import {
   api,
+  invalidateSchemaCache,
+  type AnalysisBookmark,
   type BannerResult,
   type CustomVariable,
   type DataQualityResult,
   type FilterGroup,
+  type FilterPreset,
   type FilterSpec,
   type ProfileResult,
   type ProjectDetail,
   type SurveySchema,
   type SurveyVariable,
+  type WeightConfig,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { BannerPicker } from '../components/analysis/BannerPicker'
@@ -31,6 +35,7 @@ import { FilterEditor } from '../components/analysis/FilterEditor'
 import { QuestionNavigator } from '../components/analysis/QuestionNavigator'
 import { SurveyOverviewBar } from '../components/analysis/SurveyOverviewBar'
 import { CrosstabsResults, ProfileResults } from '../components/analysis/Results'
+import { AnalysisBookmarkMenu } from '../components/analysis/AnalysisBookmarkMenu'
 import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
 import { StatusBadge } from '../components/StatusBadge'
 import { ErrorState, TableSkeleton } from '../components/States'
@@ -67,8 +72,19 @@ function parseMode(raw: string | null): Mode {
   if (raw === 'quality') return 'quality'
   if (raw === 'variables') return 'variables'
   if (raw === 'data') return 'data'
-  if (raw === 'multivariate' || raw === 'advanced') return 'multivariate'
+  if (raw === 'multivariate' || raw === 'advanced' || raw === 'statistics') return 'multivariate'
+  if (raw === 'explore' || raw === 'questions') return 'explore'
   return 'explore'
+}
+
+function modeLabel(mode: Mode): string {
+  if (mode === 'explore') return 'Questions'
+  if (mode === 'crosstabs') return 'Compare'
+  if (mode === 'multivariate') return 'Statistics'
+  if (mode === 'charts') return 'Charts'
+  if (mode === 'quality') return 'Quality'
+  if (mode === 'variables') return 'Variables'
+  return 'Data'
 }
 
 export function SurveyWorkspace() {
@@ -109,6 +125,9 @@ export function SurveyWorkspace() {
   const [qualityLoading, setQualityLoading] = useState(false)
   const [qualityError, setQualityError] = useState<string | null>(null)
   const [customVariables, setCustomVariables] = useState<CustomVariable[]>([])
+  const [weightConfig, setWeightConfig] = useState<WeightConfig>({ enabled: false, variable_id: null })
+  const [exportingReport, setExportingReport] = useState(false)
+  const [schemaVersion, setSchemaVersion] = useState(0)
 
   const mergedSchema = useMemo((): SurveySchema | null => {
     if (!schema) return null
@@ -143,6 +162,60 @@ export function SurveyWorkspace() {
       /* ignore */
     }
   }, [surveyId])
+
+  const reloadSchema = useCallback(async () => {
+    invalidateSchemaCache(surveyId)
+    setSchemaVersion((v) => v + 1)
+    try {
+      const data = await api.getSchema(surveyId, completionStatus, false)
+      setSchema(data)
+    } catch {
+      /* ignore */
+    }
+  }, [surveyId, completionStatus])
+
+  const applyFilterPreset = useCallback((preset: FilterPreset) => {
+    if (preset.filter_tree?.children?.length) {
+      setFilterTree(preset.filter_tree)
+      setFilters([])
+    } else {
+      setFilters(preset.filters ?? [])
+      setFilterTree(null)
+    }
+  }, [])
+
+  const compareCurrentQuestion = useCallback(() => {
+    if (!selectedId) return
+    setSideRowIds([selectedId])
+    setSearchParams((prev) => {
+      prev.set('mode', 'crosstabs')
+      return prev
+    }, { replace: true })
+  }, [selectedId, setSearchParams])
+
+  const loadCrosstabBookmark = useCallback((bm: AnalysisBookmark) => {
+    const cfg = bm.config
+    if (Array.isArray(cfg.side_row_ids)) setSideRowIds(cfg.side_row_ids as string[])
+    if (Array.isArray(cfg.banner_ids)) setBannerIds(cfg.banner_ids as string[])
+    if (typeof cfg.metric === 'string') setMetric(cfg.metric)
+    if (typeof cfg.show_counts === 'boolean') setShowCounts(cfg.show_counts)
+    if (typeof cfg.show_col_pct === 'boolean') setShowColPct(cfg.show_col_pct)
+    if (typeof cfg.show_row_pct === 'boolean') setShowRowPct(cfg.show_row_pct)
+    if (typeof cfg.sig_enabled === 'boolean') setSigEnabled(cfg.sig_enabled)
+    if (typeof cfg.confidence_level === 'number') setConfidenceLevel(cfg.confidence_level)
+    if (cfg.filter_tree) {
+      setFilterTree(cfg.filter_tree as FilterGroup)
+      setFilters([])
+    } else if (Array.isArray(cfg.filters)) {
+      setFilters(cfg.filters as FilterSpec[])
+      setFilterTree(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!surveyId) return
+    api.getWeightConfig(surveyId).then(setWeightConfig).catch(() => {})
+  }, [surveyId, schemaVersion])
 
   const profileAbort = useRef<AbortController | null>(null)
   const initialized = useRef(false)
@@ -253,7 +326,7 @@ export function SurveyWorkspace() {
       })
 
     return () => { cancelled = true }
-  }, [surveyId, completionStatus])
+  }, [surveyId, completionStatus, schemaVersion])
 
   useEffect(() => {
     if (!surveyId) return
@@ -531,30 +604,58 @@ export function SurveyWorkspace() {
           </p>
         </div>
 
-        {/* Mode switcher */}
-        <div className="flex rounded-lg bg-slate-100 p-0.5">
-          <ModeButton active={mode === 'explore'} onClick={() => setMode('explore')} icon={<Layers size={15} />}>
-            Explore
-          </ModeButton>
-          <ModeButton active={mode === 'charts'} onClick={() => setMode('charts')} icon={<BarChart3 size={15} />}>
-            Charts
-          </ModeButton>
-          <ModeButton active={mode === 'crosstabs'} onClick={() => setMode('crosstabs')} icon={<Table2 size={15} />}>
-            Crosstabs
-          </ModeButton>
-          <ModeButton active={mode === 'multivariate'} onClick={() => setMode('multivariate')} icon={<Sigma size={15} />}>
-            Multivariate
-          </ModeButton>
-          <ModeButton active={mode === 'quality'} onClick={() => setMode('quality')} icon={<ShieldCheck size={15} />}>
-            Quality
-          </ModeButton>
-          <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
-            Variables
-          </ModeButton>
-          <ModeButton active={mode === 'data'} onClick={() => setMode('data')} icon={<Database size={15} />}>
-            Data
-          </ModeButton>
+        {/* Mode switcher — Analyze | Setup */}
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg bg-slate-100 p-0.5">
+            <ModeButton active={mode === 'explore'} onClick={() => setMode('explore')} icon={<Layers size={15} />}>
+              {modeLabel('explore')}
+            </ModeButton>
+            <ModeButton active={mode === 'charts'} onClick={() => setMode('charts')} icon={<BarChart3 size={15} />}>
+              Charts
+            </ModeButton>
+            <ModeButton active={mode === 'crosstabs'} onClick={() => setMode('crosstabs')} icon={<Table2 size={15} />}>
+              {modeLabel('crosstabs')}
+            </ModeButton>
+            <ModeButton active={mode === 'multivariate'} onClick={() => setMode('multivariate')} icon={<Sigma size={15} />}>
+              {modeLabel('multivariate')}
+            </ModeButton>
+          </div>
+          <span className="hidden h-5 w-px bg-slate-300 sm:block" aria-hidden />
+          <div className="flex rounded-lg bg-slate-100 p-0.5">
+            <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
+              Variables
+            </ModeButton>
+            <ModeButton active={mode === 'quality'} onClick={() => setMode('quality')} icon={<ShieldCheck size={15} />}>
+              Quality
+            </ModeButton>
+            <ModeButton active={mode === 'data'} onClick={() => setMode('data')} icon={<Database size={15} />}>
+              Data
+            </ModeButton>
+          </div>
         </div>
+
+        <select
+          value={weightConfig.enabled && weightConfig.variable_id ? weightConfig.variable_id : ''}
+          onChange={async (e) => {
+            const variable_id = e.target.value || null
+            const next = { enabled: Boolean(variable_id), variable_id }
+            setWeightConfig(next)
+            await api.setWeightConfig(surveyId, next)
+            invalidateSchemaCache(surveyId)
+            setSchemaVersion((v) => v + 1)
+          }}
+          className="max-w-[9rem] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
+          title="Response weighting"
+        >
+          <option value="">No weight</option>
+          {(activeSchema?.variables ?? [])
+            .filter((v) => v.kind === 'numeric' && !v.custom)
+            .map((v) => (
+              <option key={v.id} value={v.id}>
+                W: {(v.code || v.text).slice(0, 18)}
+              </option>
+            ))}
+        </select>
 
         <select
           value={completionStatus}
@@ -614,6 +715,7 @@ export function SurveyWorkspace() {
                 onFilterTreeChange={handleFilterTreeChange}
                 onFiltersChange={handleFiltersChange}
                 schemaLoading={schemaLoading}
+                onPresetApply={applyFilterPreset}
               />
             </Suspense>
           )}
@@ -623,6 +725,7 @@ export function SurveyWorkspace() {
               surveyId={surveyId}
               completionStatus={completionStatus}
               selectedVar={selectedVar}
+              selectedId={selectedId}
               variables={activeSchema?.variables ?? []}
               groups={activeSchema?.groups ?? []}
               responseCount={activeSchema?.response_count ?? project?.responses.completed ?? 0}
@@ -632,10 +735,34 @@ export function SurveyWorkspace() {
               filterTree={filterTree}
               onFilterTreeChange={handleFilterTreeChange}
               onFiltersChange={handleFiltersChange}
+              onPresetApply={applyFilterPreset}
               analyzing={analyzing}
               profileResult={profileResult}
               schemaLoading={schemaLoading}
               enriching={enriching}
+              onCompareQuestion={compareCurrentQuestion}
+              exportingReport={exportingReport}
+              onExportReport={async (format) => {
+                if (!selectedId) return
+                setExportingReport(true)
+                try {
+                  const payload = filterPayload(filters, filterTree)
+                  await api.exportReport(
+                    surveyId,
+                    {
+                      format,
+                      report_type: 'profile',
+                      variable_id: selectedId,
+                      completion_status: completionStatus,
+                      filters: payload.filters,
+                      filter_tree: payload.filter_tree,
+                    },
+                    `question_${selectedId}.${format === 'pdf' ? 'pdf' : 'pptx'}`,
+                  )
+                } finally {
+                  setExportingReport(false)
+                }
+              }}
             />
           )}
 
@@ -671,6 +798,7 @@ export function SurveyWorkspace() {
               completionStatus={completionStatus}
               username={user?.username ?? null}
               onChanged={reloadCustomVariables}
+              onSchemaChanged={reloadSchema}
             />
           )}
 
@@ -731,6 +859,46 @@ export function SurveyWorkspace() {
               onTableFiltersChange={updateTableFilters}
               onRefreshTable={refreshCrosstabTable}
               refreshingTableId={refreshingTableId}
+              onPresetApply={applyFilterPreset}
+              onLoadBookmark={loadCrosstabBookmark}
+              buildBookmarkConfig={() => {
+                const req = buildBannerRequest()
+                return {
+                  name: `Compare ${sideRowIds.length}×${bannerIds.length}`,
+                  config: {
+                    side_row_ids: sideRowIds,
+                    banner_ids: bannerIds,
+                    metric,
+                    show_counts: showCounts,
+                    show_col_pct: showColPct,
+                    show_row_pct: showRowPct,
+                    sig_enabled: sigEnabled,
+                    confidence_level: confidenceLevel,
+                    ...filterPayload(filters, filterTree),
+                  },
+                  banner_request: req,
+                }
+              }}
+              onExportReport={async (format) => {
+                const req = buildBannerRequest()
+                if (!req) return
+                setExportingReport(true)
+                try {
+                  await api.exportReport(
+                    surveyId,
+                    {
+                      format,
+                      report_type: 'banner',
+                      completion_status: completionStatus,
+                      banner_request: req,
+                    },
+                    `crosstab.${format === 'pdf' ? 'pdf' : 'pptx'}`,
+                  )
+                } finally {
+                  setExportingReport(false)
+                }
+              }}
+              exportingReport={exportingReport}
             />
           )}
         </main>
@@ -768,6 +936,7 @@ function ExplorePanel({
   surveyId,
   completionStatus,
   selectedVar,
+  selectedId,
   variables,
   groups,
   responseCount,
@@ -777,14 +946,19 @@ function ExplorePanel({
   filterTree,
   onFiltersChange,
   onFilterTreeChange,
+  onPresetApply,
   analyzing,
   profileResult,
   schemaLoading,
   enriching,
+  onCompareQuestion,
+  onExportReport,
+  exportingReport,
 }: {
   surveyId: number
   completionStatus: string
   selectedVar: SurveyVariable | null
+  selectedId: string | null
   variables: SurveyVariable[]
   groups: { id: number; title: string; order: number; variable_ids: string[] }[]
   responseCount: number
@@ -794,10 +968,14 @@ function ExplorePanel({
   filterTree: FilterGroup | null
   onFiltersChange: (filters: FilterSpec[]) => void
   onFilterTreeChange: (tree: FilterGroup | null) => void
+  onPresetApply: (preset: FilterPreset) => void
   analyzing: boolean
   profileResult: ProfileResult | null
   schemaLoading: boolean
   enriching: boolean
+  onCompareQuestion: () => void
+  onExportReport: (format: 'pdf' | 'pptx') => void
+  exportingReport: boolean
 }) {
   const overview = (
     <SurveyOverviewBar
@@ -854,6 +1032,8 @@ function ExplorePanel({
             filterTree={filterTree}
             onChange={onFiltersChange}
             onFilterTreeChange={onFilterTreeChange}
+            showPresets
+            onPresetApply={onPresetApply}
             compact
           />
         </div>
@@ -884,6 +1064,8 @@ function ExplorePanel({
           filterTree={filterTree}
           onChange={onFiltersChange}
           onFilterTreeChange={onFilterTreeChange}
+          showPresets
+          onPresetApply={onPresetApply}
           compact
         />
       </div>
@@ -897,7 +1079,12 @@ function ExplorePanel({
           )}
           {profileResult ? (
             <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
-              <ProfileResults result={profileResult} />
+              <ProfileResults
+                result={profileResult}
+                onCompareQuestion={selectedId ? onCompareQuestion : undefined}
+                onExportReport={selectedId ? onExportReport : undefined}
+                exportingReport={exportingReport}
+              />
             </div>
           ) : !analyzing ? (
             <EmptyCanvas
@@ -956,6 +1143,11 @@ function CrosstabsPanel({
   onTableFiltersChange,
   onRefreshTable,
   refreshingTableId,
+  onPresetApply,
+  onLoadBookmark,
+  buildBookmarkConfig,
+  onExportReport,
+  exportingReport,
 }: {
   surveyId: number
   completionStatus: string
@@ -1000,6 +1192,11 @@ function CrosstabsPanel({
   onTableFiltersChange: (rowId: string, filters: FilterSpec[]) => void
   onRefreshTable: (rowId: string, tableIndex: number) => void
   refreshingTableId: string | null
+  onPresetApply: (preset: FilterPreset) => void
+  onLoadBookmark: (bm: AnalysisBookmark) => void
+  buildBookmarkConfig: () => { name: string; config: Record<string, unknown> }
+  onExportReport: (format: 'pdf' | 'pptx') => void
+  exportingReport: boolean
 }) {
   const canRun = sideRowVars.length > 0 && bannerVars.length > 0 && !schemaLoading
 
@@ -1114,20 +1311,44 @@ function CrosstabsPanel({
               Build crosstab
             </button>
             {bannerResult && !bannerResult.error && (
-              <button
-                type="button"
-                onClick={onExport}
-                disabled={exporting}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-              >
-                {exporting ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
-                Export Excel
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={onExport}
+                  disabled={exporting}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  {exporting ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
+                  Export Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onExportReport('pdf')}
+                  disabled={exportingReport}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onExportReport('pptx')}
+                  disabled={exportingReport}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  PPT
+                </button>
+              </>
             )}
           </div>
         </div>
 
-        <div className="mt-3">
+        <div className="mt-3 space-y-2">
+          <AnalysisBookmarkMenu
+            surveyId={surveyId}
+            kind="crosstab"
+            onSave={buildBookmarkConfig}
+            onLoad={onLoadBookmark}
+          />
           <FilterEditor
             surveyId={surveyId}
             completionStatus={completionStatus}
@@ -1136,6 +1357,8 @@ function CrosstabsPanel({
             filterTree={filterTree}
             onChange={onFiltersChange}
             onFilterTreeChange={onFilterTreeChange}
+            showPresets
+            onPresetApply={onPresetApply}
             compact
             heading="Default filters"
           />

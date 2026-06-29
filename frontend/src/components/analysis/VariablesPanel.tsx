@@ -25,6 +25,7 @@ import {
   saveCustomVariableBackup,
 } from '../../lib/customVariableBackup'
 import { EmptyState, ErrorState } from '../States'
+import { KindOverrideSection } from './KindOverrideSection'
 
 interface Props {
   surveyId: number
@@ -32,6 +33,7 @@ interface Props {
   completionStatus: string
   username?: string | null
   onChanged?: () => void
+  onSchemaChanged?: () => void
 }
 
 const EMPTY_FORM: CustomVariableInput = {
@@ -104,7 +106,7 @@ function typeLabel(v: CustomVariable): string {
   return 'Recode'
 }
 
-export function VariablesPanel({ surveyId, schema, completionStatus, username, onChanged }: Props) {
+export function VariablesPanel({ surveyId, schema, completionStatus, username, onChanged, onSchemaChanged }: Props) {
   const [variables, setVariables] = useState<CustomVariable[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -383,6 +385,12 @@ export function VariablesPanel({ surveyId, schema, completionStatus, username, o
         </div>
 
         {error && <ErrorState message={error} />}
+
+        <KindOverrideSection
+          surveyId={surveyId}
+          variables={schema?.variables ?? []}
+          onChanged={onSchemaChanged}
+        />
 
         {showForm ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

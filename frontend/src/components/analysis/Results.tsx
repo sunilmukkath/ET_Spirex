@@ -37,13 +37,63 @@ export function KindBadge({ kind, label }: { kind: string; label?: string }) {
   )
 }
 
-export function ProfileResults({ result }: { result: ProfileResult }) {
+export function ProfileResults({
+  result,
+  onCompareQuestion,
+  onExportReport,
+  exportingReport,
+}: {
+  result: ProfileResult
+  onCompareQuestion?: () => void
+  onExportReport?: (format: 'pdf' | 'pptx') => void
+  exportingReport?: boolean
+}) {
   if (result.error) return <ErrorState message={result.error} />
+
+  const scaleBar = result.scale_metrics ? (
+    <ScaleMetricsBar metrics={result.scale_metrics} />
+  ) : null
+
+  const actions = (onCompareQuestion || onExportReport) && (
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      {onCompareQuestion && (
+        <button
+          type="button"
+          onClick={onCompareQuestion}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/40 px-3 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)]"
+        >
+          Compare this question →
+        </button>
+      )}
+      {onExportReport && (
+        <>
+          <button
+            type="button"
+            disabled={exportingReport}
+            onClick={() => onExportReport('pdf')}
+            className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
+          >
+            Export PDF
+          </button>
+          <button
+            type="button"
+            disabled={exportingReport}
+            onClick={() => onExportReport('pptx')}
+            className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
+          >
+            Export PPT
+          </button>
+        </>
+      )}
+    </div>
+  )
 
   if (result.analysis_type === 'distribution' && result.values) {
     return (
       <div className="space-y-6">
+        {actions}
         <ResultHeader result={result} />
+        {scaleBar}
         <DistributionTable values={result.values} baseN={result.base_n || 0} />
       </div>
     )
@@ -83,7 +133,9 @@ export function ProfileResults({ result }: { result: ProfileResult }) {
     ]
     return (
       <div className="space-y-4">
+        {actions}
         <ResultHeader result={result} />
+        {scaleBar}
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {stats.map((s) => (
             <div key={s.label} className="rounded-xl bg-slate-50 p-4 text-center">
@@ -148,6 +200,35 @@ export function ProfileResults({ result }: { result: ProfileResult }) {
   }
 
   return <ErrorState message="Unsupported analysis result" />
+}
+
+function ScaleMetricsBar({
+  metrics,
+}: {
+  metrics: NonNullable<ProfileResult['scale_metrics']>
+}) {
+  const cards = [
+    metrics.top2box_pct != null && { label: 'Top 2 box', value: `${metrics.top2box_pct}%` },
+    metrics.bottom2box_pct != null && { label: 'Bottom 2 box', value: `${metrics.bottom2box_pct}%` },
+    metrics.net_pct != null && { label: 'Net (T2B − B2B)', value: `${metrics.net_pct}%` },
+    metrics.nps != null && { label: 'NPS-style', value: `${metrics.nps}` },
+    metrics.mean != null && { label: 'Weighted mean', value: String(metrics.mean) },
+  ].filter(Boolean) as { label: string; value: string }[]
+
+  if (!cards.length) return null
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {cards.map((c) => (
+        <div key={c.label} className="rounded-xl border border-[var(--et-teal)]/20 bg-[var(--et-teal-light)]/30 px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--et-teal-dark)]/70">
+            {c.label}
+          </p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-[var(--et-navy)]">{c.value}</p>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export interface MultiCrosstabControls {

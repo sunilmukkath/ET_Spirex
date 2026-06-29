@@ -1,4 +1,4 @@
-# ET Spirex — Elastic Tree Survey Analytics
+# ET Scout — Elastic Tree Survey Analytics
 
 Survey intelligence platform for Elastic Tree, powered by LimeSurvey.
 
@@ -55,7 +55,7 @@ Open **http://localhost:5173** in your browser.
 
 ## Going live (hosting)
 
-**Streamlit Community Cloud is not compatible with ET Spirex.** Streamlit only runs Python Streamlit apps (`.py` files). ET Spirex is a **React frontend + FastAPI backend** — a different stack.
+**Streamlit Community Cloud is not compatible with ET Scout.** Streamlit only runs Python Streamlit apps (`.py` files). ET Scout is a **React frontend + FastAPI backend** — a different stack.
 
 Use **Render** (free tier) or any Docker host instead:
 
@@ -79,7 +79,7 @@ cd ../backend && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.
 
 ```
 RETLS/
-├── backend/          # ET Spirex API (FastAPI + LimeSurvey)
+├── backend/          # ET Scout API (FastAPI + LimeSurvey)
 │   ├── app/
 │   │   ├── lime_client.py      # Survey & response fetching
 │   │   ├── services/analysis.py  # Custom analysis logic

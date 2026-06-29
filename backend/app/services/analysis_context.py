@@ -88,6 +88,11 @@ def load_analysis_context(
         schema = build_survey_schema(survey_id, completion_status=completion_status)
         df = get_responses(survey_id, completion_status=completion_status).dataframe
         schema, df = apply_custom_variables(survey_id, schema, df)
+        from app.services.variable_kind_overrides import apply_kind_overrides
+        from app.services.weighting import attach_weights
+
+        schema = apply_kind_overrides(survey_id, schema, df)
+        df = attach_weights(survey_id, schema, df)
         _CONTEXT_CACHE[key] = (time.time(), schema, df)
         return schema, df
 

@@ -19,6 +19,7 @@ from app.models.analysis import (
 )
 from app.models.auth import LoginRequest, LoginResponse
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
+from app.models.variable_override import VariableKindOverrideBody, VariableKindOverrideSync
 from app.services.auth import VALID_USERS, authenticate, get_session, list_active_sessions, logout
 from app.services.banner_analysis import run_banner_table, run_chart_data, run_question_profile, get_filter_options
 from app.services.advanced_analysis import run_advanced_analysis
@@ -34,6 +35,25 @@ from app.services.custom_variables import preview_custom_variable
 from app.services.data_quality import run_data_quality
 from app.services.excel_export import banner_result_to_excel
 from app.services.question_schema import build_survey_schema
+from app.services.variable_kind_override_store import (
+    list_kind_overrides,
+    set_kind_override,
+    sync_kind_overrides,
+)
+from app.services.filter_preset_store import create_filter_preset, delete_filter_preset, list_filter_presets
+from app.services.analysis_bookmark_store import (
+    create_analysis_bookmark,
+    delete_analysis_bookmark,
+    list_analysis_bookmarks,
+)
+from app.services.weight_config_store import get_weight_config, set_weight_config
+from app.models.workspace_prefs import (
+    AnalysisBookmarkCreate,
+    FilterPresetCreate,
+    ReportExportRequest,
+    WeightConfig,
+)
+from app.services.report_export import banner_to_pdf, banner_to_pptx, profile_to_pdf, profile_to_pptx
 from app.services.raw_data import get_raw_data_page, raw_data_to_csv
 from app.services.response_store import get_responses
 
@@ -204,6 +224,165 @@ def variable_filter_options(
         )
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/variables/kind-overrides")
+def get_survey_kind_overrides(
+    survey_id: int,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    overrides = list_kind_overrides(survey_id, username=username)
+    return {"overrides": overrides}
+
+
+@router.put("/projects/{survey_id}/variables/kind-overrides")
+def put_survey_kind_overrides(
+    survey_id: int,
+    body: VariableKindOverrideSync,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    overrides = sync_kind_overrides(survey_id, body.overrides, username=username)
+    return {"overrides": overrides, "saved": True}
+
+
+@router.put("/projects/{survey_id}/variables/{variable_id}/kind-override")
+def put_variable_kind_override(
+    survey_id: int,
+    variable_id: str,
+    body: VariableKindOverrideBody,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    overrides = set_kind_override(
+        survey_id,
+        variable_id,
+        body.treat_as_categorical,
+        username=username,
+    )
+    return {"overrides": overrides, "saved": True}
+
+
+@router.get("/projects/{survey_id}/filters/presets")
+def get_filter_presets(
+    survey_id: int,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    return {"presets": [p.model_dump() for p in list_filter_presets(survey_id, username=username)]}
+
+
+@router.post("/projects/{survey_id}/filters/presets")
+def post_filter_preset(
+    survey_id: int,
+    body: FilterPresetCreate,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    preset = create_filter_preset(survey_id, body, username=username)
+    return preset.model_dump()
+
+
+@router.delete("/projects/{survey_id}/filters/presets/{preset_id}")
+def remove_filter_preset(
+    survey_id: int,
+    preset_id: str,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    ok = delete_filter_preset(survey_id, preset_id, username=username)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    return {"ok": True}
+
+
+@router.get("/projects/{survey_id}/bookmarks")
+def get_analysis_bookmarks(
+    survey_id: int,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    return {"bookmarks": [b.model_dump() for b in list_analysis_bookmarks(survey_id, username=username)]}
+
+
+@router.post("/projects/{survey_id}/bookmarks")
+def post_analysis_bookmark(
+    survey_id: int,
+    body: AnalysisBookmarkCreate,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    bookmark = create_analysis_bookmark(survey_id, body, username=username)
+    return bookmark.model_dump()
+
+
+@router.delete("/projects/{survey_id}/bookmarks/{bookmark_id}")
+def remove_analysis_bookmark(
+    survey_id: int,
+    bookmark_id: str,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    ok = delete_analysis_bookmark(survey_id, bookmark_id, username=username)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Bookmark not found")
+    return {"ok": True}
+
+
+@router.get("/projects/{survey_id}/weight-config")
+def get_survey_weight_config(
+    survey_id: int,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    return get_weight_config(survey_id, username=username).model_dump()
+
+
+@router.put("/projects/{survey_id}/weight-config")
+def put_survey_weight_config(
+    survey_id: int,
+    body: WeightConfig,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    config = set_weight_config(survey_id, body, username=username)
+    return {**config.model_dump(), "saved": True}
+
+
+@router.post("/projects/{survey_id}/analysis/report")
+def export_analysis_report(
+    survey_id: int,
+    body: ReportExportRequest,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    title = f"Survey {survey_id} report"
+    fmt = (body.format or "pdf").lower()
+    if body.report_type == "banner" and body.banner_request:
+        result = run_banner_table(survey_id, **body.banner_request)
+        data = banner_to_pdf(result, title) if fmt == "pdf" else banner_to_pptx(result, title)
+        media = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ext = "pdf" if fmt == "pdf" else "pptx"
+    elif body.variable_id:
+        result = run_question_profile(
+            survey_id,
+            body.variable_id,
+            completion_status=body.completion_status,
+            filters=[f for f in body.filters] if not body.filter_tree else None,
+            filter_tree=body.filter_tree,
+        )
+        data = profile_to_pdf(result, title) if fmt == "pdf" else profile_to_pptx(result, title)
+        media = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ext = "pdf" if fmt == "pdf" else "pptx"
+    else:
+        raise HTTPException(status_code=400, detail="variable_id or banner_request required")
+
+    return StreamingResponse(
+        iter([data]),
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="report.{ext}"'},
+    )
 
 
 @router.get("/projects/{survey_id}/variables/custom")

@@ -1,4 +1,4 @@
-# ET Spirex — single container (FastAPI API + React UI)
+# ET Scout — single container (FastAPI API + React UI)
 FROM node:22-alpine AS frontend
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./

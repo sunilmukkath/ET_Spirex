@@ -9,8 +9,8 @@ from app.config import settings
 from app.routes.api import router
 
 app = FastAPI(
-    title="ET Spirex API",
-    description="Elastic Tree survey analytics API (ET Spirex)",
+    title="ET Scout API",
+    description="Elastic Tree survey analytics API (ET Scout)",
     version="0.1.0",
 )
 

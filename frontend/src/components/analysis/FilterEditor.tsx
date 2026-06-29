@@ -10,6 +10,8 @@ import {
   summarizeFilterTree,
 } from '../../lib/filterTree'
 import { GroupEditor, schemaFilterOptions } from './FilterRuleEditors'
+import { FilterPresetMenu } from './FilterPresetMenu'
+import type { FilterPreset } from '../../api/client'
 
 interface Props {
   surveyId: number
@@ -24,6 +26,8 @@ interface Props {
   applyLabel?: string
   onApply?: () => void
   applying?: boolean
+  showPresets?: boolean
+  onPresetApply?: (preset: FilterPreset) => void
 }
 
 export function FilterEditor({
@@ -39,6 +43,8 @@ export function FilterEditor({
   applyLabel,
   onApply,
   applying,
+  showPresets,
+  onPresetApply,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<FilterGroup>(() => buildDraftTree(filterTree, filters))
@@ -160,6 +166,17 @@ export function FilterEditor({
           </button>
         )}
       </div>
+
+      {showPresets && onPresetApply && (
+        <div className="mt-2 border-t border-slate-100 pt-2">
+          <FilterPresetMenu
+            surveyId={surveyId}
+            filters={filters}
+            filterTree={filterTree}
+            onApply={onPresetApply}
+          />
+        </div>
+      )}
 
       {open && onFilterTreeChange && (
         <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">

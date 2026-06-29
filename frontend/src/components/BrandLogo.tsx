@@ -12,7 +12,7 @@ export function BrandLogo({ size = 'md', showTagline = true, variant = 'dark' }:
   return (
     <div className="flex items-center gap-3">
       <img
-        src="/spirex-mark.png"
+        src="/scout-mark.png"
         alt=""
         aria-hidden
         className={`${markSize} shrink-0 object-contain`}
@@ -31,7 +31,7 @@ export function BrandLogo({ size = 'md', showTagline = true, variant = 'dark' }:
               isLight ? 'text-[var(--et-teal-light)]' : 'text-[var(--et-teal)]'
             }`}
           >
-            Spirex
+            Scout
           </span>
         </div>
         {showTagline && (

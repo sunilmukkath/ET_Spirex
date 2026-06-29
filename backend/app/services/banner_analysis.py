@@ -17,8 +17,87 @@ from app.services.answer_labels import (
 from app.services.analysis_context import load_analysis_context, load_filtered_context
 from app.services.question_schema import get_variable
 from app.services.variable_columns import find_variable_column as _find_column
+from app.services.weighting import weight_series, weighted_mean, weighted_pct, weighted_sum
 
 Z_THRESHOLDS = {0.90: 1.645, 0.95: 1.96, 0.99: 2.576}
+
+
+def _scale_code_sets(var: dict[str, Any], series: pd.Series | None = None) -> tuple[set[str], set[str], list[str]]:
+    codes = [str(o["code"]) for o in var.get("answer_options") or [] if o.get("code") is not None]
+    if not codes and series is not None:
+        codes = sorted(set(series.astype(str).tolist()), key=lambda x: (0, float(x)) if x.replace(".", "", 1).isdigit() else (1, x))
+    if not codes:
+        return set(), set(), []
+    if len(codes) >= 2:
+        top = set(codes[-2:])
+        bottom = set(codes[:2])
+    else:
+        top = set(codes)
+        bottom = set(codes)
+    return top, bottom, codes
+
+
+def _compute_scale_metrics(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any] | None:
+    col = _find_column(var, df)
+    if not col or col not in df.columns:
+        return None
+
+    weights = weight_series(df)
+    kind = var.get("kind")
+    metrics: dict[str, Any] = {}
+
+    if kind in ("single", "rank") or var.get("treat_as_categorical"):
+        series = df[col].dropna().astype(str).str.strip()
+        canonical = series.map(lambda v: canonical_answer_code(var, v))
+        valid = canonical != ""
+        if not valid.any():
+            return None
+        total = weighted_sum(valid, weights)
+        top_codes, bottom_codes, codes = _scale_code_sets(var, series[valid])
+        if not codes:
+            return None
+        top_count = weighted_sum(valid & canonical.isin(top_codes), weights)
+        bottom_count = weighted_sum(valid & canonical.isin(bottom_codes), weights)
+        metrics["top2box_pct"] = weighted_pct(top_count, total)
+        metrics["bottom2box_pct"] = weighted_pct(bottom_count, total)
+        metrics["net_pct"] = round(metrics["top2box_pct"] - metrics["bottom2box_pct"], 1)
+        metrics["base"] = round(total, 1)
+
+        numeric_codes = [float(c) for c in codes if str(c).replace(".", "", 1).isdigit()]
+        if numeric_codes and max(numeric_codes) >= 9 and min(numeric_codes) <= 1:
+            promoters = weighted_sum(valid & canonical.isin({str(int(max(numeric_codes))), str(int(max(numeric_codes) - 1))}), weights)
+            detractors = weighted_sum(
+                valid & canonical.isin({str(i) for i in range(int(min(numeric_codes)), int(min(numeric_codes)) + 7)}),
+                weights,
+            )
+            metrics["nps"] = round(weighted_pct(promoters, total) - weighted_pct(detractors, total), 1)
+        return metrics
+
+    numeric = pd.to_numeric(df[col], errors="coerce")
+    valid = numeric.notna()
+    if not valid.any():
+        return None
+    w = weights[valid]
+    vals = numeric[valid]
+    total = float(w.sum())
+    metrics["mean"] = weighted_mean(numeric, weights)
+    metrics["base"] = round(total, 1)
+
+    str_vals = vals.astype(int).astype(str)
+    uniq = sorted(set(str_vals.tolist()), key=lambda x: float(x))
+    if len(uniq) >= 2:
+        top_codes = set(uniq[-2:])
+        bottom_codes = set(uniq[:2])
+        top_count = float(w[str_vals.isin(top_codes)].sum())
+        bottom_count = float(w[str_vals.isin(bottom_codes)].sum())
+        metrics["top2box_pct"] = weighted_pct(top_count, total)
+        metrics["bottom2box_pct"] = weighted_pct(bottom_count, total)
+        metrics["net_pct"] = round(metrics["top2box_pct"] - metrics["bottom2box_pct"], 1)
+        if max(float(u) for u in uniq) >= 9:
+            promoters = float(w[str_vals.isin({uniq[-1], uniq[-2]})].sum())
+            detractors = float(w[str_vals.isin(set(uniq[:7]))].sum())
+            metrics["nps"] = round(weighted_pct(promoters, total) - weighted_pct(detractors, total), 1)
+    return metrics
 
 
 def run_question_profile(
@@ -856,27 +935,36 @@ def _profile_single(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
     if col is None:
         return {"error": f"No response data for '{var['text']}'", "variable": _var_summary(var)}
 
-    series = df[col].dropna().astype(str).str.strip()
-    canonical = series.map(lambda v: canonical_answer_code(var, v))
-    total = int((canonical != "").sum())
-    categories = _ordered_categories(var, series)
+    weights = weight_series(df)
+    raw = df[col]
+    valid_mask = raw.notna() & (raw.astype(str).str.strip() != "")
+    canonical = raw[valid_mask].astype(str).str.strip().map(lambda v: canonical_answer_code(var, v))
+    keep = canonical != ""
+    canonical = canonical[keep]
+    total = float(weights.loc[canonical.index].sum())
+    categories = _ordered_categories(var, canonical)
     values = []
     for cat in categories:
-        count = int((canonical == cat).sum())
+        mask = canonical == cat
+        count = float(weights.loc[canonical.index[mask]].sum())
         values.append(
             {
                 "code": cat,
                 "label": _label_for_code(var, cat),
-                "count": count,
-                "percentage": round((count / total) * 100, 1) if total else 0,
+                "count": round(count, 1),
+                "percentage": weighted_pct(count, total),
             }
         )
-    return {
+    result = {
         "analysis_type": "distribution",
         "variable": _var_summary(var),
-        "base_n": total,
+        "base_n": round(total, 1),
         "values": values,
     }
+    scale_metrics = _compute_scale_metrics(var, df)
+    if scale_metrics:
+        result["scale_metrics"] = scale_metrics
+    return result
 
 
 def _profile_multi(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
@@ -949,17 +1037,24 @@ def _profile_numeric(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
         return {"analysis_type": "numeric_multi", "variable": _var_summary(var), "sections": sections}
 
     col = var["columns"][0] if var["columns"] else var["code"]
-    numeric = pd.to_numeric(df[col], errors="coerce").dropna()
-    return {
+    numeric = pd.to_numeric(df[col], errors="coerce")
+    weights = weight_series(df)
+    valid = numeric.notna()
+    count = round(float(weights[valid].sum()), 1)
+    result = {
         "analysis_type": "numeric",
         "variable": _var_summary(var),
-        "count": int(numeric.count()),
-        "mean": round(float(numeric.mean()), 2) if len(numeric) else None,
-        "median": round(float(numeric.median()), 2) if len(numeric) else None,
-        "std": round(float(numeric.std()), 2) if len(numeric) > 1 else 0,
-        "min": round(float(numeric.min()), 2) if len(numeric) else None,
-        "max": round(float(numeric.max()), 2) if len(numeric) else None,
+        "count": count,
+        "mean": weighted_mean(numeric, weights),
+        "median": round(float(numeric[valid].median()), 2) if valid.any() else None,
+        "std": round(float(numeric[valid].std()), 2) if valid.sum() > 1 else 0,
+        "min": round(float(numeric[valid].min()), 2) if valid.any() else None,
+        "max": round(float(numeric[valid].max()), 2) if valid.any() else None,
     }
+    scale_metrics = _compute_scale_metrics(var, df)
+    if scale_metrics:
+        result["scale_metrics"] = scale_metrics
+    return result
 
 
 def _profile_rank(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:

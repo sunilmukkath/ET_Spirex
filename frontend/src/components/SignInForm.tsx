@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, Lock, Sparkles, User } from 'lucide-react'
+import { Loader2, Lock, User } from 'lucide-react'
 import { TEAM_USERS, useAuth } from '../auth/AuthContext'
 
 interface Props {
@@ -34,11 +34,14 @@ export function SignInForm({ onSuccess, compact }: Props) {
       className={`rounded-2xl border border-white/20 bg-white/10 p-6 shadow-2xl backdrop-blur-xl ${compact ? '' : 'sm:p-8'}`}
     >
       <div className="mb-6 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--et-gold)]/20 text-[var(--et-gold-light)]">
-          <Sparkles size={20} />
-        </div>
+        <img
+          src="/scout-mark.png"
+          alt=""
+          aria-hidden
+          className="h-10 w-10 shrink-0 object-contain"
+        />
         <div>
-          <h2 className="text-lg font-semibold text-white">Sign in to ET Spirex</h2>
+          <h2 className="text-lg font-semibold text-white">Sign in to ET Scout</h2>
           <p className="text-xs text-white/60">Elastic Tree team access</p>
         </div>
       </div>

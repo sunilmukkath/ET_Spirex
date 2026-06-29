@@ -1,6 +1,7 @@
 import type { CustomVariable } from '../api/client'
 
-const PREFIX = 'et_spirex_cv_backup'
+const PREFIX = 'et_scout_cv_backup'
+const LEGACY_PREFIX = 'et_spirex_cv_backup'
 
 export function customVariableBackupKey(username: string, surveyId: number): string {
   return `${PREFIX}:${username}:${surveyId}`
@@ -23,7 +24,10 @@ export function loadCustomVariableBackup(
   surveyId: number,
 ): CustomVariable[] | null {
   try {
-    const raw = localStorage.getItem(customVariableBackupKey(username, surveyId))
+    let raw = localStorage.getItem(customVariableBackupKey(username, surveyId))
+    if (!raw) {
+      raw = localStorage.getItem(`${LEGACY_PREFIX}:${username}:${surveyId}`)
+    }
     if (!raw) return null
     const parsed = JSON.parse(raw) as CustomVariable[]
     return Array.isArray(parsed) ? parsed : null

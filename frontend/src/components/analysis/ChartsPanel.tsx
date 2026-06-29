@@ -24,6 +24,8 @@ import { ChartDataMapper } from './ChartDataMapper'
 import { ChartTypePicker } from './ChartTypePicker'
 import { ChartVisualizer } from './ChartVisualizer'
 import { FilterEditor } from './FilterEditor'
+import { AnalysisBookmarkMenu } from './AnalysisBookmarkMenu'
+import type { FilterPreset } from '../../api/client'
 import { KindBadge } from './Results'
 import { ErrorState, ChartSkeleton } from '../States'
 
@@ -40,6 +42,7 @@ interface Props {
   onFiltersChange: (filters: FilterSpec[]) => void
   onFilterTreeChange: (tree: FilterGroup | null) => void
   schemaLoading: boolean
+  onPresetApply?: (preset: FilterPreset) => void
 }
 
 function varSummary(v: SurveyVariable) {
@@ -63,6 +66,7 @@ export function ChartsPanel({
   onFiltersChange,
   onFilterTreeChange,
   schemaLoading,
+  onPresetApply,
 }: Props) {
   const chartRef = useRef<HTMLDivElement>(null)
   const [chartType, setChartType] = useState<ChartTypeId>('bar_vertical')
@@ -445,6 +449,42 @@ export function ChartsPanel({
               </div>
             </div>
 
+            <AnalysisBookmarkMenu
+              surveyId={surveyId}
+              kind="chart"
+              onSave={() => ({
+                name: `Chart: ${valueVar?.code ?? 'custom'}`,
+                config: {
+                  chart_type: chartType,
+                  value_variable_id: valueVariableId,
+                  y_variable_id: yVariableId,
+                  z_variable_id: zVariableId,
+                  banner_variable_id: bannerVariableId,
+                  value_mode: valueMode,
+                  max_items: maxItems,
+                  histogram_bins: histogramBins,
+                  palette_id: paletteId,
+                  color_mode: colorMode,
+                },
+              })}
+              onLoad={(bm) => {
+                const c = bm.config
+                if (typeof c.chart_type === 'string') setChartType(c.chart_type as ChartTypeId)
+                if (typeof c.value_variable_id === 'string') {
+                  setValueVariableId(c.value_variable_id)
+                  onVariableChange(c.value_variable_id)
+                }
+                if (typeof c.y_variable_id === 'string') setYVariableId(c.y_variable_id)
+                if (typeof c.z_variable_id === 'string') setZVariableId(c.z_variable_id)
+                if (typeof c.banner_variable_id === 'string') setBannerVariableId(c.banner_variable_id)
+                if (c.value_mode === 'count' || c.value_mode === 'percent') setValueMode(c.value_mode)
+                if (typeof c.max_items === 'number') setMaxItems(c.max_items)
+                if (typeof c.histogram_bins === 'number') setHistogramBins(c.histogram_bins)
+                if (typeof c.palette_id === 'string') setPaletteId(c.palette_id as ChartPaletteId)
+                if (c.color_mode === 'single' || c.color_mode === 'multi') setColorMode(c.color_mode)
+              }}
+            />
+
             <FilterEditor
               surveyId={surveyId}
               completionStatus={completionStatus}
@@ -453,6 +493,8 @@ export function ChartsPanel({
               filterTree={filterTree}
               onChange={onFiltersChange}
               onFilterTreeChange={onFilterTreeChange}
+              showPresets={Boolean(onPresetApply)}
+              onPresetApply={onPresetApply}
               compact
             />
           </div>

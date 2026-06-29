@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "Starting ET Spirex backend on http://127.0.0.1:8000"
+echo "Starting ET Scout backend on http://127.0.0.1:8000"
 cd "$ROOT/backend"
 if [[ -d .venv ]]; then
   # shellcheck disable=SC1091
@@ -18,6 +18,6 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 sleep 1
-echo "Starting ET Spirex frontend on http://localhost:5173"
+echo "Starting ET Scout frontend on http://localhost:5173"
 cd "$ROOT/frontend"
 npm run dev
