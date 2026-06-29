@@ -19,7 +19,6 @@ import {
   type AnalysisBookmark,
   type BannerResult,
   type CustomVariable,
-  type DataQualityResult,
   type FilterGroup,
   type FilterPreset,
   type FilterSpec,
@@ -44,8 +43,8 @@ import { filterPayload } from '../lib/filterTree'
 const DataPanel = lazy(() =>
   import('../components/analysis/DataPanel').then((m) => ({ default: m.DataPanel })),
 )
-const QualityPanel = lazy(() =>
-  import('../components/analysis/QualityPanel').then((m) => ({ default: m.QualityPanel })),
+const ResponseQCPanel = lazy(() =>
+  import('../components/analysis/ResponseQCPanel').then((m) => ({ default: m.ResponseQCPanel })),
 )
 const ChartsPanel = lazy(() =>
   import('../components/analysis/ChartsPanel').then((m) => ({ default: m.ChartsPanel })),
@@ -82,7 +81,7 @@ function modeLabel(mode: Mode): string {
   if (mode === 'crosstabs') return 'Compare'
   if (mode === 'multivariate') return 'Statistics'
   if (mode === 'charts') return 'Charts'
-  if (mode === 'quality') return 'Quality'
+  if (mode === 'quality') return 'Response QC'
   if (mode === 'variables') return 'Variables'
   return 'Data'
 }
@@ -121,9 +120,6 @@ export function SurveyWorkspace() {
   const [filterTree, setFilterTree] = useState<FilterGroup | null>(null)
   const [tableFilters, setTableFilters] = useState<Record<string, FilterSpec[]>>({})
   const [refreshingTableId, setRefreshingTableId] = useState<string | null>(null)
-  const [qualityResult, setQualityResult] = useState<DataQualityResult | null>(null)
-  const [qualityLoading, setQualityLoading] = useState(false)
-  const [qualityError, setQualityError] = useState<string | null>(null)
   const [customVariables, setCustomVariables] = useState<CustomVariable[]>([])
   const [weightConfig, setWeightConfig] = useState<WeightConfig>({ enabled: false, variable_id: null })
   const [exportingReport, setExportingReport] = useState(false)
@@ -219,8 +215,6 @@ export function SurveyWorkspace() {
 
   const profileAbort = useRef<AbortController | null>(null)
   const initialized = useRef(false)
-  const qualityCacheRef = useRef<Map<string, { at: number; data: DataQualityResult }>>(new Map())
-  const QUALITY_CACHE_MS = 120_000
 
   const setMode = (m: Mode) => {
     setSearchParams((prev) => {
@@ -395,60 +389,6 @@ export function SurveyWorkspace() {
     const t = setTimeout(() => runProfile(selectedId), 300)
     return () => clearTimeout(t)
   }, [mode, selectedId, schemaLoading, filters, filterTree, runProfile])
-
-  useEffect(() => {
-    if (mode !== 'quality' || !Number.isFinite(surveyId) || surveyId <= 0) return
-    const cacheKey = `${surveyId}:${completionStatus}`
-    const cached = qualityCacheRef.current.get(cacheKey)
-    if (cached && Date.now() - cached.at < QUALITY_CACHE_MS) {
-      setQualityResult(cached.data)
-      setQualityLoading(false)
-      setQualityError(null)
-      return
-    }
-
-    let cancelled = false
-    setQualityLoading(true)
-    setQualityError(null)
-    setQualityResult(null)
-    api
-      .getDataQuality(surveyId, completionStatus)
-      .then((data) => {
-        if (!cancelled) {
-          qualityCacheRef.current.set(cacheKey, { at: Date.now(), data })
-          setQualityResult(data)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setQualityError(err instanceof Error ? err.message : 'Quality scan failed')
-          setQualityResult(null)
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setQualityLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [mode, surveyId, completionStatus])
-
-  const refreshQuality = useCallback(async () => {
-    if (!Number.isFinite(surveyId) || surveyId <= 0) return
-    const cacheKey = `${surveyId}:${completionStatus}`
-    setQualityLoading(true)
-    setQualityError(null)
-    try {
-      const data = await api.getDataQuality(surveyId, completionStatus, true)
-      qualityCacheRef.current.set(cacheKey, { at: Date.now(), data })
-      setQualityResult(data)
-    } catch (err) {
-      setQualityError(err instanceof Error ? err.message : 'Quality scan failed')
-      setQualityResult(null)
-    } finally {
-      setQualityLoading(false)
-    }
-  }, [surveyId, completionStatus])
 
   async function runBanner() {
     const request = buildBannerRequest()
@@ -768,11 +708,9 @@ export function SurveyWorkspace() {
 
           {mode === 'quality' && (
             <Suspense fallback={<PanelLoader />}>
-              <QualityPanel
-                result={qualityResult}
-                loading={qualityLoading}
-                error={qualityError}
-                onRefresh={refreshQuality}
+              <ResponseQCPanel
+                surveyId={surveyId}
+                onUseQcApproved={() => setCompletionStatus('qc_approved')}
               />
             </Suspense>
           )}
