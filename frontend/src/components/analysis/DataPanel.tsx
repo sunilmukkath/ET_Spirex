@@ -59,6 +59,7 @@ export function DataPanel({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [exportingCodebook, setExportingCodebook] = useState(false)
   const [savingVars, setSavingVars] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [customVariables, setCustomVariables] = useState<CustomVariable[]>([])
@@ -255,6 +256,24 @@ export function DataPanel({
             >
               {savingVars ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
               Save variables
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                setExportingCodebook(true)
+                try {
+                  await api.exportCodebook(surveyId, completionStatus)
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : 'Codebook export failed')
+                } finally {
+                  setExportingCodebook(false)
+                }
+              }}
+              disabled={exportingCodebook}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {exportingCodebook ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
+              Codebook CSV
             </button>
             <button
               type="button"

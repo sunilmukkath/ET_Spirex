@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BarChart3, ImageDown, Loader2, Palette, RefreshCw } from 'lucide-react'
+import { BarChart3, FileDown, ImageDown, Loader2, Palette, RefreshCw } from 'lucide-react'
 import {
   api,
   type BannerResult,
@@ -19,7 +19,7 @@ import {
 } from '../../lib/chartDataHelpers'
 import { chartSlotDefs } from '../../lib/chartSlots'
 import type { ChartSlotId } from '../../lib/chartSlots'
-import { exportChartPng, exportMapPlaceholder } from '../../lib/chartExport'
+import { exportChartPng, exportChartCsv, exportMapPlaceholder } from '../../lib/chartExport'
 import { ChartDataMapper } from './ChartDataMapper'
 import { ChartTypePicker } from './ChartTypePicker'
 import { ChartVisualizer } from './ChartVisualizer'
@@ -87,6 +87,7 @@ export function ChartsPanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [exportingPng, setExportingPng] = useState(false)
+  const [exportingCsv, setExportingCsv] = useState(false)
   const [filtersStale, setFiltersStale] = useState(false)
   const chartAbort = useRef<AbortController | null>(null)
   const filtersRef = useRef(filters)
@@ -303,6 +304,18 @@ export function ChartsPanel({
       return true
     })
 
+  async function handleExportCsv() {
+    if (!chartData) return
+    setExportingCsv(true)
+    try {
+      exportChartCsv(chartData, `${slug}_${chartType}.csv`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'CSV export failed')
+    } finally {
+      setExportingCsv(false)
+    }
+  }
+
   async function handleExportPng() {
     if (chartType === 'map') {
       alert(exportMapPlaceholder.message)
@@ -342,6 +355,19 @@ export function ChartsPanel({
             >
               {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
               {filtersStale ? 'Apply filters' : 'Generate'}
+            </button>
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={!chartData || loading || exportingCsv}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+            >
+              {exportingCsv ? (
+                <Loader2 className="animate-spin" size={16} />
+              ) : (
+                <FileDown size={16} />
+              )}
+              Export CSV
             </button>
             <button
               type="button"

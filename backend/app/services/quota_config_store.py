@@ -30,6 +30,7 @@ def set_quota_config(survey_id: int, config: QuotaConfig) -> QuotaConfig:
         basis=basis,
         tolerance_count=max(0, int(config.tolerance_count)),
         tolerance_pct=max(0.0, float(config.tolerance_pct)),
+        interviewer_variable_id=(config.interviewer_variable_id or None),
         fields=config.fields,
         layers=config.layers,
     )

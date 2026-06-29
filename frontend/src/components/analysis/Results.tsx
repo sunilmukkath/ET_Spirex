@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import type { BannerResult, FilterSpec, ProfileResult, SurveyVariable, TableCell } from '../../api/client'
+import type { BannerResult, FilterPreset, FilterSpec, ProfileResult, SurveyVariable, TableCell } from '../../api/client'
 import { ErrorState } from '../States'
 import { FilterEditor } from './FilterEditor'
 import { Loader2 } from 'lucide-react'
@@ -252,6 +252,7 @@ export interface MultiCrosstabControls {
   onTableFiltersChange: (rowId: string, filters: FilterSpec[]) => void
   onRefreshTable: (rowId: string, tableIndex: number) => void
   refreshingTableId: string | null
+  onTablePresetApply?: (rowId: string, preset: FilterPreset) => void
 }
 
 export function CrosstabsResults({
@@ -392,6 +393,12 @@ function MultiCrosstabList({
                       applyLabel="Apply to this table"
                       onApply={() => controls.onRefreshTable(rowId, index)}
                       applying={refreshing}
+                      showPresets={Boolean(controls.onTablePresetApply)}
+                      onPresetApply={
+                        controls.onTablePresetApply
+                          ? (preset) => controls.onTablePresetApply!(rowId, preset)
+                          : undefined
+                      }
                     />
                     {!hasCustomFilters && controls.globalFilters.length > 0 && (
                       <p className="mt-2 text-xs text-slate-500">

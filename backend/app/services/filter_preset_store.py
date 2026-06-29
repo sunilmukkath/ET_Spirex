@@ -100,12 +100,13 @@ def create_filter_preset(
 
 
 def delete_filter_preset(survey_id: int, preset_id: str, username: str | None = None) -> bool:
-    rows = _load_raw(survey_id, username)
-    next_rows = [r for r in rows if r.get("id") != preset_id]
-    if len(next_rows) == len(rows):
-        return False
-    _save_raw(survey_id, next_rows, username)
-    if username:
-        _save_raw(survey_id, next_rows, None)
-    _invalidate(survey_id)
-    return True
+    changed = False
+    for store_user in ([username, None] if username else [None]):
+        rows = _load_raw(survey_id, store_user)
+        next_rows = [r for r in rows if r.get("id") != preset_id]
+        if len(next_rows) != len(rows):
+            _save_raw(survey_id, next_rows, store_user)
+            changed = True
+    if changed:
+        _invalidate(survey_id)
+    return changed

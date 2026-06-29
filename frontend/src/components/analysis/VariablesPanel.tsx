@@ -19,22 +19,19 @@ import {
   type CustomVariableType,
   type SurveySchema,
   type SurveyVariable,
-  type WeightConfig,
 } from '../../api/client'
 import {
   loadCustomVariableBackup,
   saveCustomVariableBackup,
 } from '../../lib/customVariableBackup'
 import { EmptyState, ErrorState } from '../States'
-import { QuestionSetupPanel, buildVariableFormFromSource } from './QuestionSetupPanel'
+import { WeightingPanel } from './WeightingPanel'
 
 interface Props {
   surveyId: number
   schema: SurveySchema | null
   completionStatus: string
   username?: string | null
-  weightConfig: WeightConfig
-  onWeightConfigChange: (config: WeightConfig) => Promise<void>
   focusQuestionId?: string | null
   onFocusQuestionConsumed?: () => void
   onChanged?: () => void
@@ -133,13 +130,11 @@ export function VariablesPanel({
   schema,
   completionStatus,
   username,
-  weightConfig,
-  onWeightConfigChange,
   focusQuestionId,
   onFocusQuestionConsumed,
   onChanged,
 }: Props) {
-  const [pageTab, setPageTab] = useState<'questions' | 'custom'>('questions')
+  const [pageTab, setPageTab] = useState<'questions' | 'custom' | 'weighting'>('questions')
   const [variables, setVariables] = useState<CustomVariable[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -420,13 +415,14 @@ export function VariablesPanel({
   const showForm = creating || editing
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-6 et-scroll">
-      <div className="mx-auto max-w-5xl space-y-6">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--canvas-subtle)] et-scroll overscroll-y-contain">
+        <div className="mx-auto max-w-5xl space-y-6 p-4 pb-16 sm:p-6 sm:pb-20">
         <div className="et-panel flex flex-wrap items-start justify-between gap-4 p-5">
           <div>
             <h2 className="et-section-title">Question & variable setup</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Set response weights, recodes, net scores, and combined nets per question.
+              Create recodes, net scores, and combined nets per question.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -449,6 +445,15 @@ export function VariablesPanel({
               >
                 Custom variables ({variables.length})
               </button>
+              <button
+                type="button"
+                onClick={() => setPageTab('weighting')}
+                className={`et-segment-btn text-xs ${
+                  pageTab === 'weighting' ? 'et-segment-btn-active' : 'et-segment-btn-inactive'
+                }`}
+              >
+                Weighting
+              </button>
             </div>
             {pageTab === 'custom' && !showForm && (
               <button
@@ -469,13 +474,15 @@ export function VariablesPanel({
             variables={schema?.variables ?? []}
             groups={schema?.groups ?? []}
             customVariables={variables}
-            weightConfig={weightConfig}
-            onWeightConfigChange={onWeightConfigChange}
             focusQuestionId={focusQuestionId}
             onFocusQuestionConsumed={onFocusQuestionConsumed}
             onCreateVariable={openCreateFromQuestion}
             onEditVariable={openEdit}
           />
+        )}
+
+        {pageTab === 'weighting' && (
+          <WeightingPanel surveyId={surveyId} variables={schema?.variables ?? []} />
         )}
 
         {pageTab === 'custom' && (
@@ -860,6 +867,7 @@ export function VariablesPanel({
         )}
           </>
         )}
+      </div>
       </div>
     </div>
   )

@@ -18,38 +18,38 @@ import { LoadingState } from '../components/States'
 const FEATURES = [
   {
     icon: Layers,
-    title: 'Explore',
-    desc: 'Instant distributions, summary stats, and GPS maps for every question.',
+    title: 'Survey home',
+    desc: 'Mission control per study — sample, QC, quotas, and quick links.',
+  },
+  {
+    icon: Layers,
+    title: 'Questions & compare',
+    desc: 'Profile distributions and multi-banner crosstabs with significance testing.',
   },
   {
     icon: PieChart,
-    title: 'Charts',
-    desc: 'Build bar, pie, histogram, and banner charts one at a time — export PNG or CSV.',
+    title: 'Charts & statistics',
+    desc: '30+ chart types plus correlation, regression, t-tests, and ANOVA.',
   },
   {
     icon: Table2,
-    title: 'Crosstabs',
-    desc: 'Multi-banner tables with per-table filters, significance testing, and Excel export.',
+    title: 'Fielding & quotas',
+    desc: 'Daily completes, interviewer throughput, and layered quota targets.',
   },
   {
     icon: ShieldCheck,
     title: 'Data quality',
-    desc: 'Quality score, speeders, duplicates, straight-lining, and gibberish detection.',
+    desc: 'Speeders, duplicates, straight-lining, custom rules, and interviewer QC.',
   },
   {
     icon: SlidersHorizontal,
-    title: 'Custom variables',
-    desc: 'Recode, combine categories, and net scores — ready for banners and filters.',
+    title: 'Setup & weighting',
+    desc: 'Custom variables, recodes, net scores, and survey weighting.',
   },
   {
     icon: Database,
-    title: 'Raw data',
-    desc: 'Search, filter columns, and export the full response dataset.',
-  },
-  {
-    icon: BarChart3,
-    title: 'QC-approved analysis',
-    desc: 'Analyze clean samples with flagged responses automatically excluded.',
+    title: 'Data & reports',
+    desc: 'Raw data, codebook export, and client-ready PDF/PPT report builder.',
   },
   {
     icon: Zap,

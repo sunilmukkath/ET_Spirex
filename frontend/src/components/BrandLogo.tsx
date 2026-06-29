@@ -14,7 +14,7 @@ export function BrandLogo({ size = 'md', variant = 'dark' }: BrandLogoProps) {
         src="/scout-mark.png"
         alt=""
         aria-hidden
-        className={`${isLight ? 'et-scout-mark-light' : 'et-scout-mark'} ${markSize} shrink-0 object-contain`}
+        className={`${isLight ? 'et-scout-mark-light' : ''} ${markSize} shrink-0 object-contain`}
       />
       <div className="flex items-baseline gap-0.5">
         <span

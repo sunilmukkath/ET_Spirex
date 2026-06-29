@@ -9,6 +9,9 @@ import { LandingPage } from './pages/LandingPage'
 const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
 )
+const AdminSettingsPage = lazy(() =>
+  import('./pages/AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })),
+)
 const SurveyWorkspace = lazy(() =>
   import('./pages/SurveyWorkspace').then((m) => ({ default: m.SurveyWorkspace })),
 )
@@ -41,6 +44,7 @@ function App() {
               }
             >
               <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="settings" element={<AdminSettingsPage />} />
             </Route>
             <Route
               path="projects/:id"

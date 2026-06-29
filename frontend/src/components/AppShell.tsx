@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutGrid, LogOut, Users } from 'lucide-react'
+import { LayoutGrid, LogOut, Settings, Users } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { BrandLogo } from './BrandLogo'
 
@@ -42,6 +42,13 @@ export function AppShell() {
             >
               <LayoutGrid size={14} />
               Surveys
+            </Link>
+            <Link
+              to="/settings"
+              className={`et-chip ${location.pathname === '/settings' ? 'et-chip-active' : 'et-chip-inactive'}`}
+            >
+              <Settings size={14} />
+              Settings
             </Link>
           </nav>
 

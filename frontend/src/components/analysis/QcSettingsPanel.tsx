@@ -1,0 +1,396 @@
+import { useState } from 'react'
+import { Loader2, Plus, Save, Settings2, Trash2 } from 'lucide-react'
+import type { DataQualityResult, QcConfig, QcCustomRule, SurveyVariable } from '../../api/client'
+
+const DEFAULT_THRESHOLDS: QcConfig['thresholds'] = {
+  speeder_time_basis: 'average',
+  speeder_custom_reference_seconds: null,
+  speeder_min_seconds: 0,
+  speeder_median_fraction: 0.25,
+  min_array_items_straight_line: 4,
+  min_text_length_gibberish: 3,
+}
+
+function formatDuration(seconds: number | undefined | null): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return '—'
+  const rounded = Math.round(seconds)
+  if (rounded < 60) return `${rounded}s`
+  const minutes = Math.floor(rounded / 60)
+  const secs = rounded % 60
+  return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`
+}
+
+function emptyRule(): QcCustomRule {
+  return { variable_id: '', operator: 'in', values: [], name: '' }
+}
+
+interface Props {
+  variables: SurveyVariable[]
+  config: QcConfig
+  onChange: (config: QcConfig) => void
+  onSave: () => Promise<void>
+  saving?: boolean
+  speederStats?: DataQualityResult['speeders'] | null
+}
+
+export function QcSettingsPanel({ variables, config, onChange, onSave, saving, speederStats }: Props) {
+  const [expanded, setExpanded] = useState(true)
+  const thresholds = { ...DEFAULT_THRESHOLDS, ...config.thresholds }
+  const rules = config.custom_rules ?? []
+  const timeBasis = thresholds.speeder_time_basis ?? 'average'
+  const useCustomReference = (thresholds.speeder_custom_reference_seconds ?? 0) > 0
+  const surveyAverage = speederStats?.average_seconds
+  const surveyMedian = speederStats?.median_seconds
+  const selectedSurveyTime = timeBasis === 'median' ? surveyMedian : surveyAverage
+  const effectiveReference = useCustomReference
+    ? thresholds.speeder_custom_reference_seconds ?? 0
+    : selectedSurveyTime ?? 0
+  const effectiveThreshold = Math.max(
+    thresholds.speeder_min_seconds ?? 0,
+    effectiveReference * (thresholds.speeder_median_fraction ?? 0.25),
+  )
+
+  const filterVars = variables.filter(
+    (v) =>
+      v.custom ||
+      v.kind === 'single' ||
+      v.kind === 'multi' ||
+      v.kind === 'numeric' ||
+      v.kind === 'text',
+  )
+
+  function updateThresholds(patch: Partial<QcConfig['thresholds']>) {
+    onChange({
+      ...config,
+      thresholds: { ...DEFAULT_THRESHOLDS, ...thresholds, ...patch },
+    })
+  }
+
+  function updateRule(index: number, patch: Partial<QcCustomRule>) {
+    const next = rules.map((r, i) => (i === index ? { ...r, ...patch } : r))
+    onChange({ ...config, custom_rules: next })
+  }
+
+  function addRule() {
+    onChange({ ...config, custom_rules: [...rules, emptyRule()] })
+  }
+
+  function removeRule(index: number) {
+    onChange({ ...config, custom_rules: rules.filter((_, i) => i !== index) })
+  }
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Settings2 size={18} className="text-[var(--et-teal)]" />
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">QC thresholds & custom rules</h3>
+            <p className="text-xs text-slate-500">
+              Tune check sensitivity for this survey. Saved settings apply for all team members.
+            </p>
+          </div>
+        </div>
+        <span className="text-xs font-medium text-slate-400">{expanded ? 'Hide' : 'Show'}</span>
+      </button>
+
+      {expanded && (
+        <div className="space-y-5 border-t border-slate-100 px-5 py-4">
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Speeders</p>
+            <div className="space-y-4 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+              <div>
+                <span className="mb-2 block text-xs font-medium text-slate-600">Reference completion time</span>
+                <div className="flex flex-wrap gap-2">
+                  {(['average', 'median'] as const).map((basis) => (
+                    <button
+                      key={basis}
+                      type="button"
+                      onClick={() =>
+                        updateThresholds({
+                          speeder_time_basis: basis,
+                          speeder_custom_reference_seconds: null,
+                        })
+                      }
+                      className={`rounded-lg border px-3 py-2 text-xs font-medium transition ${
+                        timeBasis === basis && !useCustomReference
+                          ? 'border-[var(--et-teal)] bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      {basis === 'average' ? 'Average time' : 'Median time'}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-slate-500">
+                  Choose whether speeder detection compares each interview to the survey average or median
+                  completion time.
+                </p>
+              </div>
+
+              {speederStats?.available && (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Survey average</p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums text-slate-800">
+                      {formatDuration(surveyAverage)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Survey median</p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums text-slate-800">
+                      {formatDuration(surveyMedian)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Active threshold</p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums text-slate-800">
+                      {formatDuration(speederStats.threshold_seconds ?? effectiveThreshold)}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <label className="flex items-start gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={useCustomReference}
+                  onChange={(e) =>
+                    updateThresholds({
+                      speeder_custom_reference_seconds: e.target.checked
+                        ? Math.max(60, Math.round(selectedSurveyTime ?? 60))
+                        : null,
+                    })
+                  }
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[var(--et-teal)] focus:ring-[var(--et-teal)]"
+                />
+                <span>
+                  <span className="font-medium text-slate-700">Use custom reference time</span>
+                  <span className="mt-0.5 block text-[10px] text-slate-500">
+                    Override survey average/median with your own reference duration (seconds).
+                  </span>
+                </span>
+              </label>
+
+              {useCustomReference && (
+                <label className="block max-w-xs text-xs">
+                  <span className="mb-1 block font-medium text-slate-600">Custom reference (seconds)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={thresholds.speeder_custom_reference_seconds ?? ''}
+                    onChange={(e) =>
+                      updateThresholds({
+                        speeder_custom_reference_seconds: Math.max(1, Number(e.target.value) || 1),
+                      })
+                    }
+                    className="et-input w-full"
+                  />
+                  <span className="mt-1 block text-[10px] text-slate-400">
+                    {formatDuration(thresholds.speeder_custom_reference_seconds)}
+                  </span>
+                </label>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs">
+                  <span className="mb-1 block font-medium text-slate-600">Speeder time fraction</span>
+                  <input
+                    type="number"
+                    min={0.05}
+                    max={1}
+                    step={0.05}
+                    value={thresholds.speeder_median_fraction}
+                    onChange={(e) =>
+                      updateThresholds({
+                        speeder_median_fraction: Math.min(1, Math.max(0.05, Number(e.target.value) || 0.25)),
+                      })
+                    }
+                    className="et-input w-full"
+                  />
+                  <span className="mt-1 block text-[10px] text-slate-400">
+                    Flag completes faster than this share of the reference time
+                  </span>
+                </label>
+                <label className="text-xs">
+                  <span className="mb-1 block font-medium text-slate-600">Absolute floor (seconds)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={thresholds.speeder_min_seconds}
+                    onChange={(e) =>
+                      updateThresholds({ speeder_min_seconds: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                    className="et-input w-full"
+                  />
+                  <span className="mt-1 block text-[10px] text-slate-400">
+                    Optional minimum threshold; effective = max(floor, reference × fraction)
+                  </span>
+                </label>
+              </div>
+
+              {!speederStats?.available && effectiveReference > 0 && (
+                <p className="text-[10px] text-slate-500">
+                  Preview threshold: {formatDuration(effectiveThreshold)} (reference{' '}
+                  {useCustomReference ? 'custom' : timeBasis} {formatDuration(effectiveReference)} ×{' '}
+                  {Math.round((thresholds.speeder_median_fraction ?? 0.25) * 100)}%)
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Other thresholds</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs">
+                <span className="mb-1 block font-medium text-slate-600">Straight-line min items</span>
+                <input
+                  type="number"
+                  min={2}
+                  step={1}
+                  value={thresholds.min_array_items_straight_line}
+                  onChange={(e) =>
+                    updateThresholds({
+                      min_array_items_straight_line: Math.max(2, Number(e.target.value) || 4),
+                    })
+                  }
+                  className="et-input w-full"
+                />
+              </label>
+              <label className="text-xs">
+                <span className="mb-1 block font-medium text-slate-600">Gibberish min length</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={thresholds.min_text_length_gibberish}
+                  onChange={(e) =>
+                    updateThresholds({
+                      min_text_length_gibberish: Math.max(1, Number(e.target.value) || 3),
+                    })
+                  }
+                  className="et-input w-full"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Custom variable rules</p>
+              <button
+                type="button"
+                onClick={addRule}
+                className="inline-flex items-center gap-1 text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+              >
+                <Plus size={14} />
+                Add rule
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-slate-500">
+              Flag completed interviews that match a question or custom variable (e.g. test market, invalid code).
+              Rules are saved for this survey and apply for all team members.
+            </p>
+            {rules.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-xs text-slate-500">
+                No custom rules yet.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {rules.map((rule, index) => {
+                  const selectedVar = filterVars.find((v) => v.id === rule.variable_id)
+                  const options = selectedVar?.answer_options ?? []
+                  return (
+                    <div
+                      key={index}
+                      className="grid gap-2 rounded-lg border border-slate-100 bg-slate-50/80 p-3 sm:grid-cols-[1fr_auto_auto_auto]"
+                    >
+                      <input
+                        type="text"
+                        placeholder="Rule label (optional)"
+                        value={rule.name}
+                        onChange={(e) => updateRule(index, { name: e.target.value })}
+                        className="et-input text-xs sm:col-span-4"
+                      />
+                      <select
+                        value={rule.variable_id}
+                        onChange={(e) => updateRule(index, { variable_id: e.target.value, values: [] })}
+                        className="et-select text-xs"
+                      >
+                        <option value="">Select variable…</option>
+                        {filterVars.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.custom ? '[Custom] ' : ''}
+                            {v.code} — {(v.text || v.code).slice(0, 40)}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={rule.operator}
+                        onChange={(e) =>
+                          updateRule(index, { operator: e.target.value as QcCustomRule['operator'] })
+                        }
+                        className="et-select text-xs"
+                      >
+                        <option value="in">Matches any of</option>
+                        <option value="not_in">Does not match</option>
+                        <option value="is_empty">Is empty</option>
+                        <option value="not_empty">Is not empty</option>
+                      </select>
+                      {rule.operator === 'in' || rule.operator === 'not_in' ? (
+                        <select
+                          multiple
+                          value={rule.values}
+                          onChange={(e) =>
+                            updateRule(index, {
+                              values: Array.from(e.target.selectedOptions).map((o) => o.value),
+                            })
+                          }
+                          className="et-select min-h-[2.5rem] text-xs"
+                        >
+                          {options.map((o) => (
+                            <option key={o.code} value={o.code}>
+                              {o.label || o.code}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="text-xs text-slate-400 self-center">No values needed</div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeRule(index)}
+                        className="self-start rounded p-1 text-slate-400 hover:bg-white hover:text-red-600"
+                        title="Remove rule"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end border-t border-slate-100 pt-3">
+            <button
+              type="button"
+              onClick={() => void onSave()}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-teal)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save QC settings & re-scan
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}

@@ -6,6 +6,7 @@ export type QcCheckId =
   | 'duplicate_phones'
   | 'straight_liners'
   | 'gibberish'
+  | 'custom_rules'
 
 export const QC_CHECKS: {
   id: QcCheckId
@@ -45,11 +46,19 @@ export const QC_CHECKS: {
   },
 ]
 
+export const CUSTOM_RULES_CHECK = {
+  id: 'custom_rules' as const,
+  title: 'Custom rules',
+  description: 'Responses matching your custom variable conditions',
+  severity: 'medium' as const,
+}
+
 export interface QcFlaggedRow {
   response_id: string
   checks: QcCheckId[]
   severity: 'high' | 'medium' | 'low'
   detail: string
+  interviewer?: string
 }
 
 const SEVERITY_RANK: Record<'high' | 'medium' | 'low', number> = {
@@ -61,6 +70,7 @@ const SEVERITY_RANK: Record<'high' | 'medium' | 'low', number> = {
 export function isCheckAvailable(id: QcCheckId, result: DataQualityResult): boolean {
   if (id === 'speeders') return result.speeders?.available !== false
   if (id === 'duplicate_phones') return result.duplicate_phones?.available !== false
+  if (id === 'custom_rules') return (result.custom_rules?.count ?? 0) > 0 || result.custom_rules?.available === true
   return true
 }
 
@@ -69,6 +79,7 @@ export function checkCount(id: QcCheckId, result: DataQualityResult): number {
   if (id === 'test_responses') return result.test_responses?.count ?? 0
   if (id === 'duplicate_phones') return result.duplicate_phones?.count ?? 0
   if (id === 'straight_liners') return result.straight_liners?.count ?? 0
+  if (id === 'custom_rules') return result.custom_rules?.count ?? 0
   return result.gibberish?.count ?? 0
 }
 
@@ -125,6 +136,9 @@ export function aggregateFlaggedRows(
   for (const f of result.gibberish?.flags ?? []) {
     add(f.response_id, 'gibberish', 'low', `${f.question}: "${f.text}"`)
   }
+  for (const f of result.custom_rules?.flags ?? []) {
+    add(f.response_id, 'custom_rules', 'medium', f.reason ?? f.rule_name ?? 'Custom rule')
+  }
 
   return [...byId.values()].sort((a, b) => {
     const sev = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]
@@ -149,6 +163,7 @@ export function normalizeQcResult(result: DataQualityResult): DataQualityResult 
     },
     straight_liners: result.straight_liners ?? emptyFlags,
     gibberish: result.gibberish ?? emptyFlags,
+    custom_rules: result.custom_rules ?? emptyFlags,
   }
 }
 
@@ -164,17 +179,19 @@ export function computeQcMetrics(
   return { total, flagged, clean, passRate }
 }
 
+const ALL_QC_CHECK_IDS: QcCheckId[] = [...QC_CHECKS.map((c) => c.id), 'custom_rules']
+
 export function allCheckIds(): QcCheckId[] {
-  return QC_CHECKS.map((c) => c.id)
+  return ALL_QC_CHECK_IDS
 }
 
 export function enabledChecksFromDisabled(disabled: string[]): Set<QcCheckId> {
   const disabledSet = new Set(disabled)
-  return new Set(QC_CHECKS.map((c) => c.id).filter((id) => !disabledSet.has(id)))
+  return new Set(ALL_QC_CHECK_IDS.filter((id) => !disabledSet.has(id)))
 }
 
 export function disabledChecksFromEnabled(enabled: Set<QcCheckId>): string[] {
-  return QC_CHECKS.map((c) => c.id).filter((id) => !enabled.has(id))
+  return ALL_QC_CHECK_IDS.filter((id) => !enabled.has(id))
 }
 
 export interface QcReviewState {
@@ -211,12 +228,29 @@ export function setQcSampleInclusion(
   return { kept, excluded }
 }
 
+export function enrichFlaggedRowsWithInterviewers(
+  rows: QcFlaggedRow[],
+  labels: Record<string, string>,
+): QcFlaggedRow[] {
+  if (!Object.keys(labels).length) return rows
+  return rows.map((row) => ({
+    ...row,
+    interviewer: labels[row.response_id] || '—',
+  }))
+}
+
 export function exportFlaggedCsv(rows: QcFlaggedRow[], filename = 'qc_flagged.csv') {
-  const header = 'response_id,checks,severity,detail'
+  const hasInterviewer = rows.some((r) => r.interviewer)
+  const header = hasInterviewer
+    ? 'response_id,interviewer,checks,severity,detail'
+    : 'response_id,checks,severity,detail'
   const lines = rows.map((r) => {
     const checks = r.checks.join('|')
     const detail = r.detail.replace(/"/g, '""')
-    return `${r.response_id},"${checks}",${r.severity},"${detail}"`
+    const interviewer = (r.interviewer ?? '').replace(/"/g, '""')
+    return hasInterviewer
+      ? `${r.response_id},"${interviewer}","${checks}",${r.severity},"${detail}"`
+      : `${r.response_id},"${checks}",${r.severity},"${detail}"`
   })
   const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)

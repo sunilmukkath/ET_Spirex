@@ -101,9 +101,12 @@ export function FilterPresetMenu({ surveyId, filters, filterTree, onApply }: Pro
       )}
       {presets.length > 0 && (
         <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-slate-400">
-          <Bookmark size={11} /> Audiences
+          <Bookmark size={11} /> Shared audiences
         </span>
       )}
+      <p className="w-full text-[10px] text-slate-400">
+        Saved presets are shared with everyone on this survey.
+      </p>
     </div>
   )
 }

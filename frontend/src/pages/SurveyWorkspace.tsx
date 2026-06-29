@@ -5,7 +5,8 @@ import {
   BarChart3,
   ClipboardList,
   Database,
-  Info,
+  FileText,
+  Home,
   Layers,
   Loader2,
   PanelLeft,
@@ -13,6 +14,8 @@ import {
   Sigma,
   SlidersHorizontal,
   Table2,
+  TrendingUp,
+  Users,
 } from 'lucide-react'
 import {
   api,
@@ -27,21 +30,21 @@ import {
   type ProjectDetail,
   type SurveySchema,
   type SurveyVariable,
-  type WeightConfig,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { BrandLogo } from '../components/BrandLogo'
+import { ExplorePanel } from '../components/analysis/ExplorePanel'
 import { CrosstabsPanel } from '../components/analysis/CrosstabsPanel'
-import { FilterEditor } from '../components/analysis/FilterEditor'
 import { QuestionNavigator } from '../components/analysis/QuestionNavigator'
-import { SurveyOverviewBar } from '../components/analysis/SurveyOverviewBar'
-import { ProfileResults } from '../components/analysis/Results'
 import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
-import { FieldManagementPanel } from '../components/analysis/FieldManagementPanel'
-import { SuggestedCharts } from '../components/analysis/SuggestedCharts'
 import { StatusBadge } from '../components/StatusBadge'
-import { ErrorState, TableSkeleton } from '../components/States'
-import { filterPayload } from '../lib/filterTree'
+import { ErrorState } from '../components/States'
+import { FieldManagementPanel } from '../components/analysis/FieldManagementPanel'
+import { SurveyHomePanel } from '../components/analysis/SurveyHomePanel'
+import { FieldingMonitorPanel } from '../components/analysis/FieldingMonitorPanel'
+import { ReportBuilderPanel } from '../components/analysis/ReportBuilderPanel'
+import { FieldTeamPanel } from '../components/analysis/FieldTeamPanel'
+import { filterPayload, treeToFlatFilters } from '../lib/filterTree'
 import type { ChartTypeId } from '../lib/chartTypes'
 
 const DataPanel = lazy(() =>
@@ -72,10 +75,26 @@ function PanelLoader() {
   )
 }
 
-type Mode = 'explore' | 'charts' | 'crosstabs' | 'quality' | 'variables' | 'fields' | 'data' | 'multivariate'
+type Mode =
+  | 'home'
+  | 'explore'
+  | 'charts'
+  | 'fielding'
+  | 'reports'
+  | 'fieldteam'
+  | 'quality'
+  | 'variables'
+  | 'fields'
+  | 'data'
+  | 'multivariate'
+type AnalyzeView = 'profile' | 'compare'
 
 function parseMode(raw: string | null): Mode {
-  if (raw === 'crosstabs' || raw === 'compare') return 'crosstabs'
+  if (raw === 'crosstabs' || raw === 'compare') return 'explore'
+  if (raw === 'home' || raw === 'overview') return 'home'
+  if (raw === 'fielding' || raw === 'monitor') return 'fielding'
+  if (raw === 'reports' || raw === 'report-builder') return 'reports'
+  if (raw === 'fieldteam' || raw === 'field-team') return 'fieldteam'
   if (raw === 'charts') return 'charts'
   if (raw === 'quality') return 'quality'
   if (raw === 'variables') return 'variables'
@@ -83,18 +102,12 @@ function parseMode(raw: string | null): Mode {
   if (raw === 'data') return 'data'
   if (raw === 'multivariate' || raw === 'advanced' || raw === 'statistics') return 'multivariate'
   if (raw === 'explore' || raw === 'questions') return 'explore'
-  return 'explore'
+  return 'home'
 }
 
-function modeLabel(mode: Mode): string {
-  if (mode === 'explore') return 'Questions'
-  if (mode === 'crosstabs') return 'Compare'
-  if (mode === 'multivariate') return 'Statistics'
-  if (mode === 'charts') return 'Charts'
-  if (mode === 'quality') return 'Response QC'
-  if (mode === 'variables') return 'Setup'
-  if (mode === 'fields') return 'Fields'
-  return 'Data'
+function parseAnalyzeView(rawMode: string | null, rawView: string | null): AnalyzeView {
+  if (rawMode === 'crosstabs' || rawMode === 'compare' || rawView === 'compare') return 'compare'
+  return 'profile'
 }
 
 export function SurveyWorkspace() {
@@ -111,7 +124,9 @@ export function SurveyWorkspace() {
   const [enriching, setEnriching] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const mode = parseMode(searchParams.get('mode'))
+  const rawModeParam = searchParams.get('mode')
+  const mode = parseMode(rawModeParam)
+  const analyzeView = parseAnalyzeView(rawModeParam, searchParams.get('view'))
   const completionStatus = searchParams.get('responses') || 'complete'
   const initialChartType = (searchParams.get('chart') as ChartTypeId | null) || null
 
@@ -133,7 +148,6 @@ export function SurveyWorkspace() {
   const [tableFilters, setTableFilters] = useState<Record<string, FilterSpec[]>>({})
   const [refreshingTableId, setRefreshingTableId] = useState<string | null>(null)
   const [customVariables, setCustomVariables] = useState<CustomVariable[]>([])
-  const [weightConfig, setWeightConfig] = useState<WeightConfig>({ enabled: false, variable_id: null })
   const [focusQuestionId, setFocusQuestionId] = useState<string | null>(null)
   const [exportingReport, setExportingReport] = useState(false)
   const [schemaVersion, setSchemaVersion] = useState(0)
@@ -170,7 +184,18 @@ export function SurveyWorkspace() {
 
   useEffect(() => {
     setMobileNavOpen(false)
-  }, [mode])
+  }, [mode, analyzeView])
+
+  useEffect(() => {
+    const raw = searchParams.get('mode')
+    if (raw === 'crosstabs' || raw === 'compare') {
+      setSearchParams((prev) => {
+        prev.set('mode', 'explore')
+        prev.set('view', 'compare')
+        return prev
+      }, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   const mergedSchema = useMemo((): SurveySchema | null => {
     if (!schema) return null
@@ -216,14 +241,44 @@ export function SurveyWorkspace() {
     }
   }, [])
 
+  const applyTableFilterPreset = useCallback((rowId: string, preset: FilterPreset) => {
+    const next =
+      preset.filter_tree?.children?.length
+        ? treeToFlatFilters(preset.filter_tree)
+        : (preset.filters ?? [])
+    setTableFilters((prev) => ({ ...prev, [rowId]: next }))
+  }, [])
+
+  const setAnalyzeView = useCallback(
+    (view: AnalyzeView) => {
+      setSearchParams((prev) => {
+        prev.set('mode', 'explore')
+        if (view === 'compare') prev.set('view', 'compare')
+        else prev.delete('view')
+        return prev
+      }, { replace: true })
+    },
+    [setSearchParams],
+  )
+
+  const navigateWorkspace = useCallback(
+    (targetMode: string, view?: string) => {
+      setSearchParams((prev) => {
+        prev.set('mode', targetMode)
+        if (view === 'compare') prev.set('view', 'compare')
+        else if (view === 'profile') prev.delete('view')
+        else if (targetMode !== 'explore') prev.delete('view')
+        return prev
+      }, { replace: true })
+    },
+    [setSearchParams],
+  )
+
   const compareCurrentQuestion = useCallback(() => {
     if (!selectedId) return
     setSideRowIds([selectedId])
-    setSearchParams((prev) => {
-      prev.set('mode', 'crosstabs')
-      return prev
-    }, { replace: true })
-  }, [selectedId, setSearchParams])
+    setAnalyzeView('compare')
+  }, [selectedId, setAnalyzeView])
 
   const configureCurrentQuestion = useCallback(() => {
     if (!selectedId) return
@@ -252,16 +307,6 @@ export function SurveyWorkspace() {
     }, { replace: true })
   }, [setSearchParams])
 
-  const handleWeightConfigChange = useCallback(
-    async (next: WeightConfig) => {
-      setWeightConfig(next)
-      await api.setWeightConfig(surveyId, next)
-      invalidateSchemaCache(surveyId)
-      setSchemaVersion((v) => v + 1)
-    },
-    [surveyId],
-  )
-
   const loadCrosstabBookmark = useCallback((bm: AnalysisBookmark) => {
     const cfg = bm.config
     if (Array.isArray(cfg.side_row_ids)) setSideRowIds(cfg.side_row_ids as string[])
@@ -283,12 +328,10 @@ export function SurveyWorkspace() {
       setFilters(cfg.filters as FilterSpec[])
       setFilterTree(null)
     }
+    if (cfg.table_filters && typeof cfg.table_filters === 'object') {
+      setTableFilters(cfg.table_filters as Record<string, FilterSpec[]>)
+    }
   }, [])
-
-  useEffect(() => {
-    if (!surveyId) return
-    api.getWeightConfig(surveyId).then(setWeightConfig).catch(() => {})
-  }, [surveyId, schemaVersion])
 
   const profileAbort = useRef<AbortController | null>(null)
   const initialized = useRef(false)
@@ -467,10 +510,10 @@ export function SurveyWorkspace() {
   }, [surveyId, completionStatus, filters, filterTree])
 
   useEffect(() => {
-    if (mode !== 'explore' || !selectedId || schemaLoading) return
+    if (mode !== 'explore' || analyzeView !== 'profile' || !selectedId || schemaLoading) return
     const t = setTimeout(() => runProfile(selectedId), 300)
     return () => clearTimeout(t)
-  }, [mode, selectedId, schemaLoading, filters, filterTree, runProfile])
+  }, [mode, analyzeView, selectedId, schemaLoading, filters, filterTree, runProfile])
 
   async function runBanner() {
     const request = buildBannerRequest()
@@ -602,7 +645,7 @@ export function SurveyWorkspace() {
   function handleSelectQuestion(id: string) {
     setSelectedId(id)
     setMobileNavOpen(false)
-    if (mode === 'crosstabs') {
+    if (mode === 'explore' && analyzeView === 'compare') {
       setSideRowIds((prev) => {
         const rest = prev.filter((x) => x !== id)
         return [id, ...rest]
@@ -612,12 +655,16 @@ export function SurveyWorkspace() {
   }
 
   const showsQuestionNav =
+    mode !== 'home' &&
     mode !== 'quality' &&
     mode !== 'variables' &&
     mode !== 'fields' &&
     mode !== 'data' &&
     mode !== 'charts' &&
-    mode !== 'multivariate'
+    mode !== 'multivariate' &&
+    mode !== 'fielding' &&
+    mode !== 'reports' &&
+    mode !== 'fieldteam'
 
   return (
     <div className="flex h-screen flex-col bg-[var(--canvas)]">
@@ -651,26 +698,6 @@ export function SurveyWorkspace() {
           </div>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <select
-              value={weightConfig.enabled && weightConfig.variable_id ? weightConfig.variable_id : ''}
-              onChange={async (e) => {
-                const variable_id = e.target.value || null
-                const next = { enabled: Boolean(variable_id), variable_id }
-                await handleWeightConfigChange(next)
-              }}
-              className="et-select max-w-[9.5rem]"
-              title="Response weighting"
-            >
-              <option value="">No weight</option>
-              {(activeSchema?.variables ?? [])
-                .filter((v) => v.kind === 'numeric' && !v.custom)
-                .map((v) => (
-                  <option key={v.id} value={v.id}>
-                    W: {(v.code || v.text).slice(0, 18)}
-                  </option>
-                ))}
-            </select>
-
             <select
               value={completionStatus}
               onChange={(e) => setCompletionStatus(e.target.value)}
@@ -711,22 +738,28 @@ export function SurveyWorkspace() {
               className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 md:hidden"
             >
               <PanelLeft size={15} />
-              {mode === 'crosstabs' ? 'Rows & banners' : 'Questions'}
+              {analyzeView === 'compare' ? 'Rows & banners' : 'Questions'}
             </button>
           )}
           <span className="hidden shrink-0 et-kicker lg:inline">Analyze</span>
           <div className="et-segment">
+            <ModeButton active={mode === 'home'} onClick={() => setMode('home')} icon={<Home size={15} />}>
+              Home
+            </ModeButton>
             <ModeButton active={mode === 'explore'} onClick={() => setMode('explore')} icon={<Layers size={15} />}>
-              {modeLabel('explore')}
+              Questions
             </ModeButton>
             <ModeButton active={mode === 'charts'} onClick={() => setMode('charts')} icon={<BarChart3 size={15} />}>
               Charts
             </ModeButton>
-            <ModeButton active={mode === 'crosstabs'} onClick={() => setMode('crosstabs')} icon={<Table2 size={15} />}>
-              {modeLabel('crosstabs')}
+            <ModeButton active={mode === 'fielding'} onClick={() => setMode('fielding')} icon={<TrendingUp size={15} />}>
+              Fielding
+            </ModeButton>
+            <ModeButton active={mode === 'reports'} onClick={() => setMode('reports')} icon={<FileText size={15} />}>
+              Reports
             </ModeButton>
             <ModeButton active={mode === 'multivariate'} onClick={() => setMode('multivariate')} icon={<Sigma size={15} />}>
-              {modeLabel('multivariate')}
+              Statistics
             </ModeButton>
           </div>
           <span className="hidden shrink-0 text-slate-300 lg:inline" aria-hidden>
@@ -734,6 +767,9 @@ export function SurveyWorkspace() {
           </span>
           <span className="hidden shrink-0 et-kicker lg:inline">Manage</span>
           <div className="et-segment">
+            <ModeButton active={mode === 'fieldteam'} onClick={() => setMode('fieldteam')} icon={<Users size={15} />}>
+              Field team
+            </ModeButton>
             <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
               Setup
             </ModeButton>
@@ -750,7 +786,7 @@ export function SurveyWorkspace() {
         </div>
       </header>
 
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
           {showsQuestionNav && mobileNavOpen && (
             <button
               type="button"
@@ -765,7 +801,7 @@ export function SurveyWorkspace() {
                 mobileNavOpen
                   ? 'fixed inset-y-0 left-0 z-50 flex shadow-2xl md:relative md:z-auto md:shadow-none'
                   : 'hidden md:flex'
-              }`}
+              } h-full min-h-0`}
             >
               <QuestionNavigator
                 variables={activeSchema?.variables ?? []}
@@ -773,7 +809,7 @@ export function SurveyWorkspace() {
                 selectedId={selectedId}
                 onSelect={handleSelectQuestion}
                 loading={schemaLoading}
-                compareMode={mode === 'crosstabs'}
+                compareMode={mode === 'explore' && analyzeView === 'compare'}
                 compareIds={bannerIds}
                 onCompareToggle={addBanner}
                 onCompareRemove={(id) =>
@@ -785,7 +821,7 @@ export function SurveyWorkspace() {
                 sideRowIds={sideRowIds}
                 onSideRowToggle={toggleSideRow}
                 onAfterSelect={() => setMobileNavOpen(false)}
-                className="h-full max-h-screen md:max-h-none"
+                className="h-full min-h-0 max-h-full"
               />
             </div>
           )}
@@ -797,11 +833,59 @@ export function SurveyWorkspace() {
             </div>
           )}
 
+          {mode === 'explore' && (
+            <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 sm:px-4">
+              <div className="et-segment">
+                <AnalyzeViewButton
+                  active={analyzeView === 'profile'}
+                  onClick={() => setAnalyzeView('profile')}
+                  icon={<Layers size={14} />}
+                >
+                  Profile
+                </AnalyzeViewButton>
+                <AnalyzeViewButton
+                  active={analyzeView === 'compare'}
+                  onClick={() => setAnalyzeView('compare')}
+                  icon={<Table2 size={14} />}
+                >
+                  Compare
+                </AnalyzeViewButton>
+              </div>
+              <p className="hidden text-xs text-slate-500 sm:block">
+                {analyzeView === 'profile'
+                  ? 'Single-question distribution and summary'
+                  : 'Crosstab rows against banner columns'}
+              </p>
+            </div>
+          )}
+
           {enriching && schema && (
             <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
               <Loader2 className="animate-spin" size={14} />
               Loading answer options for {schema.question_count ?? schema.variables.length} questions…
             </div>
+          )}
+
+          {mode === 'home' && (
+            <SurveyHomePanel surveyId={surveyId} onNavigate={navigateWorkspace} />
+          )}
+
+          {mode === 'fielding' && (
+            <FieldingMonitorPanel surveyId={surveyId} completionStatus={completionStatus} />
+          )}
+
+          {mode === 'reports' && (
+            <ReportBuilderPanel
+              surveyId={surveyId}
+              completionStatus={completionStatus}
+              variables={activeSchema?.variables ?? []}
+              filters={filters}
+              filterTree={filterTree}
+            />
+          )}
+
+          {mode === 'fieldteam' && (
+            <FieldTeamPanel surveyId={surveyId} variables={activeSchema?.variables ?? []} />
           )}
 
           {mode === 'charts' && (
@@ -826,7 +910,7 @@ export function SurveyWorkspace() {
             </Suspense>
           )}
 
-          {mode === 'explore' && (
+          {mode === 'explore' && analyzeView === 'profile' && (
             <ExplorePanel
               surveyId={surveyId}
               completionStatus={completionStatus}
@@ -880,6 +964,7 @@ export function SurveyWorkspace() {
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <ResponseQCPanel
                     surveyId={surveyId}
+                    variables={activeSchema?.variables ?? []}
                     qcApprovedCount={qcSummary?.qc_approved_count ?? null}
                     onUseQcApproved={() => setCompletionStatus('qc_approved')}
                     onReviewChanged={handleQcReviewChanged}
@@ -904,17 +989,17 @@ export function SurveyWorkspace() {
           )}
 
           {mode === 'variables' && (
-            <VariablesPanel
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <VariablesPanel
               surveyId={surveyId}
               schema={schema}
               completionStatus={completionStatus}
               username={user?.username ?? null}
-              weightConfig={weightConfig}
-              onWeightConfigChange={handleWeightConfigChange}
               focusQuestionId={focusQuestionId}
               onFocusQuestionConsumed={() => setFocusQuestionId(null)}
               onChanged={reloadCustomVariables}
-            />
+              />
+            </div>
           )}
 
           {mode === 'fields' && (
@@ -936,7 +1021,7 @@ export function SurveyWorkspace() {
             </Suspense>
           )}
 
-          {mode === 'crosstabs' && (
+          {mode === 'explore' && analyzeView === 'compare' && (
             <CrosstabsPanel
               surveyId={surveyId}
               completionStatus={completionStatus}
@@ -984,6 +1069,7 @@ export function SurveyWorkspace() {
               onRefreshTable={refreshCrosstabTable}
               refreshingTableId={refreshingTableId}
               onPresetApply={applyFilterPreset}
+              onTablePresetApply={applyTableFilterPreset}
               onLoadBookmark={loadCrosstabBookmark}
               buildBookmarkConfig={() => {
                 const req = buildBannerRequest()
@@ -999,6 +1085,7 @@ export function SurveyWorkspace() {
                     show_row_pct: showRowPct,
                     sig_enabled: sigEnabled,
                     confidence_level: confidenceLevel,
+                    table_filters: tableFilters,
                     ...filterPayload(filters, filterTree),
                   },
                   banner_request: req,
@@ -1032,6 +1119,31 @@ export function SurveyWorkspace() {
   )
 }
 
+function AnalyzeViewButton({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition ${
+        active ? 'et-segment-btn-active' : 'et-segment-btn-inactive'
+      }`}
+    >
+      {icon}
+      {children}
+    </button>
+  )
+}
+
 function ModeButton({
   active,
   onClick,
@@ -1052,201 +1164,5 @@ function ModeButton({
       {icon}
       {children}
     </button>
-  )
-}
-
-function ExplorePanel({
-  surveyId,
-  completionStatus,
-  selectedVar,
-  selectedId,
-  variables,
-  groups,
-  responseCount,
-  questionCount,
-  customVarCount,
-  filters,
-  filterTree,
-  onFiltersChange,
-  onFilterTreeChange,
-  onPresetApply,
-  analyzing,
-  profileResult,
-  schemaLoading,
-  enriching,
-  onCompareQuestion,
-  onConfigureQuestion,
-  onOpenChart,
-  onExportReport,
-  exportingReport,
-}: {
-  surveyId: number
-  completionStatus: string
-  selectedVar: SurveyVariable | null
-  selectedId: string | null
-  variables: SurveyVariable[]
-  groups: { id: number; title: string; order: number; variable_ids: string[] }[]
-  responseCount: number
-  questionCount: number
-  customVarCount: number
-  filters: FilterSpec[]
-  filterTree: FilterGroup | null
-  onFiltersChange: (filters: FilterSpec[]) => void
-  onFilterTreeChange: (tree: FilterGroup | null) => void
-  onPresetApply: (preset: FilterPreset) => void
-  analyzing: boolean
-  profileResult: ProfileResult | null
-  schemaLoading: boolean
-  enriching: boolean
-  onCompareQuestion: () => void
-  onConfigureQuestion: () => void
-  onOpenChart: (chartType: ChartTypeId) => void
-  onExportReport: (format: 'pdf' | 'pptx') => void
-  exportingReport: boolean
-}) {
-  const overview = (
-    <SurveyOverviewBar
-      responseCount={responseCount}
-      questionCount={questionCount}
-      groupCount={groups.length}
-      variables={variables}
-      completionStatus={completionStatus}
-      customVarCount={customVarCount}
-    />
-  )
-
-  if (schemaLoading) {
-    return (
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200/80 bg-[var(--canvas-subtle)] px-6 py-4">
-          {overview}
-        </div>
-        <div className="flex flex-1 flex-col gap-4 p-8">
-          <TableSkeleton rows={4} />
-          <TableSkeleton rows={8} />
-        </div>
-      </div>
-    )
-  }
-
-  if (!selectedVar) {
-    return (
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200/80 bg-[var(--canvas-subtle)] px-6 py-4">
-          {overview}
-        </div>
-        <EmptyCanvas
-          icon={<BarChart3 size={40} />}
-          title="Select a question"
-          description="Choose any question from the sidebar to see its distribution, chart, and summary stats."
-        />
-      </div>
-    )
-  }
-
-  if (enriching && !profileResult && !analyzing) {
-    return (
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200/80 bg-[var(--canvas-subtle)] px-6 py-4">
-          {overview}
-        </div>
-        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
-          <FilterEditor
-            surveyId={surveyId}
-            completionStatus={completionStatus}
-            variables={variables}
-            filters={filters}
-            filterTree={filterTree}
-            onChange={onFiltersChange}
-            onFilterTreeChange={onFilterTreeChange}
-            showPresets
-            onPresetApply={onPresetApply}
-            compact
-          />
-        </div>
-        <div className="flex flex-1 flex-col items-center justify-center p-8">
-          <div className="max-w-md text-center">
-            <p className="font-medium text-slate-800">{selectedVar.text}</p>
-            <div className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-500">
-              <Loader2 className="animate-spin text-[var(--et-teal)]" size={18} />
-              Preparing analysis…
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-slate-200/80 bg-[var(--canvas-subtle)] px-6 py-4">
-        {overview}
-      </div>
-      <div className="shrink-0 border-b border-slate-200/80 bg-white px-6 py-3 shadow-sm">
-        <FilterEditor
-          surveyId={surveyId}
-          completionStatus={completionStatus}
-          variables={variables}
-          filters={filters}
-          filterTree={filterTree}
-          onChange={onFiltersChange}
-          onFilterTreeChange={onFilterTreeChange}
-          showPresets
-          onPresetApply={onPresetApply}
-          compact
-        />
-      </div>
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="mx-auto max-w-4xl animate-fade-in">
-          {analyzing && (
-            <div className="mb-4 flex items-center gap-2 text-sm text-[var(--et-teal-dark)]">
-              <Loader2 className="animate-spin" size={16} />
-              Analyzing...
-            </div>
-          )}
-          {selectedVar && !schemaLoading && (
-            <div className="mb-4">
-              <SuggestedCharts variable={selectedVar} onSelectChart={onOpenChart} />
-            </div>
-          )}
-          {profileResult ? (
-            <div className="et-panel p-6 shadow-sm">
-              <ProfileResults
-                result={profileResult}
-                onCompareQuestion={selectedId ? onCompareQuestion : undefined}
-                onConfigureQuestion={selectedId ? onConfigureQuestion : undefined}
-                onExportReport={selectedId ? onExportReport : undefined}
-                exportingReport={exportingReport}
-              />
-            </div>
-          ) : !analyzing ? (
-            <EmptyCanvas
-              icon={<Info size={32} />}
-              title="No data"
-              description="This question has no response data yet, or the survey table is empty."
-            />
-          ) : null}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-
-function EmptyCanvas({
-  icon,
-  title,
-  description,
-}: {
-  icon: React.ReactNode
-  title: string
-  description: string
-}) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center p-12 text-center">
-      <div className="et-empty-icon">{icon}</div>
-      <h3 className="mt-5 font-display text-lg font-semibold text-slate-800">{title}</h3>
-      <p className="mt-2 max-w-sm text-sm leading-relaxed text-slate-500">{description}</p>
-    </div>
   )
 }

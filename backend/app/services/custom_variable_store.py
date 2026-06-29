@@ -79,8 +79,8 @@ def list_custom_variables(survey_id: int, username: str | None = None) -> list[C
     if cached and now - cached[0] < _LIST_TTL:
         return list(cached[1])
 
-    user_rows = _load_raw(survey_id, username) if username else []
     shared_rows = _load_raw(survey_id, None)
+    user_rows = _load_raw(survey_id, username) if username else []
     rows = _merge_rows(user_rows, shared_rows) if user_rows else shared_rows
     variables = [CustomVariable.model_validate(row) for row in rows]
     _LIST_CACHE[cache_key] = (now, variables)

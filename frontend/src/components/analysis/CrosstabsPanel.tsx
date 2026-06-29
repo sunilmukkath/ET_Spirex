@@ -90,7 +90,7 @@ function EmptyCanvas({
   description: string
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center p-8 text-center sm:p-12">
+    <div className="flex flex-col items-center justify-center py-16 text-center sm:py-20">
       <div className="et-empty-icon">{icon}</div>
       <h3 className="mt-5 font-display text-lg font-semibold text-slate-800">{title}</h3>
       <p className="mt-2 max-w-sm text-sm leading-relaxed text-slate-500">{description}</p>
@@ -142,6 +142,7 @@ export interface CrosstabsPanelProps {
   onRefreshTable: (rowId: string, tableIndex: number) => void
   refreshingTableId: string | null
   onPresetApply: (preset: FilterPreset) => void
+  onTablePresetApply: (rowId: string, preset: FilterPreset) => void
   onLoadBookmark: (bm: AnalysisBookmark) => void
   buildBookmarkConfig: () => { name: string; config: Record<string, unknown> }
   onExportReport: (format: 'pdf' | 'pptx') => void
@@ -193,6 +194,7 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
     onRefreshTable,
     refreshingTableId,
     onPresetApply,
+    onTablePresetApply,
     onLoadBookmark,
     buildBookmarkConfig,
     onExportReport,
@@ -258,8 +260,9 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="z-10 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm sm:px-6">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="min-h-0 flex-1 overflow-y-auto et-scroll overscroll-y-contain">
+        <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm sm:px-6">
+          <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onRun}
@@ -312,9 +315,8 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
             </button>
           </div>
         </div>
-      </div>
+        </div>
 
-      <div className="shrink-0 overflow-y-auto et-scroll">
         <CollapsibleSection
           title="Row & banner setup"
           summary={setupSummary}
@@ -484,9 +486,8 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
             Default filters apply to all tables on build. Override filters per table in each result section below.
           </p>
         </CollapsibleSection>
-      </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto et-scroll p-4 sm:p-6">
+        <div className="p-4 pb-12 sm:p-6 sm:pb-16">
         {!bannerResult && !analyzing && (
           <EmptyCanvas
             icon={<Table2 size={40} />}
@@ -516,10 +517,12 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
                 onTableFiltersChange,
                 onRefreshTable,
                 refreshingTableId,
+                onTablePresetApply: onTablePresetApply,
               }}
             />
           </div>
         )}
+        </div>
       </div>
     </div>
   )

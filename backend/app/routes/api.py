@@ -42,10 +42,12 @@ from app.services.analysis_bookmark_store import (
     list_analysis_bookmarks,
 )
 from app.services.weight_config_store import get_weight_config, set_weight_config
-from app.services.qc_config_store import QcConfig, get_qc_config, set_qc_config
+from app.models.qc_config import QcConfig
+from app.services.qc_config_store import get_qc_config, set_qc_config
 from app.models.quota_config import QuotaConfig
 from app.services.quota_config_store import get_quota_config, set_quota_config
 from app.services.quota_check import check_quotas, quota_eligible_variables
+from app.services.field_reports import interviewer_rejections_csv, qc_checks_csv, quota_completion_csv
 from app.models.workspace_prefs import (
     AnalysisBookmarkCreate,
     FilterPresetCreate,
@@ -229,6 +231,69 @@ def get_qc_summary_route(survey_id: int):
     return get_qc_summary(survey_id)
 
 
+@router.get("/projects/{survey_id}/qc/by-interviewer")
+def get_interviewer_qc_route(survey_id: int, interviewer_variable_id: str | None = None):
+    from app.services.interviewer_qc import interviewer_qc_stats
+
+    try:
+        return interviewer_qc_stats(survey_id, interviewer_variable_id)
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/qc/interviewer-labels")
+def get_interviewer_labels_route(survey_id: int, interviewer_variable_id: str | None = None):
+    from app.services.interviewer_qc import interviewer_labels_by_response
+
+    try:
+        return interviewer_labels_by_response(survey_id, interviewer_variable_id)
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/overview")
+def get_survey_overview_route(survey_id: int):
+    from app.services.survey_overview import survey_overview
+
+    try:
+        return survey_overview(survey_id)
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/fielding")
+def get_fielding_stats_route(
+    survey_id: int,
+    completion_status: str = "complete",
+    interviewer_variable_id: str | None = None,
+):
+    from app.services.fielding_monitor import fielding_stats
+
+    try:
+        return fielding_stats(
+            survey_id,
+            completion_status=completion_status,
+            interviewer_variable_id=interviewer_variable_id,
+        )
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/data/codebook/export")
+def export_codebook_route(survey_id: int, completion_status: str = "complete"):
+    from app.services.codebook_export import build_codebook_csv
+
+    try:
+        content = build_codebook_csv(survey_id, completion_status=completion_status)
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="survey_{survey_id}_codebook.csv"'},
+        )
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
 @router.put("/projects/{survey_id}/qc/config")
 def put_qc_config_route(survey_id: int, config: QcConfig):
     return set_qc_config(survey_id, config).model_dump()
@@ -257,6 +322,52 @@ def get_quota_eligible_route(survey_id: int, completion_status: str = "complete"
     try:
         schema = build_survey_schema(survey_id, completion_status=completion_status, light=True)
         return {"variables": quota_eligible_variables(schema)}
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/field-reports/quota/export")
+def export_quota_completion_report(survey_id: int, completion_status: str | None = None):
+    try:
+        content = quota_completion_csv(survey_id, completion_status=completion_status)
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="survey_{survey_id}_quota_completion.csv"'},
+        )
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/field-reports/qc/export")
+def export_qc_checks_report(survey_id: int):
+    try:
+        content = qc_checks_csv(survey_id)
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="survey_{survey_id}_qc_checks.csv"'},
+        )
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/field-reports/interviewer-rejections/export")
+def export_interviewer_rejections_report(
+    survey_id: int,
+    interviewer_variable_id: str | None = None,
+):
+    try:
+        content = interviewer_rejections_csv(survey_id, interviewer_variable_id=interviewer_variable_id)
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="survey_{survey_id}_interviewer_rejections.csv"'
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
 

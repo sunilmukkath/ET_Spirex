@@ -211,6 +211,7 @@ export interface QuotaConfig {
   basis: 'complete' | 'qc_approved'
   tolerance_count: number
   tolerance_pct: number
+  interviewer_variable_id?: string | null
   fields: QuotaFieldConfig[]
   layers: QuotaLayerConfig[]
 }
@@ -269,6 +270,45 @@ export interface QuotaCheckResult {
     layers_mixed: number
     layers_empty: number
   }
+}
+
+export interface SurveyOverview {
+  survey_id: number
+  generated_at: string
+  response_count: number
+  total_responses: number
+  incomplete_count: number
+  qc_approved_count: number
+  qc_excluded_count: number
+  question_count: number
+  banner_ready_count: number
+  custom_rule_count: number
+  quota_field_count: number
+  quota_layer_count: number
+  has_interviewer_variable: boolean
+  quota_summary?: {
+    fields_ok: number
+    fields_under: number
+    fields_over: number
+    layers_ok: number
+    layers_under: number
+    layers_over: number
+    total_completes: number
+    checked_at?: string
+  } | null
+}
+
+export interface FieldingStats {
+  survey_id: number
+  completion_status: string
+  generated_at: string
+  total_responses: number
+  daily: { date: string; count: number; cumulative?: number }[]
+  hourly: { hour: string; count: number }[]
+  interviewer_variable_id?: string | null
+  by_interviewer: { interviewer: string; count: number }[]
+  average_completion_seconds?: number | null
+  has_submit_dates: boolean
 }
 
 export interface FilterSpec {
@@ -382,6 +422,52 @@ export interface ProfileResult {
   }
 }
 
+export interface QcThresholds {
+  speeder_time_basis?: 'average' | 'median'
+  speeder_custom_reference_seconds?: number | null
+  speeder_min_seconds: number
+  speeder_median_fraction: number
+  min_array_items_straight_line: number
+  min_text_length_gibberish: number
+}
+
+export interface QcCustomRule {
+  variable_id: string
+  operator: 'in' | 'not_in' | 'is_empty' | 'not_empty'
+  values: string[]
+  name: string
+}
+
+export interface QcConfig {
+  disabled_checks: string[]
+  kept_response_ids: string[]
+  excluded_response_ids: string[]
+  thresholds: QcThresholds
+  custom_rules: QcCustomRule[]
+  interviewer_variable_id?: string | null
+}
+
+export interface InterviewerQcRow {
+  interviewer: string
+  completed: number
+  approved: number
+  rejected: number
+  rejection_pct: number
+  checks: Record<string, number>
+}
+
+export interface InterviewerQcResult {
+  interviewer_variable_id?: string | null
+  interviewer_question?: string
+  interviewer_code?: string
+  total_completed?: number
+  total_rejected?: number
+  total_approved?: number
+  check_columns?: string[]
+  rows: InterviewerQcRow[]
+  error?: string
+}
+
 export interface DataQualityResult {
   total_responses: number
   flagged_count: number
@@ -394,8 +480,19 @@ export interface DataQualityResult {
     message?: string
     count: number
     median_seconds?: number
+    average_seconds?: number
+    reference_seconds?: number
+    reference_basis?: 'average' | 'median' | 'custom'
     threshold_seconds?: number
-    flags: { response_id: string | number; seconds: number; median_seconds?: number; reason?: string }[]
+    flags: {
+      response_id: string | number
+      seconds: number
+      average_seconds?: number
+      median_seconds?: number
+      reference_seconds?: number
+      reference_basis?: 'average' | 'median' | 'custom'
+      reason?: string
+    }[]
   }
   test_responses: {
     count: number
@@ -448,6 +545,18 @@ export interface DataQualityResult {
       reason?: string
     }[]
   }
+  custom_rules?: {
+    available?: boolean
+    count: number
+    rules?: string[]
+    flags: {
+      response_id: string | number
+      rule_name?: string
+      variable_id?: string
+      reason?: string
+    }[]
+  }
+  thresholds?: QcThresholds
 }
 
 export interface AdvancedAnalysisResult {
@@ -743,12 +852,7 @@ export const api = {
       undefined,
       ANALYSIS_TIMEOUT_MS,
     ),
-  getQcConfig: (id: number) =>
-    fetchJson<{
-      disabled_checks: string[]
-      kept_response_ids: string[]
-      excluded_response_ids: string[]
-    }>(`/api/projects/${id}/qc/config`),
+  getQcConfig: (id: number) => fetchJson<QcConfig>(`/api/projects/${id}/qc/config`),
   getQcSummary: (id: number) =>
     fetchJson<{
       total_completed: number
@@ -759,23 +863,49 @@ export const api = {
       manual_excluded_count: number
       has_review: boolean
     }>(`/api/projects/${id}/qc/summary`),
-  setQcConfig: (
-    id: number,
-    body: {
-      disabled_checks: string[]
-      kept_response_ids?: string[]
-      excluded_response_ids?: string[]
-    },
-  ) =>
-    fetchJson<{
-      disabled_checks: string[]
-      kept_response_ids: string[]
-      excluded_response_ids: string[]
-    }>(`/api/projects/${id}/qc/config`, {
+  setQcConfig: (id: number, body: QcConfig) =>
+    fetchJson<QcConfig>(`/api/projects/${id}/qc/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  getInterviewerQc: (id: number, interviewerVariableId?: string) => {
+    const qs = interviewerVariableId
+      ? `?interviewer_variable_id=${encodeURIComponent(interviewerVariableId)}`
+      : ''
+    return fetchJson<InterviewerQcResult>(`/api/projects/${id}/qc/by-interviewer${qs}`)
+  },
+  getInterviewerLabels: (id: number, interviewerVariableId?: string) => {
+    const qs = interviewerVariableId
+      ? `?interviewer_variable_id=${encodeURIComponent(interviewerVariableId)}`
+      : ''
+    return fetchJson<{
+      interviewer_variable_id?: string | null
+      interviewer_question?: string
+      labels: Record<string, string>
+      error?: string
+    }>(`/api/projects/${id}/qc/interviewer-labels${qs}`)
+  },
+  getSurveyOverview: (id: number) => fetchJson<SurveyOverview>(`/api/projects/${id}/overview`),
+  getFieldingStats: (id: number, completionStatus?: string, interviewerVariableId?: string) => {
+    const params = new URLSearchParams()
+    if (completionStatus) params.set('completion_status', completionStatus)
+    if (interviewerVariableId) params.set('interviewer_variable_id', interviewerVariableId)
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    return fetchJson<FieldingStats>(`/api/projects/${id}/fielding${qs}`)
+  },
+  exportCodebook: async (id: number, completionStatus?: string) => {
+    const qs = completionStatus ? `?completion_status=${encodeURIComponent(completionStatus)}` : ''
+    const res = await fetch(`/api/projects/${id}/data/codebook/export${qs}`, { headers: authHeaders() })
+    if (!res.ok) throw new Error('Codebook export failed')
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `survey_${id}_codebook.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  },
   getQuotaConfig: (id: number) => fetchJson<QuotaConfig>(`/api/projects/${id}/quota/config`),
   setQuotaConfig: (id: number, body: QuotaConfig) =>
     fetchJson<QuotaConfig>(`/api/projects/${id}/quota/config`, {
@@ -786,6 +916,44 @@ export const api = {
   checkQuotas: (id: number, completionStatus?: string) => {
     const qs = completionStatus ? `?completion_status=${encodeURIComponent(completionStatus)}` : ''
     return fetchJson<QuotaCheckResult>(`/api/projects/${id}/quota/check${qs}`, { method: 'POST' })
+  },
+  exportFieldReport: async (
+    id: number,
+    kind: 'quota' | 'qc' | 'interviewer-rejections',
+    options: { completionStatus?: string; interviewerVariableId?: string; filename?: string } = {},
+  ) => {
+    const params = new URLSearchParams()
+    if (kind === 'quota' && options.completionStatus) {
+      params.set('completion_status', options.completionStatus)
+    }
+    if (kind === 'interviewer-rejections' && options.interviewerVariableId) {
+      params.set('interviewer_variable_id', options.interviewerVariableId)
+    }
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    const path =
+      kind === 'quota'
+        ? `/api/projects/${id}/field-reports/quota/export${qs}`
+        : kind === 'qc'
+          ? `/api/projects/${id}/field-reports/qc/export`
+          : `/api/projects/${id}/field-reports/interviewer-rejections/export${qs}`
+    const defaultName =
+      kind === 'quota'
+        ? `survey_${id}_quota_completion.csv`
+        : kind === 'qc'
+          ? `survey_${id}_qc_checks.csv`
+          : `survey_${id}_interviewer_rejections.csv`
+    const res = await fetch(path, { headers: authHeaders() })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || `Export failed (${res.status})`)
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = options.filename || defaultName
+    a.click()
+    URL.revokeObjectURL(url)
   },
   getCustomVariables: (id: number) =>
     fetchJson<{ variables: CustomVariable[] }>(`/api/projects/${id}/variables/custom`),

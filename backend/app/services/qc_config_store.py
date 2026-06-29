@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
-from pydantic import BaseModel, Field
+from app.models.qc_config import QcConfig, QcCustomRule, QcThresholds
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "qc_config"
 
@@ -14,18 +13,59 @@ ALL_CHECK_IDS = frozenset({
     "duplicate_phones",
     "straight_liners",
     "gibberish",
+    "custom_rules",
 })
-
-
-class QcConfig(BaseModel):
-    disabled_checks: list[str] = Field(default_factory=list)
-    kept_response_ids: list[str] = Field(default_factory=list)
-    excluded_response_ids: list[str] = Field(default_factory=list)
 
 
 def _path(survey_id: int) -> Path:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     return _DATA_DIR / f"{survey_id}.json"
+
+
+def _normalize_thresholds(raw: dict | None) -> QcThresholds:
+    if not raw:
+        return QcThresholds()
+    basis = str(raw.get("speeder_time_basis", "average") or "average").lower()
+    if basis not in ("average", "median"):
+        basis = "average"
+    custom_raw = raw.get("speeder_custom_reference_seconds")
+    custom_ref = None
+    if custom_raw is not None and str(custom_raw).strip() != "":
+        custom_val = float(custom_raw or 0)
+        custom_ref = custom_val if custom_val > 0 else None
+    return QcThresholds(
+        speeder_time_basis=basis,  # type: ignore[arg-type]
+        speeder_custom_reference_seconds=custom_ref,
+        speeder_min_seconds=max(0.0, float(raw.get("speeder_min_seconds", 0) or 0)),
+        speeder_median_fraction=min(1.0, max(0.05, float(raw.get("speeder_median_fraction", 0.25) or 0.25))),
+        min_array_items_straight_line=max(2, int(raw.get("min_array_items_straight_line", 4) or 4)),
+        min_text_length_gibberish=max(1, int(raw.get("min_text_length_gibberish", 3) or 3)),
+    )
+
+
+def _normalize_custom_rules(raw: list | None) -> list[QcCustomRule]:
+    if not raw:
+        return []
+    rules: list[QcCustomRule] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        variable_id = str(item.get("variable_id", "")).strip()
+        if not variable_id:
+            continue
+        operator = str(item.get("operator", "in")).lower()
+        if operator not in ("in", "not_in", "is_empty", "not_empty"):
+            operator = "in"
+        values = [str(v) for v in item.get("values", []) if str(v).strip()]
+        rules.append(
+            QcCustomRule(
+                variable_id=variable_id,
+                operator=operator,
+                values=values,
+                name=str(item.get("name", "")).strip(),
+            )
+        )
+    return rules
 
 
 def get_qc_config(survey_id: int) -> QcConfig:
@@ -41,8 +81,13 @@ def get_qc_config(survey_id: int) -> QcConfig:
             disabled_checks=disabled,
             kept_response_ids=kept,
             excluded_response_ids=excluded,
+            thresholds=_normalize_thresholds(data.get("thresholds")),
+            custom_rules=_normalize_custom_rules(data.get("custom_rules")),
+            interviewer_variable_id=(str(data["interviewer_variable_id"]).strip() or None)
+            if data.get("interviewer_variable_id")
+            else None,
         )
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, ValueError):
         return QcConfig()
 
 
@@ -54,13 +99,17 @@ def set_qc_config(survey_id: int, config: QcConfig) -> QcConfig:
         disabled_checks=disabled,
         kept_response_ids=kept,
         excluded_response_ids=excluded,
+        thresholds=_normalize_thresholds(config.thresholds.model_dump()),
+        custom_rules=_normalize_custom_rules([r.model_dump() for r in config.custom_rules]),
+        interviewer_variable_id=(config.interviewer_variable_id or None),
     )
     _path(survey_id).write_text(json.dumps(normalized.model_dump(), indent=2), encoding="utf-8")
     from app.services.qc_filter import invalidate_flagged_cache
-
-    invalidate_flagged_cache(survey_id)
+    from app.services.data_quality import invalidate_quality_cache
     from app.services.response_store import invalidate_survey_cache
 
+    invalidate_flagged_cache(survey_id)
+    invalidate_quality_cache(survey_id)
     invalidate_survey_cache(survey_id)
     return normalized
 

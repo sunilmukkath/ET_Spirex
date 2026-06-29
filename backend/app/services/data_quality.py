@@ -124,17 +124,43 @@ def run_data_quality(
             light=True,
         )
         _attach_export_columns(schema, df_columns)
+        from app.services.custom_variables import apply_custom_variables
+
+        schema, df = apply_custom_variables(survey_id, schema, df)
     except Exception:
         schema = {"variables": _infer_variables_from_columns(df_columns)}
 
-    speeders = _detect_speeders(df)
+    from app.services.qc_config_store import get_qc_config
+
+    qc_cfg = get_qc_config(survey_id)
+    thresholds = qc_cfg.thresholds
+    custom_rule_payload = [r.model_dump() for r in qc_cfg.custom_rules]
+
+    speeders = _detect_speeders(
+        df,
+        min_seconds=thresholds.speeder_min_seconds,
+        median_fraction=thresholds.speeder_median_fraction,
+        time_basis=thresholds.speeder_time_basis,
+        custom_reference_seconds=thresholds.speeder_custom_reference_seconds,
+    )
     test_responses = _detect_test_responses(df, schema, col_index)
     duplicate_phones = _detect_duplicate_phones(df, schema, col_index)
-    straight_liners = _detect_straight_liners(df, schema, col_index)
-    gibberish = _detect_gibberish(df, schema, col_index)
+    straight_liners = _detect_straight_liners(
+        df,
+        schema,
+        col_index,
+        min_array_items=thresholds.min_array_items_straight_line,
+    )
+    gibberish = _detect_gibberish(
+        df,
+        schema,
+        col_index,
+        min_text_len=thresholds.min_text_length_gibberish,
+    )
+    custom_rules = _detect_custom_rules(df, schema, custom_rule_payload)
 
     flagged_ids: set[str] = set()
-    for section in (speeders, test_responses, duplicate_phones, straight_liners, gibberish):
+    for section in (speeders, test_responses, duplicate_phones, straight_liners, gibberish, custom_rules):
         for item in section.get("flags", []):
             rid = item.get("response_id")
             if rid is not None:
@@ -151,17 +177,27 @@ def run_data_quality(
         {"id": "gibberish", "title": "Gibberish text", "count": gibberish.get("count", 0), "severity": "low"},
     ]
 
+    if custom_rules.get("count", 0) > 0:
+        checks.append({
+            "id": "custom_rules",
+            "title": "Custom variable rules",
+            "count": custom_rules.get("count", 0),
+            "severity": "medium",
+        })
+
     result = _sanitize_for_json({
         "total_responses": int(len(df)),
         "flagged_count": len(flagged_ids),
         "clean_estimate": clean_estimate,
         "duplicate_exclude_count": duplicate_exclude,
         "checks": checks,
+        "thresholds": thresholds.model_dump(),
         "speeders": speeders,
         "test_responses": test_responses,
         "duplicate_phones": duplicate_phones,
         "straight_liners": straight_liners,
         "gibberish": gibberish,
+        "custom_rules": custom_rules,
     })
     _QUALITY_CACHE[survey_id] = (now, result)
     return result
@@ -369,7 +405,14 @@ def _is_test_text(text: str) -> bool:
     return False
 
 
-def _detect_speeders(df: pd.DataFrame) -> dict[str, Any]:
+def _detect_speeders(
+    df: pd.DataFrame,
+    *,
+    min_seconds: float = 0.0,
+    median_fraction: float = 0.25,
+    time_basis: str = "average",
+    custom_reference_seconds: float | None = None,
+) -> dict[str, Any]:
     start_col, end_col = _find_time_columns(df)
     id_col = response_id_column(df)
 
@@ -394,8 +437,28 @@ def _detect_speeders(df: pd.DataFrame) -> dict[str, Any]:
             "flags": [],
         }
 
+    average = float(valid.mean())
     median = float(valid.median())
-    threshold = max(30.0, median * _SPEEDER_FRACTION)
+    basis = time_basis if time_basis in ("average", "median") else "average"
+    computed_reference = median if basis == "median" else average
+    custom = float(custom_reference_seconds or 0)
+    if custom > 0:
+        reference = custom
+        reference_basis = "custom"
+    else:
+        reference = computed_reference
+        reference_basis = basis
+
+    fraction = float(median_fraction)
+    threshold = max(float(min_seconds), reference * fraction)
+
+    def _ref_label() -> str:
+        if reference_basis == "custom":
+            return f"custom {_safe_float(reference)}s"
+        if reference_basis == "median":
+            return f"median {_safe_float(reference)}s"
+        return f"avg {_safe_float(reference)}s"
+
     flags = []
     for idx, secs in seconds.items():
         if pd.isna(secs) or secs <= 0 or secs >= threshold:
@@ -403,15 +466,24 @@ def _detect_speeders(df: pd.DataFrame) -> dict[str, Any]:
         flags.append({
             "response_id": safe_response_id(df.at[idx, id_col] if id_col else None, idx),
             "seconds": _safe_float(secs),
+            "average_seconds": _safe_float(average),
             "median_seconds": _safe_float(median),
-            "reason": f"Completed in {_safe_float(secs)}s (threshold {_safe_float(threshold)}s)",
+            "reference_seconds": _safe_float(reference),
+            "reference_basis": reference_basis,
+            "reason": (
+                f"Completed in {_safe_float(secs)}s "
+                f"(threshold {_safe_float(threshold)}s, {_ref_label()})"
+            ),
         })
 
     flags.sort(key=lambda x: x["seconds"])
     return {
         "available": True,
         "count": len(flags),
+        "average_seconds": _safe_float(average),
         "median_seconds": _safe_float(median),
+        "reference_seconds": _safe_float(reference),
+        "reference_basis": reference_basis,
         "threshold_seconds": _safe_float(threshold),
         "flags": flags[:_MAX_FLAGS],
     }
@@ -528,6 +600,8 @@ def _detect_straight_liners(
     df: pd.DataFrame,
     schema: dict[str, Any],
     col_index: dict[str, str],
+    *,
+    min_array_items: int = _MIN_ARRAY_ITEMS,
 ) -> dict[str, Any]:
     id_col = response_id_column(df)
     flags: list[dict[str, Any]] = []
@@ -536,7 +610,7 @@ def _detect_straight_liners(
         if var.get("kind") != "array":
             continue
         cols = [col_index[c] for c in var.get("columns") or [] if c in col_index]
-        if len(cols) < _MIN_ARRAY_ITEMS:
+        if len(cols) < min_array_items:
             continue
 
         subset = df[cols].copy()
@@ -545,11 +619,11 @@ def _detect_straight_liners(
 
         non_empty = subset.apply(lambda row: sum(1 for v in row if v is not None), axis=1)
         unique_counts = subset.apply(lambda row: len({v for v in row if v is not None}), axis=1)
-        straight_rows = (non_empty >= _MIN_ARRAY_ITEMS) & (unique_counts == 1)
+        straight_rows = (non_empty >= min_array_items) & (unique_counts == 1)
 
         for idx in subset.index[straight_rows]:
             values = [v for v in subset.loc[idx] if not _is_missing(v)]
-            if len(values) < _MIN_ARRAY_ITEMS:
+            if len(values) < min_array_items:
                 continue
             flags.append({
                 "response_id": safe_response_id(df.at[idx, id_col] if id_col else None, idx),
@@ -567,6 +641,8 @@ def _detect_gibberish(
     df: pd.DataFrame,
     schema: dict[str, Any],
     col_index: dict[str, str],
+    *,
+    min_text_len: int = _MIN_TEXT_LEN,
 ) -> dict[str, Any]:
     id_col = response_id_column(df)
     flags: list[dict[str, Any]] = []
@@ -582,7 +658,7 @@ def _detect_gibberish(
 
         for idx, raw in df[col].dropna().items():
             text = str(raw).strip()
-            if len(text) < _MIN_TEXT_LEN:
+            if len(text) < min_text_len:
                 continue
             if _looks_like_person_name(text):
                 continue
@@ -596,6 +672,57 @@ def _detect_gibberish(
                 })
 
     return {"count": len(flags), "flags": flags[:_MAX_FLAGS]}
+
+
+def _detect_custom_rules(
+    df: pd.DataFrame,
+    schema: dict[str, Any],
+    rules: list[dict[str, Any]],
+) -> dict[str, Any]:
+    from app.services.filter_engine import _eval_condition
+
+    if not rules:
+        return {"available": False, "count": 0, "flags": [], "rules": []}
+
+    id_col = response_id_column(df)
+    flags: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for rule in rules:
+        variable_id = str(rule.get("variable_id", "")).strip()
+        if not variable_id:
+            continue
+        operator = str(rule.get("operator", "in")).lower()
+        values = [str(v) for v in rule.get("values", []) if str(v).strip()]
+        name = str(rule.get("name", "")).strip() or variable_id
+        cond = {
+            "type": "condition",
+            "variable_id": variable_id,
+            "operator": operator,
+            "values": values,
+        }
+        try:
+            mask = _eval_condition(df, schema, cond).fillna(False)
+        except Exception:
+            continue
+        for idx in df.index[mask]:
+            rid = str(safe_response_id(df.at[idx, id_col] if id_col else None, idx))
+            if rid in seen:
+                continue
+            seen.add(rid)
+            flags.append({
+                "response_id": safe_response_id(df.at[idx, id_col] if id_col else None, idx),
+                "rule_name": name,
+                "variable_id": variable_id,
+                "reason": f"Custom rule: {name}",
+            })
+
+    return {
+        "available": True,
+        "count": len(flags),
+        "rules": [str(r.get("name") or r.get("variable_id")) for r in rules],
+        "flags": flags[:_MAX_FLAGS],
+    }
 
 
 def _normalize_cell(value: Any) -> str | None:

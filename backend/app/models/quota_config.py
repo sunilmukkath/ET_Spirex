@@ -33,5 +33,6 @@ class QuotaConfig(BaseModel):
     basis: str = "complete"  # complete | qc_approved
     tolerance_count: int = 0
     tolerance_pct: float = 2.0
+    interviewer_variable_id: str | None = None
     fields: list[QuotaFieldConfig] = Field(default_factory=list)
     layers: list[QuotaLayerConfig] = Field(default_factory=list)

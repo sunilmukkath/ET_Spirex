@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BarChart3, ChevronRight, Search, Sparkles, Wifi, WifiOff } from 'lucide-react'
+import { BarChart3, ChevronRight, Search, Sparkles, Star, Wifi, WifiOff } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { api, type ConnectionStatus, type Project } from '../api/client'
+import {
+  isFavoriteSurvey,
+  loadFavoriteSurveyIds,
+  toggleFavoriteSurveyId,
+} from '../lib/dashboardFavorites'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
@@ -40,6 +45,8 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [favorites, setFavorites] = useState<number[]>(() => loadFavoriteSurveyIds())
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const statsStarted = useRef(false)
 
   useEffect(() => {
@@ -109,9 +116,10 @@ export function DashboardPage() {
     return projects.filter((p) => {
       const matchesSearch = p.title.toLowerCase().includes(search.toLowerCase())
       const matchesStatus = statusFilter === 'all' || p.status === statusFilter
-      return matchesSearch && matchesStatus
+      const matchesFav = !showFavoritesOnly || favorites.includes(p.id)
+      return matchesSearch && matchesStatus && matchesFav
     })
-  }, [projects, search, statusFilter])
+  }, [projects, search, statusFilter, showFavoritesOnly, favorites])
 
   const counts = useMemo(
     () => ({
@@ -199,6 +207,15 @@ export function DashboardPage() {
               <span className="opacity-60">{counts[s]}</span>
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setShowFavoritesOnly((v) => !v)}
+            className={`et-chip ${showFavoritesOnly ? 'et-chip-active' : 'et-chip-inactive'}`}
+          >
+            <Star size={14} className={showFavoritesOnly ? 'fill-current' : ''} />
+            Favorites
+            <span className="opacity-60">{favorites.length}</span>
+          </button>
         </div>
       </section>
 
@@ -207,12 +224,22 @@ export function DashboardPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((project) => (
-            <Link
-              key={project.id}
-              to={`/projects/${project.id}`}
-              state={{ title: project.title }}
-              className="et-card group flex flex-col p-5"
-            >
+            <div key={project.id} className="et-card group relative flex flex-col p-5">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  setFavorites(toggleFavoriteSurveyId(project.id))
+                }}
+                className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-300 hover:bg-slate-50 hover:text-amber-500"
+                aria-label={isFavoriteSurvey(project.id) ? 'Remove favorite' : 'Add favorite'}
+              >
+                <Star
+                  size={16}
+                  className={isFavoriteSurvey(project.id) ? 'fill-amber-400 text-amber-500' : ''}
+                />
+              </button>
+              <Link to={`/projects/${project.id}?mode=home`} state={{ title: project.title }} className="flex flex-1 flex-col">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge status={project.status} />
@@ -249,7 +276,8 @@ export function DashboardPage() {
                   <ChevronRight size={14} />
                 </span>
               </div>
-            </Link>
+              </Link>
+            </div>
           ))}
         </div>
       )}

@@ -54,14 +54,9 @@ body {
   background-size: 48px 48px;
 }
 
-.et-scout-mark {
-  filter: brightness(0) saturate(100%) invert(79%) sepia(74%) saturate(560%) hue-rotate(359deg)
-    brightness(101%) contrast(94%);
-}
-
+/* Scout mark uses native PNG colors: yellow arrow, gold tree rings */
 .et-scout-mark-light {
-  filter: brightness(0) saturate(100%) invert(93%) sepia(48%) saturate(746%) hue-rotate(359deg)
-    brightness(107%) contrast(98%);
+  filter: brightness(1.08) contrast(1.05);
 }
 
 .et-canvas-dots {
@@ -328,6 +323,8 @@ body {
 .et-sidebar {
   display: flex;
   width: min(100vw - 3rem, 18rem);
+  max-height: 100%;
+  min-height: 0;
   flex-shrink: 0;
   flex-direction: column;
   background: linear-gradient(180deg, var(--sidebar-bg) 0%, #0a1c33 100%);

@@ -6,144 +6,56 @@ Survey intelligence platform for Elastic Tree, powered by LimeSurvey.
 
 ## Features
 
-- **Project overview** — List all surveys with status (active / inactive / expired), response counts, and expiry dates
-- **Project detail** — View completion rates, schedule, and survey questions
-- **Custom analysis** — Run frequency distributions, cross-tabulations, and numeric summaries on response data
-- **Live LimeSurvey connection** — Uses the LimeSurvey RemoteControl 2 (JSON-RPC) API via [citric](https://citric.readthedocs.io/)
+- **Dashboard** — Survey list with favorites, status filters, and response counts
+- **Survey home** — Per-study overview: sample size, QC snapshot, quota status, quick links
+- **Questions** — Profile (single-question) and Compare (multi-banner crosstabs with sig testing)
+- **Charts** — 30+ chart types with PNG and CSV export
+- **Statistics** — Correlation, regression, chi-square, t-test, ANOVA, descriptives
+- **Fielding monitor** — Daily completes and interviewer throughput
+- **Field team** — Interviewer QC performance and rejection rates
+- **Field quotas** — Single-question and layered quota targets with min/max bounds
+- **Response QC** — Speeders, duplicates, straight-lining, gibberish, custom rules
+- **Setup** — Custom variables (recode, combine, net score) and survey weighting
+- **Reports** — Assemble profile and crosstab sections into PDF/PPT decks
+- **Data** — Paginated raw data, full CSV export, and codebook export
+- **Settings** — Connection status and active team sessions
 
 ## Prerequisites
 
-1. A LimeSurvey instance with **JSON-RPC enabled**:
-   - LimeSurvey admin → **Global settings** → **Interfaces**
-   - Set **RPC interface enabled** to **JSON-RPC**
+1. A LimeSurvey instance with **JSON-RPC enabled**
 2. A LimeSurvey user account with API access to your surveys
 
 ## Quick start
 
-### 1. Configure LimeSurvey credentials
+See `backend/.env.example` for LimeSurvey credentials, then:
 
 ```bash
-cd backend
-cp .env.example .env
+# Backend
+cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload
+
+# Frontend (separate terminal)
+cd frontend && npm install && npm run dev
 ```
 
-Edit `.env` with your LimeSurvey URL and credentials:
+Or build and run the combined Docker image (serves API + SPA on one port).
 
-```env
-LIMESURVEY_URL=https://your-limesurvey.com/index.php/admin/remotecontrol
-LIMESURVEY_USERNAME=your_username
-LIMESURVEY_PASSWORD=your_password
-```
+## Workspace tabs
 
-### 2. Start the backend
+| Tab | Purpose |
+|-----|---------|
+| Home | Study overview and shortcuts |
+| Questions | Profile / Compare sub-views |
+| Charts | Visualisation builder |
+| Fielding | Completion pace over time |
+| Reports | Client deck builder |
+| Statistics | Multivariate analysis |
+| Field team | Interviewer performance |
+| Setup | Questions + custom variables + weighting |
+| Fields | Quota management |
+| Quality | QC scan and review |
+| Data | Raw response table |
 
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
+## Tech stack
 
-### 3. Start the frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open **http://localhost:5173** in your browser.
-
-## Going live (hosting)
-
-**Streamlit Community Cloud is not compatible with ET Scout.** Streamlit only runs Python Streamlit apps (`.py` files). ET Scout is a **React frontend + FastAPI backend** — a different stack.
-
-Use **Render** (free tier) or any Docker host instead:
-
-1. Push this repo to GitHub: [sunilmukkath/ET_Spirex](https://github.com/sunilmukkath/ET_Spirex)
-2. Create a [Render](https://render.com) account → **New Web Service** → connect the repo
-3. Set **Runtime** to **Docker** (uses the root `Dockerfile`)
-4. Add environment variables from `backend/.env.example`:
-   - `LIMESURVEY_URL`, `LIMESURVEY_USERNAME`, `LIMESURVEY_PASSWORD`
-   - `CORS_ORIGINS=https://et-spirex.onrender.com`
-5. Deploy — production URL: **https://et-spirex.onrender.com/** (UI + `/api` on one host)
-
-Alternatively, run locally in production mode:
-
-```bash
-cd frontend && npm run build
-cd ../backend && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000
-# Open http://localhost:8000
-```
-
-## Project structure
-
-```
-RETLS/
-├── backend/          # ET Scout API (FastAPI + LimeSurvey)
-│   ├── app/
-│   │   ├── lime_client.py      # Survey & response fetching
-│   │   ├── services/analysis.py  # Custom analysis logic
-│   │   └── routes/api.py         # REST endpoints
-│   └── requirements.txt
-└── frontend/         # React + Vite dashboard UI
-    └── src/
-        ├── pages/    # Dashboard, project detail, analysis
-        └── api/      # API client
-```
-
-## Analysis (Decipher-style)
-
-The analysis module reads your **survey structure** from LimeSurvey (question types, answer options, subquestions) and runs appropriate statistics — not raw CSV column names.
-
-### Question profile
-Auto-selects analysis by question type:
-- **Single choice / 5-point / Yes-No** → labeled frequency distribution
-- **Multiple choice** → % selecting each option
-- **Array / matrix** → per-row distributions
-- **Numeric** → mean, median, std dev, min, max
-- **Text** → sample verbatims
-
-### Banner / crosstab tables
-Like Decipher banner runs:
-1. Pick a **row question** (stub) — the variable to analyze down the rows
-2. Pick **banner breaks** — demographic or grouping variables across columns
-3. Choose metric: distribution, mean, top-2-box, bottom-2-box (based on question type)
-4. Optional **significance testing** — flags cells significantly higher/lower than Total (95%)
-
-### API endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/projects/{id}/schema` | Survey variables with types, labels, answer options |
-| `POST /api/projects/{id}/analysis/profile` | Question-type-aware single question analysis |
-| `POST /api/projects/{id}/analysis/banner` | Banner/crosstab table with significance |
-
-Example banner request:
-
-```json
-{
-  "row_variable_id": "q123456",
-  "banner_variable_ids": ["q789012"],
-  "completion_status": "complete",
-  "metric": "auto",
-  "show_significance": true
-}
-```
-
-## Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| "Not connected" on dashboard | Check `.env` credentials and that JSON-RPC is enabled in LimeSurvey |
-| Empty project list | Verify the API user owns or has access to surveys; try setting `LIMESURVEY_FILTER_USER` |
-| Column not found in analysis | LimeSurvey exports use question codes (e.g. `G01Q02`) as column names |
-
-## Next steps
-
-Possible extensions:
-- Export analysis results to CSV/Excel
-- Time-series charts for response trends
-- Multi-survey comparison views
-- Cached/local database for faster repeated analysis
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, Recharts
+- **Backend:** FastAPI, pandas, scipy, citric (LimeSurvey JSON-RPC)

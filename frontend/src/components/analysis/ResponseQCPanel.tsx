@@ -9,13 +9,15 @@ import {
   Search,
   ShieldCheck,
 } from 'lucide-react'
-import { api, type DataQualityResult } from '../../api/client'
+import { api, type DataQualityResult, type QcConfig, type SurveyVariable } from '../../api/client'
 import {
   aggregateFlaggedRows,
   checkCount,
   computeQcMetrics,
+  CUSTOM_RULES_CHECK,
   disabledChecksFromEnabled,
   enabledChecksFromDisabled,
+  enrichFlaggedRowsWithInterviewers,
   exportFlaggedCsv,
   isCheckAvailable,
   isIncludedInQcSample,
@@ -28,12 +30,32 @@ import {
   type QcReviewState,
 } from '../../lib/qcHelpers'
 import { ErrorState } from '../States'
+import { InterviewerQcTab } from './InterviewerQcTab'
+import { QcSettingsPanel } from './QcSettingsPanel'
 
 interface Props {
   surveyId: number
+  variables?: SurveyVariable[]
   onUseQcApproved?: () => void
   onReviewChanged?: () => void
   qcApprovedCount?: number | null
+}
+
+function defaultQcConfig(): QcConfig {
+  return {
+    disabled_checks: [],
+    kept_response_ids: [],
+    excluded_response_ids: [],
+    thresholds: {
+      speeder_time_basis: 'average',
+      speeder_custom_reference_seconds: null,
+      speeder_min_seconds: 0,
+      speeder_median_fraction: 0.25,
+      min_array_items_straight_line: 4,
+      min_text_length_gibberish: 3,
+    },
+    custom_rules: [],
+  }
 }
 
 function loadCached(surveyId: number): { result: DataQualityResult; at: number } | null {
@@ -59,11 +81,12 @@ function saveCached(surveyId: number, result: DataQualityResult) {
   }
 }
 
-export function ResponseQCPanel({ surveyId, onUseQcApproved, onReviewChanged, qcApprovedCount }: Props) {
+export function ResponseQCPanel({ surveyId, variables = [], onUseQcApproved, onReviewChanged, qcApprovedCount }: Props) {
   return (
     <QcErrorBoundary onReset={() => sessionStorage.removeItem(qcCacheKey(surveyId))}>
       <ResponseQCPanelInner
         surveyId={surveyId}
+        variables={variables}
         onUseQcApproved={onUseQcApproved}
         onReviewChanged={onReviewChanged}
         qcApprovedCount={qcApprovedCount}
@@ -72,47 +95,66 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved, onReviewChanged, qc
   )
 }
 
-function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcApprovedCount }: Props) {
+function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onReviewChanged, qcApprovedCount }: Props) {
   const [result, setResult] = useState<DataQualityResult | null>(() => loadCached(surveyId)?.result ?? null)
   const [lastRunAt, setLastRunAt] = useState<number | null>(() => loadCached(surveyId)?.at ?? null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filterCheck, setFilterCheck] = useState<QcCheckId | 'all'>('all')
   const [search, setSearch] = useState('')
-  const [enabledChecks, setEnabledChecks] = useState<Set<QcCheckId>>(
-    () => new Set(QC_CHECKS.map((c) => c.id)),
-  )
+  const [qcConfig, setQcConfig] = useState<QcConfig>(defaultQcConfig)
   const [configLoading, setConfigLoading] = useState(true)
-  const [review, setReview] = useState<QcReviewState>({ kept: new Set(), excluded: new Set() })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [reviewSaving, setReviewSaving] = useState(false)
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [qcTab, setQcTab] = useState<'overview' | 'interviewer'>('overview')
+  const [interviewerLabels, setInterviewerLabels] = useState<Record<string, string>>({})
+
+  const showInterviewerColumn = Boolean(qcConfig.interviewer_variable_id)
+
+  const enabledChecks = useMemo(
+    () => enabledChecksFromDisabled(qcConfig.disabled_checks ?? []),
+    [qcConfig.disabled_checks],
+  )
+  const review = useMemo<QcReviewState>(
+    () => ({
+      kept: new Set(qcConfig.kept_response_ids ?? []),
+      excluded: new Set(qcConfig.excluded_response_ids ?? []),
+    }),
+    [qcConfig.kept_response_ids, qcConfig.excluded_response_ids],
+  )
+  const hasCustomRules = (qcConfig.custom_rules?.length ?? 0) > 0
 
   const surveyReady = Number.isFinite(surveyId) && surveyId > 0
 
-  const persistReview = useCallback(
-    async (nextReview: QcReviewState, checks: Set<QcCheckId>) => {
-      setReview(nextReview)
+  const persistConfig = useCallback(
+    async (next: QcConfig) => {
+      setQcConfig(next)
       setReviewSaving(true)
       try {
-        await api.setQcConfig(surveyId, {
-          disabled_checks: disabledChecksFromEnabled(checks),
-          kept_response_ids: [...nextReview.kept],
-          excluded_response_ids: [...nextReview.excluded],
-        })
+        const saved = await api.setQcConfig(surveyId, next)
+        setQcConfig(saved)
         onReviewChanged?.()
       } catch {
         const cfg = await api.getQcConfig(surveyId).catch(() => null)
-        if (cfg) {
-          setReview({
-            kept: new Set(cfg.kept_response_ids ?? []),
-            excluded: new Set(cfg.excluded_response_ids ?? []),
-          })
-        }
+        if (cfg) setQcConfig(cfg)
       } finally {
         setReviewSaving(false)
       }
     },
     [surveyId, onReviewChanged],
+  )
+
+  const persistReview = useCallback(
+    async (nextReview: QcReviewState, checks: Set<QcCheckId>) => {
+      await persistConfig({
+        ...qcConfig,
+        disabled_checks: disabledChecksFromEnabled(checks),
+        kept_response_ids: [...nextReview.kept],
+        excluded_response_ids: [...nextReview.excluded],
+      })
+    },
+    [qcConfig, persistConfig],
   )
 
   useEffect(() => {
@@ -126,23 +168,36 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
   }, [surveyId])
 
   useEffect(() => {
+    if (!surveyReady || !qcConfig.interviewer_variable_id) {
+      setInterviewerLabels({})
+      return
+    }
+    let cancelled = false
+    api
+      .getInterviewerLabels(surveyId, qcConfig.interviewer_variable_id)
+      .then((res) => {
+        if (!cancelled) setInterviewerLabels(res.labels ?? {})
+      })
+      .catch(() => {
+        if (!cancelled) setInterviewerLabels({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [surveyId, surveyReady, qcConfig.interviewer_variable_id])
+
+  useEffect(() => {
     let cancelled = false
     setConfigLoading(true)
     api
       .getQcConfig(surveyId)
       .then((cfg) => {
         if (!cancelled) {
-          setEnabledChecks(enabledChecksFromDisabled(cfg.disabled_checks ?? []))
-          setReview({
-            kept: new Set(cfg.kept_response_ids ?? []),
-            excluded: new Set(cfg.excluded_response_ids ?? []),
-          })
+          setQcConfig({ ...defaultQcConfig(), ...cfg })
         }
       })
       .catch(() => {
-        if (!cancelled) {
-          setEnabledChecks(new Set(QC_CHECKS.map((c) => c.id)))
-        }
+        if (!cancelled) setQcConfig(defaultQcConfig())
       })
       .finally(() => {
         if (!cancelled) setConfigLoading(false)
@@ -181,20 +236,42 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
       const next = new Set(enabledChecks)
       if (include) next.add(checkId)
       else next.delete(checkId)
-      setEnabledChecks(next)
+      await persistReview(review, next)
+    },
+    [enabledChecks, review, persistReview],
+  )
+
+  const saveQcSettings = useCallback(
+    async (nextConfig: QcConfig) => {
+      setSettingsSaving(true)
       try {
-        await api.setQcConfig(surveyId, {
-          disabled_checks: disabledChecksFromEnabled(next),
-          kept_response_ids: [...review.kept],
-          excluded_response_ids: [...review.excluded],
-        })
+        const saved = await api.setQcConfig(surveyId, nextConfig)
+        setQcConfig(saved)
         onReviewChanged?.()
+        await runScan(true)
       } catch {
-        setEnabledChecks(enabledChecks)
+        const cfg = await api.getQcConfig(surveyId).catch(() => null)
+        if (cfg) setQcConfig(cfg)
+      } finally {
+        setSettingsSaving(false)
       }
     },
-    [enabledChecks, review, surveyId, onReviewChanged],
+    [surveyId, onReviewChanged, runScan],
   )
+
+  const saveQcConfigOnly = useCallback(async () => {
+    setSettingsSaving(true)
+    try {
+      const saved = await api.setQcConfig(surveyId, qcConfig)
+      setQcConfig(saved)
+      onReviewChanged?.()
+    } catch {
+      const cfg = await api.getQcConfig(surveyId).catch(() => null)
+      if (cfg) setQcConfig(cfg)
+    } finally {
+      setSettingsSaving(false)
+    }
+  }, [surveyId, qcConfig, onReviewChanged])
 
   const metrics = useMemo(() => {
     if (!result) return null
@@ -203,16 +280,22 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
 
   const activeRows = useMemo(() => {
     if (!result) return []
+    let rows: QcFlaggedRow[]
     if (filterCheck !== 'all') {
-      return aggregateFlaggedRows(result, new Set([filterCheck]))
+      rows = aggregateFlaggedRows(result, new Set([filterCheck]))
+    } else {
+      rows = aggregateFlaggedRows(result, enabledChecks)
     }
-    return aggregateFlaggedRows(result, enabledChecks)
-  }, [result, enabledChecks, filterCheck])
+    return enrichFlaggedRowsWithInterviewers(rows, interviewerLabels)
+  }, [result, enabledChecks, filterCheck, interviewerLabels])
 
-  const exportRows = useMemo(
-    () => (result ? aggregateFlaggedRows(result, enabledChecks) : []),
-    [result, enabledChecks],
-  )
+  const exportRows = useMemo(() => {
+    if (!result) return []
+    return enrichFlaggedRowsWithInterviewers(
+      aggregateFlaggedRows(result, enabledChecks),
+      interviewerLabels,
+    )
+  }, [result, enabledChecks, interviewerLabels])
 
   const enabledFlaggedCount = exportRows.length
 
@@ -267,6 +350,7 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
         (r) =>
           r.response_id.toLowerCase().includes(q) ||
           r.detail.toLowerCase().includes(q) ||
+          (r.interviewer?.toLowerCase().includes(q) ?? false) ||
           r.checks.some((c) => c.includes(q)),
       )
     }
@@ -415,6 +499,35 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
           </div>
         </div>
 
+        <div className="et-segment w-fit">
+          <button
+            type="button"
+            onClick={() => setQcTab('overview')}
+            className={`et-segment-btn text-xs ${qcTab === 'overview' ? 'et-segment-btn-active' : 'et-segment-btn-inactive'}`}
+          >
+            Overview
+          </button>
+          <button
+            type="button"
+            onClick={() => setQcTab('interviewer')}
+            className={`et-segment-btn text-xs ${qcTab === 'interviewer' ? 'et-segment-btn-active' : 'et-segment-btn-inactive'}`}
+          >
+            By interviewer
+          </button>
+        </div>
+
+        {qcTab === 'interviewer' ? (
+          <InterviewerQcTab
+            surveyId={surveyId}
+            variables={variables}
+            qcConfig={qcConfig}
+            onConfigChange={setQcConfig}
+            onSaveConfig={saveQcConfigOnly}
+            savingConfig={settingsSaving}
+            hasScan={Boolean(result)}
+          />
+        ) : (
+          <>
         {loading && (
           <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
             <Loader2 className="animate-spin text-[var(--et-teal)]" size={16} />
@@ -434,6 +547,15 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
             {result.message}
           </div>
         )}
+
+        <QcSettingsPanel
+          variables={variables}
+          config={qcConfig}
+          onChange={setQcConfig}
+          onSave={() => saveQcSettings(qcConfig)}
+          saving={settingsSaving}
+          speederStats={result?.speeders}
+        />
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <SummaryTile label="Sample size" value={metrics.total} />
@@ -487,6 +609,17 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
                 />
               )
             })}
+            {(hasCustomRules || (result.custom_rules?.count ?? 0) > 0) && (
+              <IssueChip
+                label={CUSTOM_RULES_CHECK.title}
+                count={checkCount('custom_rules', result)}
+                active={filterCheck === 'custom_rules'}
+                muted={!enabledChecks.has('custom_rules')}
+                onClick={() =>
+                  setFilterCheck(filterCheck === 'custom_rules' ? 'all' : 'custom_rules')
+                }
+              />
+            )}
           </div>
         </section>
 
@@ -563,6 +696,60 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
                     </tr>
                   )
                 })}
+                {(hasCustomRules || (result.custom_rules?.count ?? 0) > 0) && (() => {
+                  const check = CUSTOM_RULES_CHECK
+                  const count = checkCount('custom_rules', result)
+                  const available = isCheckAvailable('custom_rules', result)
+                  const included = enabledChecks.has('custom_rules')
+                  const active = filterCheck === 'custom_rules'
+                  return (
+                    <tr
+                      className={`border-b border-slate-50 transition hover:bg-slate-50/80 ${
+                        active ? 'bg-[var(--et-teal-light)]/30' : ''
+                      } ${!included ? 'opacity-70' : ''}`}
+                    >
+                      <td
+                        className="cursor-pointer px-5 py-3"
+                        onClick={() => setFilterCheck(active ? 'all' : 'custom_rules')}
+                      >
+                        <p className="font-medium text-slate-900">{check.title}</p>
+                        <p className="text-xs text-slate-500">{check.description}</p>
+                      </td>
+                      <td className="px-5 py-3 tabular-nums font-semibold text-slate-800">
+                        {count}
+                      </td>
+                      <td className="px-5 py-3">
+                        <SeverityBadge severity={check.severity} />
+                      </td>
+                      <td className="px-5 py-3">
+                        <label className="inline-flex cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={included}
+                            disabled={configLoading}
+                            onChange={(e) => toggleCheck('custom_rules', e.target.checked)}
+                            className="h-4 w-4 rounded border-slate-300 text-[var(--et-teal)] focus:ring-[var(--et-teal)]"
+                          />
+                          <span className="text-xs text-slate-600">
+                            {included ? 'On' : 'Off'}
+                          </span>
+                        </label>
+                      </td>
+                      <td
+                        className="cursor-pointer px-5 py-3 text-xs text-slate-500"
+                        onClick={() => setFilterCheck(active ? 'all' : 'custom_rules')}
+                      >
+                        {!available
+                          ? 'Not available'
+                          : count === 0
+                            ? 'All clear'
+                            : included
+                              ? 'View flags ↓'
+                              : 'Excluded from QC'}
+                      </td>
+                    </tr>
+                  )
+                })()}
               </tbody>
             </table>
           </div>
@@ -614,7 +801,7 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
                   type="search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search ID or detail…"
+                  placeholder={showInterviewerColumn ? 'Search ID, interviewer, or detail…' : 'Search ID or detail…'}
                   className="w-48 rounded-lg border border-slate-200 py-1.5 pl-8 pr-3 text-xs outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
                 />
               </div>
@@ -635,6 +822,9 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
                     <th className="w-10 px-3 py-2" aria-label="Select" />
                     <th className="px-3 py-2 font-semibold">In QC sample</th>
                     <th className="px-5 py-2 font-semibold">Response ID</th>
+                    {showInterviewerColumn && (
+                      <th className="px-5 py-2 font-semibold">Interviewer</th>
+                    )}
                     <th className="px-5 py-2 font-semibold">Checks</th>
                     <th className="px-5 py-2 font-semibold">Severity</th>
                     <th className="px-5 py-2 font-semibold">Detail</th>
@@ -645,6 +835,7 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
                     <FlaggedTableRow
                       key={row.response_id}
                       row={row}
+                      showInterviewer={showInterviewerColumn}
                       selected={selectedIds.has(row.response_id)}
                       included={isIncludedInQcSample(row.response_id, flaggedIdSet, review)}
                       onToggleSelected={() => toggleSelected(row.response_id)}
@@ -656,6 +847,8 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcAp
             </div>
           )}
         </section>
+          </>
+        )}
       </div>
     </div>
   )
@@ -739,12 +932,14 @@ function SeverityBadge({ severity }: { severity: 'high' | 'medium' | 'low' }) {
 
 function FlaggedTableRow({
   row,
+  showInterviewer,
   selected,
   included,
   onToggleSelected,
   onToggleInclusion,
 }: {
   row: QcFlaggedRow
+  showInterviewer?: boolean
   selected: boolean
   included: boolean
   onToggleSelected: () => void
@@ -777,6 +972,11 @@ function FlaggedTableRow({
       <td className="px-5 py-2.5 font-mono text-xs font-medium text-slate-800">
         {row.response_id}
       </td>
+      {showInterviewer && (
+        <td className="px-5 py-2.5 text-xs font-medium text-slate-700">
+          {row.interviewer || '—'}
+        </td>
+      )}
       <td className="px-5 py-2.5">
         <div className="flex flex-wrap gap-1">
           {row.checks.map((c) => (
@@ -784,7 +984,8 @@ function FlaggedTableRow({
               key={c}
               className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
             >
-              {QC_CHECKS.find((x) => x.id === c)?.title ?? c}
+              {QC_CHECKS.find((x) => x.id === c)?.title ??
+                (c === 'custom_rules' ? CUSTOM_RULES_CHECK.title : c)}
             </span>
           ))}
         </div>

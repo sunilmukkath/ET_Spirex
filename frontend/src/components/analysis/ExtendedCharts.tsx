@@ -4,6 +4,7 @@ import {
   CartesianGrid,
   Cell,
   ComposedChart,
+  LabelList,
   Legend,
   Line,
   PolarAngleAxis,
@@ -33,6 +34,7 @@ import {
   type ValueRow,
   waterfallRows,
 } from '../../lib/chartDataHelpers'
+import { BarPercentLabel, formatChartPct } from '../../lib/chartLabelHelpers'
 
 function colors(options: ChartDisplayOptions) {
   return getPalette(options.paletteId).colors
@@ -61,7 +63,7 @@ export function LollipopChart({
         <ComposedChart
           data={data}
           layout={layout === 'horizontal' ? 'vertical' : 'horizontal'}
-          margin={layout === 'horizontal' ? { left: 8, right: 24 } : { bottom: 70 }}
+          margin={layout === 'horizontal' ? { left: 8, right: 48 } : { bottom: 70, top: 20 }}
         >
           <CartesianGrid strokeDasharray="3 3" />
           {layout === 'horizontal' ? (
@@ -76,7 +78,12 @@ export function LollipopChart({
             </>
           )}
           <Tooltip />
-          <Bar dataKey="value" barSize={2} fill={colors(options)[0]} />
+          <Bar dataKey="value" barSize={2} fill={colors(options)[0]}>
+            <LabelList
+              dataKey="pct"
+              content={(props) => <BarPercentLabel {...props} layout={layout} />}
+            />
+          </Bar>
           <Scatter dataKey="value" fill={colors(options)[1] ?? colors(options)[0]} />
         </ComposedChart>
       </ResponsiveContainer>
@@ -121,7 +128,12 @@ export function ComboChart({
           <YAxis />
           <Tooltip />
           <Legend />
-          <Bar dataKey="value" name="Bars" fill={stroke} radius={[4, 4, 0, 0]} />
+          <Bar dataKey="value" name="Bars" fill={stroke} radius={[4, 4, 0, 0]}>
+            <LabelList
+              dataKey="pct"
+              content={(props) => <BarPercentLabel {...props} layout="vertical" />}
+            />
+          </Bar>
           <Line
             type="monotone"
             dataKey="lineValue"
@@ -154,8 +166,9 @@ export function FunnelChart({ values, options }: { values: ValueRow[]; options: 
                 className="mx-auto rounded-md py-2 text-center text-xs font-semibold text-white"
                 style={{ width: `${widthPct}%`, backgroundColor: fillAt(options, i), minWidth: '4rem' }}
               >
-                {row.value}
-                {options.valueMode === 'percent' ? '%' : ''}
+                {options.valueMode === 'percent'
+                  ? formatChartPct(row.value)
+                  : `${row.value} (${formatChartPct(row.pct)})`}
               </div>
             </div>
           </div>
@@ -235,7 +248,19 @@ export function RadialBarChartView({ values, options }: { values: ValueRow[]; op
     <div className="h-96">
       <ResponsiveContainer width="100%" height="100%">
         <RadialBarChart cx="50%" cy="50%" innerRadius="20%" outerRadius="90%" data={data} startAngle={90} endAngle={-270}>
-          <RadialBar dataKey="value" background cornerRadius={4} />
+          <RadialBar dataKey="value" background cornerRadius={4}>
+            <LabelList
+              dataKey="value"
+              position="insideStart"
+              formatter={(v) => {
+                const n = typeof v === 'number' ? v : Number(v)
+                return options.valueMode === 'percent' && Number.isFinite(n)
+                  ? formatChartPct(n)
+                  : String(v ?? '')
+              }}
+              className="fill-slate-700 text-[9px] font-semibold"
+            />
+          </RadialBar>
           <Legend />
           <Tooltip />
         </RadialBarChart>
@@ -282,6 +307,10 @@ export function WaterfallChart({ values, options }: { values: ValueRow[]; option
             {rows.map((_, i) => (
               <Cell key={i} fill={fillAt(options, i)} />
             ))}
+            <LabelList
+              dataKey="pct"
+              content={(props) => <BarPercentLabel {...props} layout="vertical" />}
+            />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -330,8 +359,7 @@ export function CategoryHeatmapStrip({ values, options }: { values: ValueRow[]; 
                 className="mx-auto flex h-16 w-full items-center justify-center rounded-lg text-xs font-semibold text-slate-800"
                 style={{ backgroundColor: `rgba(${r}, ${g}, ${b}, ${0.15 + intensity * 0.55})` }}
               >
-                {row.value}
-                {options.valueMode === 'percent' ? '%' : ''}
+                {options.valueMode === 'percent' ? formatChartPct(row.value) : `${row.value} (${formatChartPct(row.pct)})`}
               </div>
               <p className="mt-1 line-clamp-2 text-[10px] text-slate-500" title={row.fullLabel}>
                 {row.fullLabel}
@@ -428,7 +456,7 @@ function CategoryBarChart100({
         <BarChart
           data={data}
           layout={layout === 'horizontal' ? 'vertical' : 'horizontal'}
-          margin={layout === 'horizontal' ? { left: 8, right: 16 } : { bottom: 70 }}
+          margin={layout === 'horizontal' ? { left: 8, right: 48 } : { bottom: 70, top: 20 }}
         >
           <CartesianGrid strokeDasharray="3 3" />
           {layout === 'horizontal' ? (
@@ -447,6 +475,10 @@ function CategoryBarChart100({
             {data.map((_, i) => (
               <Cell key={i} fill={fillAt(options, i)} />
             ))}
+            <LabelList
+              dataKey="pct"
+              content={(props) => <BarPercentLabel {...props} layout={layout} />}
+            />
           </Bar>
         </BarChart>
       </ResponsiveContainer>

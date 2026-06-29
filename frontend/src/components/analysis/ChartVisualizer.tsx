@@ -6,6 +6,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -23,6 +24,7 @@ import type { BannerResult, ProfileResult } from '../../api/client'
 import type { ChartTypeId } from '../../lib/chartTypes'
 import type { ChartDisplayOptions } from '../../lib/chartDataHelpers'
 import { wordsAsValues } from '../../lib/chartDataHelpers'
+import { BarPercentLabel, formatChartPct, PiePercentCallout } from '../../lib/chartLabelHelpers'
 import { getPalette } from '../../lib/chartPalettes'
 import {
   ArrayHeatmap,
@@ -125,8 +127,8 @@ function CategoryBarChart({
           layout={layout === 'horizontal' ? 'vertical' : 'horizontal'}
           margin={
             layout === 'horizontal'
-              ? { left: 8, right: 16, top: 8, bottom: 8 }
-              : { bottom: 70, left: 8, right: 8, top: 8 }
+              ? { left: 8, right: 48, top: 8, bottom: 8 }
+              : { bottom: 70, left: 8, right: 8, top: 20 }
           }
         >
           <CartesianGrid strokeDasharray="3 3" vertical={layout !== 'horizontal'} horizontal />
@@ -158,6 +160,12 @@ function CategoryBarChart({
             {chartData.map((_, i) => (
               <Cell key={i} fill={barFill(options, i)} />
             ))}
+            <LabelList
+              dataKey="pct"
+              content={(props) => (
+                <BarPercentLabel {...props} layout={layout} />
+              )}
+            />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -184,7 +192,7 @@ function PieDonutChart({
   return (
     <div className="h-80">
       <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
+        <PieChart margin={{ top: 12, right: 48, bottom: 12, left: 48 }}>
           <Pie
             data={chartData}
             dataKey="value"
@@ -192,11 +200,9 @@ function PieDonutChart({
             cx="50%"
             cy="50%"
             innerRadius={donut ? 55 : 0}
-            outerRadius={100}
+            outerRadius={92}
             paddingAngle={1}
-            label={({ name, percent }) =>
-              `${truncate(String(name), 16)} (${((percent ?? 0) * 100).toFixed(0)}%)`
-            }
+            label={PiePercentCallout}
             labelLine={false}
           >
             {chartData.map((_, i) => (
@@ -204,12 +210,16 @@ function PieDonutChart({
             ))}
           </Pie>
           <Tooltip
-            formatter={(value, _name, item) => [
-              options.valueMode === 'percent'
-                ? `${value}%`
-                : `${value} (${(item?.payload as { pct?: number })?.pct ?? 0}%)`,
-              'Value',
-            ]}
+            formatter={(value, _name, item) => {
+              const row = item?.payload as { pct?: number; count?: number; name?: string }
+              const pct = row?.pct ?? 0
+              return [
+                options.valueMode === 'percent'
+                  ? `${value}%`
+                  : `${value} (${formatChartPct(pct)})`,
+                row?.name ?? 'Value',
+              ]
+            }}
           />
           <Legend />
         </PieChart>
@@ -241,7 +251,7 @@ function BannerGroupedChart({
   return (
     <div className="h-96">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} margin={{ bottom: 60, left: 8, right: 8 }}>
+        <BarChart data={chartData} margin={{ bottom: 60, left: 8, right: 8, top: stacked ? 18 : 8 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="name" angle={-25} textAnchor="end" interval={0} height={60} tick={{ fontSize: 10 }} />
           <YAxis unit="%" />
@@ -253,7 +263,20 @@ function BannerGroupedChart({
               dataKey={h.label}
               stackId={stacked ? 'stack' : undefined}
               fill={colors[i % colors.length]}
-            />
+            >
+              {stacked && (
+                <LabelList
+                  dataKey={h.label}
+                  position="center"
+                  formatter={(v) => {
+                    const n = typeof v === 'number' ? v : Number(v)
+                    return Number.isFinite(n) && n >= 4 ? `${Math.round(n)}%` : ''
+                  }}
+                  className="fill-white text-[9px] font-semibold"
+                  style={{ paintOrder: 'stroke', stroke: 'rgba(15,23,42,0.3)', strokeWidth: 2 }}
+                />
+              )}
+            </Bar>
           ))}
         </BarChart>
       </ResponsiveContainer>
