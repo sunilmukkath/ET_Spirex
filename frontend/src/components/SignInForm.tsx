@@ -35,7 +35,7 @@ export function SignInForm({ onSuccess, compact }: Props) {
     >
       <div className="mb-6 flex items-center gap-3">
         <img
-          src="/scout-mark.png"
+          src="/spirex-mark.png"
           alt=""
           aria-hidden
           className="h-10 w-10 shrink-0 object-contain"
