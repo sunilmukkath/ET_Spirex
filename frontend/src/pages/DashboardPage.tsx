@@ -123,23 +123,25 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-8 animate-fade-in">
-      <section className="et-hero overflow-hidden rounded-2xl px-6 py-8 text-white shadow-xl sm:px-8 sm:py-10">
+      <section className="et-hero relative overflow-hidden rounded-2xl px-6 py-8 text-white shadow-xl sm:px-8 sm:py-10">
         <div className="relative z-10">
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-[var(--et-teal-light)]">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-[var(--et-teal-light)]">
             <Sparkles size={14} />
             Welcome back, {user?.username}
           </div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Your surveys</h2>
-          <p className="mt-2 max-w-xl text-sm text-white/70">
-            Sorted by newest first. Open a survey to explore, chart, crosstab, or run quality checks.
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">
+            Sorted by newest first. Open a survey to explore questions, build charts, run crosstabs, or review quality.
           </p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="mt-5 flex flex-wrap items-center gap-3">
             {connection && (
-              <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${
-                connection.connected
-                  ? 'bg-[var(--et-teal)]/30 text-[var(--et-teal-light)] ring-1 ring-white/20'
-                  : 'bg-amber-500/20 text-amber-100 ring-1 ring-amber-300/30'
-              }`}>
+              <div
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${
+                  connection.connected
+                    ? 'bg-[var(--et-teal)]/30 text-[var(--et-teal-light)] ring-1 ring-white/20'
+                    : 'bg-amber-500/20 text-amber-100 ring-1 ring-amber-300/30'
+                }`}
+              >
                 {connection.connected ? <Wifi size={12} /> : <WifiOff size={12} />}
                 {connection.connected
                   ? `Connected · ${connection.survey_count} surveys`
@@ -147,22 +149,37 @@ export function DashboardPage() {
               </div>
             )}
             {statsLoading && (
-              <span className="text-xs text-white/50">Loading sample sizes…</span>
+              <span className="text-xs text-white/50">Refreshing response counts…</span>
             )}
           </div>
         </div>
         <div className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full bg-[var(--et-teal)]/20 blur-2xl" />
+        <div className="pointer-events-none absolute -bottom-12 left-1/3 h-32 w-32 rounded-full bg-[var(--et-gold)]/10 blur-2xl" />
       </section>
 
-      <section className="flex flex-col gap-4 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: 'Total', value: counts.all, tone: 'text-slate-900' },
+          { label: 'Active', value: counts.active, tone: 'text-emerald-700' },
+          { label: 'Inactive', value: counts.inactive, tone: 'text-slate-600' },
+          { label: 'Expired', value: counts.expired, tone: 'text-amber-700' },
+        ].map((stat) => (
+          <div key={stat.label} className="et-metric-card px-4 py-3">
+            <p className="et-kicker">{stat.label}</p>
+            <p className={`mt-1 text-2xl font-bold tabular-nums ${stat.tone}`}>{stat.value}</p>
+          </div>
+        ))}
+      </section>
+
+      <section className="et-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input
             type="search"
             placeholder="Search by survey name..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm shadow-sm outline-none ring-[var(--et-teal)] focus:ring-2"
+            className="et-input et-input-with-icon"
           />
         </div>
         <div className="flex flex-wrap gap-2">
@@ -171,14 +188,10 @@ export function DashboardPage() {
               key={s}
               type="button"
               onClick={() => setStatusFilter(s)}
-              className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                statusFilter === s
-                  ? 'bg-[var(--et-navy)] text-white'
-                  : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
-              }`}
+              className={`et-chip ${statusFilter === s ? 'et-chip-active' : 'et-chip-inactive'}`}
             >
               {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
-              <span className="ml-1.5 opacity-60">{counts[s]}</span>
+              <span className="opacity-60">{counts[s]}</span>
             </button>
           ))}
         </div>
@@ -237,16 +250,17 @@ export function DashboardPage() {
           </div>
 
           {filtered.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between text-sm text-slate-600">
+            <div className="et-panel flex items-center justify-between px-4 py-3 text-sm text-slate-600">
               <span>
-                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of{' '}
+                {filtered.length}
               </span>
               <div className="flex gap-2">
                 <button
                   type="button"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => p - 1)}
-                  className="rounded-lg bg-white px-3 py-1.5 ring-1 ring-slate-200 disabled:opacity-40"
+                  className="rounded-lg bg-white px-3 py-1.5 font-medium ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-40"
                 >
                   Previous
                 </button>
@@ -254,7 +268,7 @@ export function DashboardPage() {
                   type="button"
                   disabled={page * PAGE_SIZE >= filtered.length}
                   onClick={() => setPage((p) => p + 1)}
-                  className="rounded-lg bg-white px-3 py-1.5 ring-1 ring-slate-200 disabled:opacity-40"
+                  className="rounded-lg bg-white px-3 py-1.5 font-medium ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-40"
                 >
                   Next
                 </button>

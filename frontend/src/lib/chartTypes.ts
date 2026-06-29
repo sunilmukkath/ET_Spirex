@@ -459,3 +459,36 @@ export function defaultChartType(variable: SurveyVariable | null): ChartTypeId {
       return 'bar_vertical'
   }
 }
+
+const SUGGESTED_BY_KIND: Partial<Record<string, ChartTypeId[]>> = {
+  single: ['bar_vertical', 'bar_horizontal', 'pie', 'donut'],
+  multi: ['bar_horizontal', 'bar_vertical', 'pie'],
+  numeric: ['histogram', 'gauge', 'boxplot', 'lollipop'],
+  array: ['array_grid', 'array_heatmap', 'radar'],
+  text: ['word_bar', 'word_treemap'],
+  location: ['map'],
+  rank: ['bar_horizontal', 'lollipop', 'bar_vertical'],
+}
+
+export function suggestedChartTypes(
+  variable: SurveyVariable | null,
+  limit = 4,
+): ChartTypeOption[] {
+  if (!variable) return []
+  const available = chartTypesForVariable(variable, 'all')
+  const byId = new Map(available.map((t) => [t.id, t]))
+  const preferred = SUGGESTED_BY_KIND[variable.kind] ?? [defaultChartType(variable)]
+  const picked: ChartTypeOption[] = []
+
+  for (const id of preferred) {
+    const opt = byId.get(id)
+    if (opt && !picked.some((p) => p.id === opt.id)) picked.push(opt)
+    if (picked.length >= limit) return picked
+  }
+
+  for (const opt of available) {
+    if (picked.length >= limit) break
+    if (!picked.some((p) => p.id === opt.id)) picked.push(opt)
+  }
+  return picked
+}

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LogOut, Users } from 'lucide-react'
+import { LayoutGrid, LogOut, Users } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { BrandLogo } from './BrandLogo'
+import { BrandLockup } from './BrandLockup'
 
 function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString(undefined, {
@@ -28,12 +28,22 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--canvas)]">
-      <header className="sticky top-0 z-20 border-b border-[var(--et-teal)]/10 bg-white/80 shadow-sm backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3.5">
-          <Link to="/dashboard" className="group rounded-lg transition">
-            <BrandLogo size="sm" showTagline={false} />
+    <div className="et-canvas-dots min-h-screen">
+      <header className="sticky top-0 z-20 border-b border-[var(--et-teal)]/10 bg-white/90 shadow-sm backdrop-blur-md">
+        <div className="et-page et-page-wide flex items-center justify-between gap-4 py-3.5">
+          <Link to="/dashboard" className="rounded-lg transition hover:opacity-90">
+            <BrandLockup size="sm" showTagline={false} />
           </Link>
+
+          <nav className="hidden items-center gap-1 sm:flex">
+            <Link
+              to="/dashboard"
+              className={`et-chip ${location.pathname === '/dashboard' ? 'et-chip-active' : 'et-chip-inactive'}`}
+            >
+              <LayoutGrid size={14} />
+              Surveys
+            </Link>
+          </nav>
 
           <div className="relative flex items-center gap-3">
             {activeSessions.length > 0 && (
@@ -50,14 +60,14 @@ export function AppShell() {
                   {activeSessions.length} signed in
                 </button>
                 {showSessions && (
-                  <div className="absolute right-0 top-full z-30 mt-2 w-56 rounded-xl border border-slate-200 bg-white py-2 shadow-xl">
+                  <div className="absolute right-0 top-full z-30 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-2 shadow-xl">
                     <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                       Active now
                     </p>
                     {activeSessions.map((s) => (
                       <div
                         key={`${s.username}-${s.login_at}`}
-                        className="flex items-center justify-between px-3 py-1.5 text-sm"
+                        className="flex items-center justify-between px-3 py-1.5 text-sm hover:bg-slate-50"
                       >
                         <span className="font-medium text-slate-800">{s.username}</span>
                         <span className="text-xs text-slate-400">{formatTime(s.last_seen)}</span>
@@ -67,13 +77,13 @@ export function AppShell() {
                 )}
               </div>
             )}
-            <div className="flex items-center gap-2 rounded-full bg-[var(--et-navy)] px-3 py-1.5 text-sm text-white">
+            <div className="flex items-center gap-2 rounded-full bg-[var(--et-navy)] py-1.5 pl-3 pr-1.5 text-sm text-white shadow-md">
               <span className="hidden h-2 w-2 rounded-full bg-[var(--et-teal-light)] sm:inline" />
               <span className="font-medium">{user?.username}</span>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="ml-1 rounded-full p-1 text-white/70 transition hover:bg-white/10 hover:text-white"
+                className="rounded-full p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white"
                 title="Sign out"
               >
                 <LogOut size={15} />
@@ -82,7 +92,7 @@ export function AppShell() {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="et-page et-page-wide et-page-main">
         <Outlet />
       </main>
     </div>

@@ -8,7 +8,7 @@ import {
   type ProfileResult,
   type SurveyVariable,
 } from '../../api/client'
-import { type ChartTypeId } from '../../lib/chartTypes'
+import { type ChartTypeId, defaultChartType } from '../../lib/chartTypes'
 import { CHART_PALETTES, type ChartPaletteId } from '../../lib/chartPalettes'
 import {
   apiChartType,
@@ -43,6 +43,8 @@ interface Props {
   onFilterTreeChange: (tree: FilterGroup | null) => void
   schemaLoading: boolean
   onPresetApply?: (preset: FilterPreset) => void
+  initialChartType?: ChartTypeId | null
+  onInitialChartTypeConsumed?: () => void
 }
 
 function varSummary(v: SurveyVariable) {
@@ -67,9 +69,11 @@ export function ChartsPanel({
   onFilterTreeChange,
   schemaLoading,
   onPresetApply,
+  initialChartType,
+  onInitialChartTypeConsumed,
 }: Props) {
   const chartRef = useRef<HTMLDivElement>(null)
-  const [chartType, setChartType] = useState<ChartTypeId>('bar_vertical')
+  const [chartType, setChartType] = useState<ChartTypeId>(initialChartType ?? 'bar_vertical')
   const [valueVariableId, setValueVariableId] = useState(selectedId ?? '')
   const [yVariableId, setYVariableId] = useState('')
   const [zVariableId, setZVariableId] = useState('')
@@ -120,6 +124,17 @@ export function ChartsPanel({
       setValueVariableId(selectedId)
     }
   }, [selectedId])
+
+  useEffect(() => {
+    if (!initialChartType) return
+    setChartType(initialChartType)
+    onInitialChartTypeConsumed?.()
+  }, [initialChartType, onInitialChartTypeConsumed])
+
+  useEffect(() => {
+    if (!valueVar || initialChartType) return
+    setChartType(defaultChartType(valueVar))
+  }, [valueVar?.id, valueVar?.kind, initialChartType])
 
   useEffect(() => {
     setYVariableId('')

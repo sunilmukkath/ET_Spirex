@@ -11,7 +11,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { BrandLogo } from '../components/BrandLogo'
+import { BrandLockup } from '../components/BrandLockup'
 import { SignInForm } from '../components/SignInForm'
 import { LoadingState } from '../components/States'
 
@@ -83,7 +83,7 @@ export function LandingPage() {
       </div>
 
       <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <BrandLogo size="lg" variant="light" />
+        <BrandLockup size="lg" variant="light" />
         <a
           href="#signin"
           className="rounded-full border border-white/20 bg-white/5 px-5 py-2 text-sm font-medium backdrop-blur-sm transition hover:bg-white/10"
@@ -92,41 +92,47 @@ export function LandingPage() {
         </a>
       </header>
 
-      <main className="relative z-10 mx-auto grid max-w-6xl gap-12 px-6 pb-20 pt-8 lg:grid-cols-2 lg:items-center lg:gap-16 lg:pt-16">
+      <main className="relative z-10 mx-auto grid max-w-6xl gap-12 px-6 pb-20 pt-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-start lg:gap-14 lg:pt-14">
         <div className="animate-fade-in">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--et-teal)]/30 bg-[var(--et-teal)]/10 px-3 py-1 text-xs font-medium text-[var(--et-teal-light)]">
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--et-teal)]/30 bg-[var(--et-teal)]/10 px-3.5 py-1.5 text-xs font-semibold text-[var(--et-teal-light)]">
             <Sparkles size={14} />
             Survey intelligence platform
           </div>
-          <h1 className="font-display text-4xl font-bold leading-tight tracking-tight sm:text-5xl lg:text-[3.25rem]">
+          <h1 className="font-display text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl lg:text-[3.25rem]">
             Analytics that feel as sharp as your research.
           </h1>
-          <p className="mt-5 max-w-lg text-base leading-relaxed text-white/70 sm:text-lg">
+          <p className="mt-5 max-w-lg text-base leading-relaxed text-white/75 sm:text-lg">
             ET Scout turns LimeSurvey data into explore charts, custom visualisations,
             advanced crosstabs, quality scans, and export-ready tables — built for the Elastic Tree team.
           </p>
 
-          <div className="mt-10 grid gap-3 sm:grid-cols-2">
+          <div className="mt-10 grid gap-2.5 sm:grid-cols-2">
             {FEATURES.map(({ icon: Icon, title, desc }) => (
               <div
                 key={title}
-                className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm transition hover:border-[var(--et-teal)]/30 hover:bg-white/[0.07]"
+                className="group rounded-2xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition hover:border-[var(--et-teal)]/35 hover:bg-white/[0.08]"
               >
-                <Icon className="mb-2 text-[var(--et-teal-light)]" size={20} />
-                <h3 className="text-sm font-semibold text-white">{title}</h3>
-                <p className="mt-1 text-[11px] leading-relaxed text-white/55">{desc}</p>
+                <div className="mb-2.5 flex items-center gap-2.5">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--et-teal)]/20 text-[var(--et-teal-light)] ring-1 ring-white/10">
+                    <Icon size={16} />
+                  </span>
+                  <h3 className="text-sm font-semibold text-white">{title}</h3>
+                </div>
+                <p className="text-[11px] leading-relaxed text-white/55">{desc}</p>
               </div>
             ))}
           </div>
         </div>
 
-        <div id="signin" className="animate-fade-in lg:justify-self-end">
+        <div id="signin" className="animate-fade-in lg:sticky lg:top-8 lg:justify-self-end">
           <SignInForm onSuccess={() => navigate('/dashboard')} />
         </div>
       </main>
 
       <footer className="relative z-10 border-t border-white/10 py-6 text-center text-xs text-white/40">
-        <BarChart3 className="mx-auto mb-2 opacity-40" size={18} />
+        <div className="mx-auto mb-3 flex justify-center">
+          <BrandLockup size="md" variant="light" showTagline={false} />
+        </div>
         ET Scout · Elastic Tree Consumer Insights
       </footer>
     </div>

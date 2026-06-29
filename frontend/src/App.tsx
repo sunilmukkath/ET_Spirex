@@ -15,8 +15,13 @@ const SurveyWorkspace = lazy(() =>
 
 function PageLoader() {
   return (
-    <div className="flex min-h-[50vh] items-center justify-center">
-      <Loader2 className="animate-spin text-[var(--et-teal)]" size={32} />
+    <div className="et-canvas-dots flex min-h-screen items-center justify-center">
+      <div className="flex flex-col items-center gap-4">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-lg ring-1 ring-[var(--et-teal)]/15">
+          <Loader2 className="animate-spin text-[var(--et-teal)]" size={32} />
+        </div>
+        <p className="text-sm font-medium text-slate-500">Loading ET Scout…</p>
+      </div>
     </div>
   )
 }

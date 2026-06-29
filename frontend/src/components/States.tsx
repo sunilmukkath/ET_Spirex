@@ -1,31 +1,49 @@
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, Inbox, Loader2 } from 'lucide-react'
 
 export function LoadingState({ message = 'Loading...' }: { message?: string }) {
   return (
-    <div className="flex items-center justify-center gap-3 py-20 text-slate-500">
-      <Loader2 className="animate-spin" size={20} />
-      <span>{message}</span>
+    <div className="flex flex-col items-center justify-center gap-4 py-24">
+      <div className="relative">
+        <div className="absolute inset-0 animate-ping rounded-full bg-[var(--et-teal)]/20" />
+        <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-md ring-1 ring-[var(--et-teal)]/15">
+          <Loader2 className="animate-spin text-[var(--et-teal)]" size={26} />
+        </div>
+      </div>
+      <p className="text-sm font-medium text-slate-600">{message}</p>
     </div>
   )
 }
 
 export function ErrorState({ message }: { message: string }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">
-      <AlertCircle className="mt-0.5 shrink-0" size={18} />
+    <div className="flex items-start gap-3 rounded-xl border border-red-200/80 bg-gradient-to-br from-red-50 to-white p-4 text-red-800 shadow-sm">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-100">
+        <AlertCircle size={18} />
+      </div>
       <div>
-        <p className="font-medium">Something went wrong</p>
-        <p className="mt-1 text-sm">{message}</p>
+        <p className="font-semibold">Something went wrong</p>
+        <p className="mt-1 text-sm leading-relaxed text-red-700/90">{message}</p>
       </div>
     </div>
   )
 }
 
-export function EmptyState({ title, description }: { title: string; description: string }) {
+export function EmptyState({
+  title,
+  description,
+  icon,
+}: {
+  title: string
+  description: string
+  icon?: React.ReactNode
+}) {
   return (
-    <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center">
-      <h3 className="text-lg font-medium text-slate-900">{title}</h3>
-      <p className="mt-2 text-sm text-slate-500">{description}</p>
+    <div className="et-empty-state">
+      <div className="et-empty-icon mx-auto">
+        {icon ?? <Inbox size={28} strokeWidth={1.5} />}
+      </div>
+      <h3 className="mt-5 font-display text-lg font-semibold text-slate-900">{title}</h3>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-500">{description}</p>
     </div>
   )
 }
@@ -41,17 +59,17 @@ export function SkeletonBlock({ className = '' }: { className?: string }) {
 
 export function ChartSkeleton() {
   return (
-    <div className="space-y-4" aria-label="Loading chart">
+    <div className="et-panel space-y-4 p-6" aria-label="Loading chart">
       <SkeletonBlock className="h-4 w-48" />
-      <SkeletonBlock className="h-72 w-full" />
+      <SkeletonBlock className="h-72 w-full rounded-xl" />
     </div>
   )
 }
 
 export function TableSkeleton({ rows = 6 }: { rows?: number }) {
   return (
-    <div className="space-y-2" aria-label="Loading">
-      <SkeletonBlock className="h-8 w-full" />
+    <div className="et-panel space-y-3 p-4" aria-label="Loading">
+      <SkeletonBlock className="h-8 w-full rounded-lg" />
       {Array.from({ length: rows }).map((_, i) => (
         <SkeletonBlock key={i} className="h-6 w-full" />
       ))}

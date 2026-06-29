@@ -20,7 +20,6 @@ from app.models.analysis import (
 )
 from app.models.auth import LoginRequest, LoginResponse
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
-from app.models.variable_override import VariableKindOverrideBody, VariableKindOverrideSync
 from app.services.auth import VALID_USERS, authenticate, get_session, list_active_sessions, logout
 from app.services.banner_analysis import run_banner_table, run_chart_data, run_question_profile, get_filter_options
 from app.services.advanced_analysis import run_advanced_analysis
@@ -36,11 +35,6 @@ from app.services.custom_variables import preview_custom_variable
 from app.services.data_quality import run_data_quality
 from app.services.excel_export import banner_result_to_excel
 from app.services.question_schema import build_survey_schema
-from app.services.variable_kind_override_store import (
-    list_kind_overrides,
-    set_kind_override,
-    sync_kind_overrides,
-)
 from app.services.filter_preset_store import create_filter_preset, delete_filter_preset, list_filter_presets
 from app.services.analysis_bookmark_store import (
     create_analysis_bookmark,
@@ -225,6 +219,13 @@ def get_qc_config_route(survey_id: int):
     return get_qc_config(survey_id).model_dump()
 
 
+@router.get("/projects/{survey_id}/qc/summary")
+def get_qc_summary_route(survey_id: int):
+    from app.services.qc_filter import get_qc_summary
+
+    return get_qc_summary(survey_id)
+
+
 @router.put("/projects/{survey_id}/qc/config")
 def put_qc_config_route(survey_id: int, config: QcConfig):
     return set_qc_config(survey_id, config).model_dump()
@@ -244,44 +245,6 @@ def variable_filter_options(
         )
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
-
-
-@router.get("/projects/{survey_id}/variables/kind-overrides")
-def get_survey_kind_overrides(
-    survey_id: int,
-    authorization: str | None = Header(default=None),
-):
-    username = _optional_username(authorization)
-    overrides = list_kind_overrides(survey_id, username=username)
-    return {"overrides": overrides}
-
-
-@router.put("/projects/{survey_id}/variables/kind-overrides")
-def put_survey_kind_overrides(
-    survey_id: int,
-    body: VariableKindOverrideSync,
-    authorization: str | None = Header(default=None),
-):
-    username = _optional_username(authorization)
-    overrides = sync_kind_overrides(survey_id, body.overrides, username=username)
-    return {"overrides": overrides, "saved": True}
-
-
-@router.put("/projects/{survey_id}/variables/{variable_id}/kind-override")
-def put_variable_kind_override(
-    survey_id: int,
-    variable_id: str,
-    body: VariableKindOverrideBody,
-    authorization: str | None = Header(default=None),
-):
-    username = _optional_username(authorization)
-    overrides = set_kind_override(
-        survey_id,
-        variable_id,
-        body.treat_as_categorical,
-        username=username,
-    )
-    return {"overrides": overrides, "saved": True}
 
 
 @router.get("/projects/{survey_id}/filters/presets")

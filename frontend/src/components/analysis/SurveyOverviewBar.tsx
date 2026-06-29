@@ -65,7 +65,7 @@ export function SurveyOverviewBar({
       {metrics.map(({ icon: Icon, label, value, hint }) => (
         <div
           key={label}
-          className="rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm"
+          className="et-metric-card px-4 py-3.5"
         >
           <div className="flex items-center gap-2 text-[var(--et-teal-dark)]">
             <Icon size={15} />

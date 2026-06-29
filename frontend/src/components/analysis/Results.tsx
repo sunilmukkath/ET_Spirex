@@ -40,11 +40,13 @@ export function KindBadge({ kind, label }: { kind: string; label?: string }) {
 export function ProfileResults({
   result,
   onCompareQuestion,
+  onConfigureQuestion,
   onExportReport,
   exportingReport,
 }: {
   result: ProfileResult
   onCompareQuestion?: () => void
+  onConfigureQuestion?: () => void
   onExportReport?: (format: 'pdf' | 'pptx') => void
   exportingReport?: boolean
 }) {
@@ -54,7 +56,7 @@ export function ProfileResults({
     <ScaleMetricsBar metrics={result.scale_metrics} />
   ) : null
 
-  const actions = (onCompareQuestion || onExportReport) && (
+  const actions = (onCompareQuestion || onConfigureQuestion || onExportReport) && (
     <div className="mb-4 flex flex-wrap items-center gap-2">
       {onCompareQuestion && (
         <button
@@ -63,6 +65,15 @@ export function ProfileResults({
           className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/40 px-3 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)]"
         >
           Compare this question →
+        </button>
+      )}
+      {onConfigureQuestion && (
+        <button
+          type="button"
+          onClick={onConfigureQuestion}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-[var(--et-teal)]/40 hover:bg-slate-50"
+        >
+          Configure analysis
         </button>
       )}
       {onExportReport && (
@@ -187,6 +198,7 @@ export function ProfileResults({
   if (result.analysis_type === 'location') {
     return (
       <div className="space-y-4">
+        {actions}
         <ResultHeader result={result} />
         <Suspense fallback={<ChartFallback />}>
           <LocationMap points={result.points ?? []} bounds={result.bounds} />
@@ -433,6 +445,7 @@ export function BannerTable({ result }: { result: BannerResult }) {
   const conf = result.confidence_level ?? 0.95
   const headerRows = result.header_rows
   const hasNestedHeaders = Boolean(headerRows && headerRows.length > 0)
+  const cellMetrics = stackedCellMetrics(isMetric, showCounts, showColPct, showRowPct)
 
   return (
     <div className="space-y-4">
@@ -489,27 +502,42 @@ export function BannerTable({ result }: { result: BannerResult }) {
             )}
           </thead>
           <tbody>
-            {result.rows.map((row) => (
-              <tr
-                key={row.code}
-                className={`border-b border-slate-100 ${row.is_total ? 'bg-slate-50 font-semibold' : ''}`}
-              >
-                <td className="sticky left-0 z-10 bg-white px-3 py-2 font-medium text-slate-800">
-                  {row.label}
-                </td>
-                {row.cells.map((cell, ci) => (
-                  <td key={ci} className="px-3 py-2 text-slate-700">
-                    <CellDisplay
-                      cell={cell}
-                      isMetric={isMetric}
-                      showCounts={showCounts}
-                      showColPct={showColPct}
-                      showRowPct={showRowPct}
-                    />
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {result.rows.map((row) => {
+              const rowClass = `border-b border-slate-100 ${row.is_total ? 'bg-slate-50 font-semibold' : ''}`
+              const labelBg = row.is_total ? 'bg-slate-50' : 'bg-white'
+
+              if (cellMetrics.length <= 1) {
+                const metric = cellMetrics[0] ?? 'count'
+                return (
+                  <tr key={row.code} className={rowClass}>
+                    <td className={`sticky left-0 z-10 ${labelBg} px-3 py-2 font-medium text-slate-800`}>
+                      {row.label}
+                    </td>
+                    {row.cells.map((cell, ci) => (
+                      <td key={ci} className="px-3 py-2 text-slate-700">
+                        <CellDisplay
+                          cell={cell}
+                          isMetric={isMetric}
+                          metric={metric}
+                          showSig={metric === 'col_pct'}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                )
+              }
+
+              return (
+                <FragmentRow
+                  key={row.code}
+                  row={row}
+                  rowClass={rowClass}
+                  labelBg={labelBg}
+                  metrics={cellMetrics}
+                  isMetric={isMetric}
+                />
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -522,42 +550,104 @@ export function BannerTable({ result }: { result: BannerResult }) {
   )
 }
 
+type CellMetric = 'count' | 'col_pct' | 'row_pct' | 'value'
+
+function stackedCellMetrics(
+  isMetric: boolean,
+  showCounts: boolean,
+  showColPct: boolean,
+  showRowPct: boolean,
+): CellMetric[] {
+  if (isMetric) return ['value']
+  const metrics: CellMetric[] = []
+  if (showCounts) metrics.push('count')
+  if (showColPct) metrics.push('col_pct')
+  if (showRowPct) metrics.push('row_pct')
+  return metrics.length ? metrics : ['count']
+}
+
+function FragmentRow({
+  row,
+  rowClass,
+  labelBg,
+  metrics,
+  isMetric,
+}: {
+  row: { code: string; label: string; cells: TableCell[]; is_total?: boolean }
+  rowClass: string
+  labelBg: string
+  metrics: CellMetric[]
+  isMetric: boolean
+}) {
+  return (
+    <>
+      {metrics.map((metric, mi) => (
+        <tr key={`${row.code}-${metric}`} className={rowClass}>
+          {mi === 0 ? (
+            <td
+              rowSpan={metrics.length}
+              className={`sticky left-0 z-10 ${labelBg} border-r border-slate-100 px-3 py-2 align-top font-medium text-slate-800`}
+            >
+              {row.label}
+            </td>
+          ) : null}
+          {row.cells.map((cell, ci) => (
+            <td
+              key={ci}
+              className={`px-3 py-2 text-slate-700 ${mi > 0 ? 'border-t border-dashed border-slate-100' : ''}`}
+            >
+              <CellDisplay cell={cell} isMetric={isMetric} metric={metric} showSig={metric === 'col_pct'} />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  )
+}
+
 function CellDisplay({
   cell,
   isMetric,
-  showCounts = true,
-  showColPct = true,
-  showRowPct = false,
+  metric = 'count',
+  showSig = false,
 }: {
   cell: TableCell
   isMetric: boolean
-  showCounts?: boolean
-  showColPct?: boolean
-  showRowPct?: boolean
+  metric?: CellMetric
+  showSig?: boolean
 }) {
-  if (isMetric) {
+  if (isMetric || metric === 'value') {
     return <span className="font-medium">{cell.value ?? '—'}</span>
   }
-  const sig = cell.sig
+
+  const sig = showSig ? cell.sig : undefined
   const sigPositive = sig?.startsWith('+')
   const sigEl = sig ? (
     <sup className={`ml-0.5 font-bold ${sigPositive ? 'text-[var(--et-teal)]' : 'text-red-600'}`}>
       {sig}
     </sup>
   ) : null
-  return (
-    <span>
-      {showCounts && <span>{cell.count}</span>}
-      {showCounts && showColPct && ' '}
-      {showColPct && (
-        <span className={showCounts ? 'text-slate-400' : ''}>({cell.col_pct}%)</span>
-      )}
-      {showRowPct && cell.row_pct != null && (
-        <span className="ml-1 text-slate-400">[{cell.row_pct}%]</span>
-      )}
-      {sigEl}
-    </span>
-  )
+
+  if (metric === 'count') {
+    return <span className="font-medium tabular-nums">{cell.count ?? '—'}</span>
+  }
+  if (metric === 'col_pct') {
+    return (
+      <span className="tabular-nums text-slate-600">
+        {cell.col_pct != null ? `${cell.col_pct}%` : '—'}
+        {sigEl}
+      </span>
+    )
+  }
+  if (metric === 'row_pct') {
+    return (
+      <span className="tabular-nums text-slate-600">
+        {cell.row_pct != null ? `${cell.row_pct}%` : '—'}
+      </span>
+    )
+  }
+
+  return <span>—</span>
 }
 
 function BannerMeta({ result }: { result: BannerResult }) {

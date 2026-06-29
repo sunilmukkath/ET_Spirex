@@ -177,6 +177,40 @@ export function disabledChecksFromEnabled(enabled: Set<QcCheckId>): string[] {
   return QC_CHECKS.map((c) => c.id).filter((id) => !enabled.has(id))
 }
 
+export interface QcReviewState {
+  kept: Set<string>
+  excluded: Set<string>
+}
+
+export function isIncludedInQcSample(
+  responseId: string,
+  flaggedIds: Set<string>,
+  review: QcReviewState,
+): boolean {
+  if (review.excluded.has(responseId)) return false
+  if (flaggedIds.has(responseId) && !review.kept.has(responseId)) return false
+  return true
+}
+
+export function setQcSampleInclusion(
+  responseId: string,
+  include: boolean,
+  flaggedIds: Set<string>,
+  review: QcReviewState,
+): QcReviewState {
+  const kept = new Set(review.kept)
+  const excluded = new Set(review.excluded)
+  if (include) {
+    excluded.delete(responseId)
+    if (flaggedIds.has(responseId)) kept.add(responseId)
+    else kept.delete(responseId)
+  } else {
+    kept.delete(responseId)
+    excluded.add(responseId)
+  }
+  return { kept, excluded }
+}
+
 export function exportFlaggedCsv(rows: QcFlaggedRow[], filename = 'qc_flagged.csv') {
   const header = 'response_id,checks,severity,detail'
   const lines = rows.map((r) => {

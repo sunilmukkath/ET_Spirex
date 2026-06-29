@@ -48,7 +48,7 @@ def get_responses(
     from app.services.qc_filter import (
         QC_APPROVED_STATUS,
         exclude_flagged_responses,
-        get_flagged_response_ids,
+        get_qc_excluded_response_ids,
         normalize_export_status,
     )
 
@@ -70,8 +70,8 @@ def get_responses(
         df = export_responses_dataframe(survey_id, completion_status=export_status)
 
         if completion_status == QC_APPROVED_STATUS:
-            flagged = get_flagged_response_ids(survey_id)
-            df = exclude_flagged_responses(df, flagged)
+            excluded = get_qc_excluded_response_ids(survey_id)
+            df = exclude_flagged_responses(df, excluded)
 
         _CACHE[key] = (time.time(), df)
         return ResponseDataset(df, len(df), len(df.columns))

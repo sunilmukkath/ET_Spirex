@@ -68,6 +68,40 @@ def get_flagged_response_ids(survey_id: int) -> set[str]:
     return flagged
 
 
+def get_qc_excluded_response_ids(survey_id: int) -> set[str]:
+    """Response IDs removed from the QC Approved analysis sample."""
+    from app.services.qc_config_store import get_qc_config
+
+    auto_flagged = get_flagged_response_ids(survey_id)
+    cfg = get_qc_config(survey_id)
+    kept = {str(x) for x in cfg.kept_response_ids}
+    extra_excluded = {str(x) for x in cfg.excluded_response_ids}
+    return (auto_flagged - kept) | extra_excluded
+
+
+def get_qc_summary(survey_id: int) -> dict[str, Any]:
+    from app.services.qc_config_store import get_qc_config
+    from app.services.response_store import get_responses
+
+    cfg = get_qc_config(survey_id)
+    dataset = get_responses(survey_id, completion_status="complete")
+    df = dataset.dataframe
+    total = int(len(df))
+    auto_flagged = get_flagged_response_ids(survey_id)
+    qc_approved = qc_approved_response_count(survey_id)
+    kept = {str(x) for x in cfg.kept_response_ids}
+    manual_excluded = {str(x) for x in cfg.excluded_response_ids} - auto_flagged
+    return {
+        "total_completed": total,
+        "auto_flagged_count": len(auto_flagged),
+        "excluded_count": max(0, total - qc_approved),
+        "qc_approved_count": qc_approved,
+        "kept_flagged_count": len(kept & auto_flagged),
+        "manual_excluded_count": len(manual_excluded),
+        "has_review": bool(kept or cfg.excluded_response_ids),
+    }
+
+
 def qc_approved_response_count(survey_id: int) -> int:
     from app.services.response_store import get_responses
 
@@ -76,19 +110,19 @@ def qc_approved_response_count(survey_id: int) -> int:
     if df.empty:
         return 0
 
-    flagged = get_flagged_response_ids(survey_id)
-    if not flagged:
+    excluded = get_qc_excluded_response_ids(survey_id)
+    if not excluded:
         return int(len(df))
 
     id_col = response_id_column(df)
     if not id_col:
-        return max(0, int(len(df)) - len(flagged))
+        return max(0, int(len(df)) - len(excluded))
 
     ids = pd.Series(
         (str(safe_response_id(df.at[idx, id_col], idx)) for idx in df.index),
         index=df.index,
     )
-    return int((~ids.isin(flagged)).sum())
+    return int((~ids.isin(excluded)).sum())
 
 
 def exclude_flagged_responses(df: pd.DataFrame, flagged_ids: set[str]) -> pd.DataFrame:

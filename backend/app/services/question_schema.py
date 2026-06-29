@@ -191,8 +191,6 @@ def _variable_to_dict(v: SurveyVariable) -> dict[str, Any]:
         "can_filter": v.can_filter,
         "lat_column": v.lat_column,
         "lng_column": v.lng_column,
-        "treat_as_categorical": getattr(v, "treat_as_categorical", False),
-        "original_kind": getattr(v, "original_kind", None),
     }
 
 
@@ -318,17 +316,7 @@ def _finalize_schema(
     completion_status: str,
     light: bool,
 ) -> dict[str, Any]:
-    df = None
-    if not light:
-        try:
-            from app.services.response_store import get_responses
-
-            df = get_responses(survey_id, completion_status=completion_status).dataframe
-        except Exception:
-            pass
-    from app.services.variable_kind_overrides import apply_kind_overrides
-
-    return apply_kind_overrides(survey_id, result, df)
+    return result
 
 
 def _enrich_variables_parallel(

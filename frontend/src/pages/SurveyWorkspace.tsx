@@ -29,6 +29,7 @@ import {
   type WeightConfig,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { BrandLockup } from '../components/BrandLockup'
 import { BannerPicker } from '../components/analysis/BannerPicker'
 import { BannerLayerEditor } from '../components/analysis/BannerLayerEditor'
 import { FilterEditor } from '../components/analysis/FilterEditor'
@@ -37,9 +38,11 @@ import { SurveyOverviewBar } from '../components/analysis/SurveyOverviewBar'
 import { CrosstabsResults, ProfileResults } from '../components/analysis/Results'
 import { AnalysisBookmarkMenu } from '../components/analysis/AnalysisBookmarkMenu'
 import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
+import { SuggestedCharts } from '../components/analysis/SuggestedCharts'
 import { StatusBadge } from '../components/StatusBadge'
 import { ErrorState, TableSkeleton } from '../components/States'
 import { filterPayload } from '../lib/filterTree'
+import type { ChartTypeId } from '../lib/chartTypes'
 
 const DataPanel = lazy(() =>
   import('../components/analysis/DataPanel').then((m) => ({ default: m.DataPanel })),
@@ -59,7 +62,12 @@ const AdvancedAnalysisPanel = lazy(() =>
 function PanelLoader() {
   return (
     <div className="flex flex-1 items-center justify-center p-8">
-      <Loader2 className="animate-spin text-[var(--et-teal)]" size={32} />
+      <div className="flex flex-col items-center gap-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+          <Loader2 className="animate-spin text-[var(--et-teal)]" size={24} />
+        </div>
+        <p className="text-sm text-slate-500">Loading panel…</p>
+      </div>
     </div>
   )
 }
@@ -83,7 +91,7 @@ function modeLabel(mode: Mode): string {
   if (mode === 'multivariate') return 'Statistics'
   if (mode === 'charts') return 'Charts'
   if (mode === 'quality') return 'Response QC'
-  if (mode === 'variables') return 'Variables'
+  if (mode === 'variables') return 'Setup'
   return 'Data'
 }
 
@@ -103,6 +111,7 @@ export function SurveyWorkspace() {
 
   const mode = parseMode(searchParams.get('mode'))
   const completionStatus = searchParams.get('responses') || 'complete'
+  const initialChartType = (searchParams.get('chart') as ChartTypeId | null) || null
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [bannerLayers, setBannerLayers] = useState<string[][]>([[]])
@@ -123,8 +132,38 @@ export function SurveyWorkspace() {
   const [refreshingTableId, setRefreshingTableId] = useState<string | null>(null)
   const [customVariables, setCustomVariables] = useState<CustomVariable[]>([])
   const [weightConfig, setWeightConfig] = useState<WeightConfig>({ enabled: false, variable_id: null })
+  const [focusQuestionId, setFocusQuestionId] = useState<string | null>(null)
   const [exportingReport, setExportingReport] = useState(false)
   const [schemaVersion, setSchemaVersion] = useState(0)
+  const [qcSummary, setQcSummary] = useState<{
+    total_completed: number
+    qc_approved_count: number
+    excluded_count: number
+    has_review: boolean
+  } | null>(null)
+
+  const reloadQcSummary = useCallback(async () => {
+    if (!surveyId) return
+    try {
+      const summary = await api.getQcSummary(surveyId)
+      setQcSummary(summary)
+    } catch {
+      setQcSummary(null)
+    }
+  }, [surveyId])
+
+  const handleQcReviewChanged = useCallback(() => {
+    reloadQcSummary()
+    invalidateSchemaCache(surveyId)
+    setSchemaVersion((v) => v + 1)
+    setProfileResult(null)
+    setBannerResult(null)
+  }, [surveyId, reloadQcSummary])
+
+  useEffect(() => {
+    if (!surveyId) return
+    reloadQcSummary()
+  }, [surveyId, schemaVersion, reloadQcSummary])
 
   const mergedSchema = useMemo((): SurveySchema | null => {
     if (!schema) return null
@@ -160,17 +199,6 @@ export function SurveyWorkspace() {
     }
   }, [surveyId])
 
-  const reloadSchema = useCallback(async () => {
-    invalidateSchemaCache(surveyId)
-    setSchemaVersion((v) => v + 1)
-    try {
-      const data = await api.getSchema(surveyId, completionStatus, false)
-      setSchema(data)
-    } catch {
-      /* ignore */
-    }
-  }, [surveyId, completionStatus])
-
   const applyFilterPreset = useCallback((preset: FilterPreset) => {
     if (preset.filter_tree?.children?.length) {
       setFilterTree(preset.filter_tree)
@@ -189,6 +217,43 @@ export function SurveyWorkspace() {
       return prev
     }, { replace: true })
   }, [selectedId, setSearchParams])
+
+  const configureCurrentQuestion = useCallback(() => {
+    if (!selectedId) return
+    setFocusQuestionId(selectedId)
+    setSearchParams((prev) => {
+      prev.set('mode', 'variables')
+      return prev
+    }, { replace: true })
+  }, [selectedId, setSearchParams])
+
+  const openQuestionChart = useCallback(
+    (chartType: ChartTypeId) => {
+      setSearchParams((prev) => {
+        prev.set('mode', 'charts')
+        prev.set('chart', chartType)
+        return prev
+      }, { replace: true })
+    },
+    [setSearchParams],
+  )
+
+  const clearInitialChartType = useCallback(() => {
+    setSearchParams((prev) => {
+      prev.delete('chart')
+      return prev
+    }, { replace: true })
+  }, [setSearchParams])
+
+  const handleWeightConfigChange = useCallback(
+    async (next: WeightConfig) => {
+      setWeightConfig(next)
+      await api.setWeightConfig(surveyId, next)
+      invalidateSchemaCache(surveyId)
+      setSchemaVersion((v) => v + 1)
+    },
+    [surveyId],
+  )
 
   const loadCrosstabBookmark = useCallback((bm: AnalysisBookmark) => {
     const cfg = bm.config
@@ -540,34 +605,91 @@ export function SurveyWorkspace() {
 
   return (
     <div className="flex h-screen flex-col bg-[var(--canvas)]">
-      {/* Top bar */}
-      <header className="flex shrink-0 items-center gap-4 border-b border-[var(--et-teal)]/15 bg-white px-4 py-2 shadow-sm">
-        <Link
-          to="/dashboard"
-          className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-500 hover:bg-[var(--et-teal-light)] hover:text-[var(--et-teal-dark)]"
-        >
-          <ArrowLeft size={16} />
-          <span className="hidden sm:inline">Surveys</span>
-        </Link>
-        <div className="hidden h-5 w-px bg-slate-200 sm:block" />
+      <header className="shrink-0 border-b border-[var(--et-teal)]/12 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
+          <Link
+            to="/dashboard"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-[var(--et-teal-light)] hover:text-[var(--et-teal-dark)]"
+          >
+            <ArrowLeft size={16} />
+            <span className="hidden sm:inline">Surveys</span>
+          </Link>
+          <div className="hidden h-6 w-px bg-slate-200 md:block" />
+          <Link to="/dashboard" className="hidden shrink-0 rounded-lg transition hover:opacity-90 md:block">
+            <BrandLockup size="sm" showTagline={false} />
+          </Link>
+          <div className="hidden h-6 w-px bg-slate-200 lg:block" />
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h1 className="truncate text-base font-semibold text-slate-900">
-              {project?.title || navTitle || 'Loading survey...'}
-            </h1>
-            {project && <StatusBadge status={project.status} />}
+          <div className="min-w-0 flex-1 basis-full sm:basis-auto">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate font-display text-base font-semibold tracking-tight text-slate-900 sm:text-lg">
+                {project?.title || navTitle || 'Loading survey...'}
+              </h1>
+              {project && <StatusBadge status={project.status} />}
+            </div>
+            <p className="mt-0.5 text-xs text-slate-500">
+              ID {surveyId}
+              {schema && ` · ${schema.response_count.toLocaleString()} in sample`}
+              {project && project.responses.total > 0 && ` · ${project.responses.completed.toLocaleString()} completed`}
+            </p>
           </div>
-          <p className="text-xs text-slate-500">
-            ID {surveyId}
-            {schema && ` · ${schema.response_count} responses`}
-            {project && project.responses.total > 0 && ` · ${project.responses.completed} completed`}
-          </p>
+
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <select
+              value={weightConfig.enabled && weightConfig.variable_id ? weightConfig.variable_id : ''}
+              onChange={async (e) => {
+                const variable_id = e.target.value || null
+                const next = { enabled: Boolean(variable_id), variable_id }
+                await handleWeightConfigChange(next)
+              }}
+              className="et-select max-w-[9.5rem]"
+              title="Response weighting"
+            >
+              <option value="">No weight</option>
+              {(activeSchema?.variables ?? [])
+                .filter((v) => v.kind === 'numeric' && !v.custom)
+                .map((v) => (
+                  <option key={v.id} value={v.id}>
+                    W: {(v.code || v.text).slice(0, 18)}
+                  </option>
+                ))}
+            </select>
+
+            <select
+              value={completionStatus}
+              onChange={(e) => setCompletionStatus(e.target.value)}
+              className={`et-select ${
+                completionStatus === 'qc_approved'
+                  ? 'border-[var(--et-teal)] bg-[var(--et-teal-light)]/50 font-medium text-[var(--et-teal-dark)]'
+                  : ''
+              }`}
+              title="Response sample for analysis"
+            >
+              <option value="complete">Completed</option>
+              <option value="qc_approved">
+                QC Approved{qcSummary ? ` (${qcSummary.qc_approved_count})` : ''}
+              </option>
+              <option value="all">All responses</option>
+              <option value="incomplete">Incomplete</option>
+            </select>
+
+            {(completionStatus === 'qc_approved' || qcSummary?.has_review) && (
+              <button
+                type="button"
+                onClick={() => setMode('quality')}
+                className="inline-flex items-center gap-1 rounded-lg border border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/50 px-2.5 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] transition hover:bg-[var(--et-teal-light)]"
+                title="Review flagged responses and exclusions"
+              >
+                <ShieldCheck size={14} />
+                QC review
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Mode switcher — Analyze | Setup */}
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-lg bg-slate-100 p-0.5">
+        <div className="et-toolbar-scroll flex items-center gap-3 border-t border-slate-100 bg-slate-50/90 px-4 py-2">
+          <span className="hidden shrink-0 et-kicker lg:inline">Analyze</span>
+          <div className="et-segment">
             <ModeButton active={mode === 'explore'} onClick={() => setMode('explore')} icon={<Layers size={15} />}>
               {modeLabel('explore')}
             </ModeButton>
@@ -581,10 +703,13 @@ export function SurveyWorkspace() {
               {modeLabel('multivariate')}
             </ModeButton>
           </div>
-          <span className="hidden h-5 w-px bg-slate-300 sm:block" aria-hidden />
-          <div className="flex rounded-lg bg-slate-100 p-0.5">
+          <span className="hidden shrink-0 text-slate-300 lg:inline" aria-hidden>
+            |
+          </span>
+          <span className="hidden shrink-0 et-kicker lg:inline">Manage</span>
+          <div className="et-segment">
             <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
-              Variables
+              Setup
             </ModeButton>
             <ModeButton active={mode === 'quality'} onClick={() => setMode('quality')} icon={<ShieldCheck size={15} />}>
               Quality
@@ -594,40 +719,6 @@ export function SurveyWorkspace() {
             </ModeButton>
           </div>
         </div>
-
-        <select
-          value={weightConfig.enabled && weightConfig.variable_id ? weightConfig.variable_id : ''}
-          onChange={async (e) => {
-            const variable_id = e.target.value || null
-            const next = { enabled: Boolean(variable_id), variable_id }
-            setWeightConfig(next)
-            await api.setWeightConfig(surveyId, next)
-            invalidateSchemaCache(surveyId)
-            setSchemaVersion((v) => v + 1)
-          }}
-          className="max-w-[9rem] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
-          title="Response weighting"
-        >
-          <option value="">No weight</option>
-          {(activeSchema?.variables ?? [])
-            .filter((v) => v.kind === 'numeric' && !v.custom)
-            .map((v) => (
-              <option key={v.id} value={v.id}>
-                W: {(v.code || v.text).slice(0, 18)}
-              </option>
-            ))}
-        </select>
-
-        <select
-          value={completionStatus}
-          onChange={(e) => setCompletionStatus(e.target.value)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
-        >
-          <option value="complete">Completed</option>
-          <option value="qc_approved">QC Approved</option>
-          <option value="all">All responses</option>
-          <option value="incomplete">Incomplete</option>
-        </select>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -682,6 +773,8 @@ export function SurveyWorkspace() {
                 onFiltersChange={handleFiltersChange}
                 schemaLoading={schemaLoading}
                 onPresetApply={applyFilterPreset}
+                initialChartType={initialChartType}
+                onInitialChartTypeConsumed={clearInitialChartType}
               />
             </Suspense>
           )}
@@ -707,6 +800,8 @@ export function SurveyWorkspace() {
               schemaLoading={schemaLoading}
               enriching={enriching}
               onCompareQuestion={compareCurrentQuestion}
+              onConfigureQuestion={configureCurrentQuestion}
+              onOpenChart={openQuestionChart}
               exportingReport={exportingReport}
               onExportReport={async (format) => {
                 if (!selectedId) return
@@ -738,7 +833,9 @@ export function SurveyWorkspace() {
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <ResponseQCPanel
                     surveyId={surveyId}
+                    qcApprovedCount={qcSummary?.qc_approved_count ?? null}
                     onUseQcApproved={() => setCompletionStatus('qc_approved')}
+                    onReviewChanged={handleQcReviewChanged}
                   />
                 </div>
               </Suspense>
@@ -765,8 +862,11 @@ export function SurveyWorkspace() {
               schema={schema}
               completionStatus={completionStatus}
               username={user?.username ?? null}
+              weightConfig={weightConfig}
+              onWeightConfigChange={handleWeightConfigChange}
+              focusQuestionId={focusQuestionId}
+              onFocusQuestionConsumed={() => setFocusQuestionId(null)}
               onChanged={reloadCustomVariables}
-              onSchemaChanged={reloadSchema}
             />
           )}
 
@@ -893,9 +993,7 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
-        active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-      }`}
+      className={`et-segment-btn ${active ? 'et-segment-btn-active' : 'et-segment-btn-inactive'}`}
     >
       {icon}
       {children}
@@ -923,6 +1021,8 @@ function ExplorePanel({
   schemaLoading,
   enriching,
   onCompareQuestion,
+  onConfigureQuestion,
+  onOpenChart,
   onExportReport,
   exportingReport,
 }: {
@@ -945,6 +1045,8 @@ function ExplorePanel({
   schemaLoading: boolean
   enriching: boolean
   onCompareQuestion: () => void
+  onConfigureQuestion: () => void
+  onOpenChart: (chartType: ChartTypeId) => void
   onExportReport: (format: 'pdf' | 'pptx') => void
   exportingReport: boolean
 }) {
@@ -962,7 +1064,7 @@ function ExplorePanel({
   if (schemaLoading) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200 bg-[var(--canvas)] px-6 py-4">
+        <div className="shrink-0 border-b border-slate-200/80 bg-[var(--canvas-subtle)] px-6 py-4">
           {overview}
         </div>
         <div className="flex flex-1 flex-col gap-4 p-8">
@@ -976,7 +1078,7 @@ function ExplorePanel({
   if (!selectedVar) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200 bg-[var(--canvas)] px-6 py-4">
+        <div className="shrink-0 border-b border-slate-200/80 bg-[var(--canvas-subtle)] px-6 py-4">
           {overview}
         </div>
         <EmptyCanvas
@@ -991,7 +1093,7 @@ function ExplorePanel({
   if (enriching && !profileResult && !analyzing) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200 bg-[var(--canvas)] px-6 py-4">
+        <div className="shrink-0 border-b border-slate-200/80 bg-[var(--canvas-subtle)] px-6 py-4">
           {overview}
         </div>
         <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
@@ -1023,10 +1125,10 @@ function ExplorePanel({
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-slate-200 bg-[var(--canvas)] px-6 py-4">
+      <div className="shrink-0 border-b border-slate-200/80 bg-[var(--canvas-subtle)] px-6 py-4">
         {overview}
       </div>
-      <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
+      <div className="shrink-0 border-b border-slate-200/80 bg-white px-6 py-3 shadow-sm">
         <FilterEditor
           surveyId={surveyId}
           completionStatus={completionStatus}
@@ -1048,11 +1150,17 @@ function ExplorePanel({
               Analyzing...
             </div>
           )}
+          {selectedVar && !schemaLoading && (
+            <div className="mb-4">
+              <SuggestedCharts variable={selectedVar} onSelectChart={onOpenChart} />
+            </div>
+          )}
           {profileResult ? (
-            <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <div className="et-panel p-6 shadow-sm">
               <ProfileResults
                 result={profileResult}
                 onCompareQuestion={selectedId ? onCompareQuestion : undefined}
+                onConfigureQuestion={selectedId ? onConfigureQuestion : undefined}
                 onExportReport={selectedId ? onExportReport : undefined}
                 exportingReport={exportingReport}
               />
@@ -1457,9 +1565,9 @@ function EmptyCanvas({
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center p-12 text-center">
-      <div className="rounded-2xl bg-slate-100 p-5 text-slate-400">{icon}</div>
-      <h3 className="mt-4 text-lg font-semibold text-slate-800">{title}</h3>
-      <p className="mt-2 max-w-sm text-sm text-slate-500">{description}</p>
+      <div className="et-empty-icon">{icon}</div>
+      <h3 className="mt-5 font-display text-lg font-semibold text-slate-800">{title}</h3>
+      <p className="mt-2 max-w-sm text-sm leading-relaxed text-slate-500">{description}</p>
     </div>
   )
 }

@@ -31,7 +31,7 @@ export function SignInForm({ onSuccess, compact }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
-      className={`rounded-2xl border border-white/20 bg-white/10 p-6 shadow-2xl backdrop-blur-xl ${compact ? '' : 'sm:p-8'}`}
+      className={`rounded-2xl border border-white/20 bg-white/[0.08] p-6 shadow-2xl backdrop-blur-xl ring-1 ring-white/10 ${compact ? '' : 'sm:p-8'}`}
     >
       <div className="mb-6 flex items-center gap-3">
         <img
@@ -94,7 +94,7 @@ export function SignInForm({ onSuccess, compact }: Props) {
       <button
         type="submit"
         disabled={submitting || !password}
-        className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--et-teal)] to-[var(--et-teal-dark)] py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--et-teal)]/25 transition hover:brightness-110 disabled:opacity-50"
+        className="et-btn-primary w-full py-3"
       >
         {submitting ? <Loader2 className="animate-spin" size={18} /> : null}
         Enter dashboard

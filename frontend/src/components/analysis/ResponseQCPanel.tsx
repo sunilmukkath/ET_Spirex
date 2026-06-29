@@ -18,17 +18,22 @@ import {
   enabledChecksFromDisabled,
   exportFlaggedCsv,
   isCheckAvailable,
+  isIncludedInQcSample,
   normalizeQcResult,
   QC_CHECKS,
   qcCacheKey,
+  setQcSampleInclusion,
   type QcCheckId,
   type QcFlaggedRow,
+  type QcReviewState,
 } from '../../lib/qcHelpers'
 import { ErrorState } from '../States'
 
 interface Props {
   surveyId: number
   onUseQcApproved?: () => void
+  onReviewChanged?: () => void
+  qcApprovedCount?: number | null
 }
 
 function loadCached(surveyId: number): { result: DataQualityResult; at: number } | null {
@@ -54,15 +59,20 @@ function saveCached(surveyId: number, result: DataQualityResult) {
   }
 }
 
-export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
+export function ResponseQCPanel({ surveyId, onUseQcApproved, onReviewChanged, qcApprovedCount }: Props) {
   return (
     <QcErrorBoundary onReset={() => sessionStorage.removeItem(qcCacheKey(surveyId))}>
-      <ResponseQCPanelInner surveyId={surveyId} onUseQcApproved={onUseQcApproved} />
+      <ResponseQCPanelInner
+        surveyId={surveyId}
+        onUseQcApproved={onUseQcApproved}
+        onReviewChanged={onReviewChanged}
+        qcApprovedCount={qcApprovedCount}
+      />
     </QcErrorBoundary>
   )
 }
 
-function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
+function ResponseQCPanelInner({ surveyId, onUseQcApproved, onReviewChanged, qcApprovedCount }: Props) {
   const [result, setResult] = useState<DataQualityResult | null>(() => loadCached(surveyId)?.result ?? null)
   const [lastRunAt, setLastRunAt] = useState<number | null>(() => loadCached(surveyId)?.at ?? null)
   const [loading, setLoading] = useState(false)
@@ -73,8 +83,37 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
     () => new Set(QC_CHECKS.map((c) => c.id)),
   )
   const [configLoading, setConfigLoading] = useState(true)
+  const [review, setReview] = useState<QcReviewState>({ kept: new Set(), excluded: new Set() })
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [reviewSaving, setReviewSaving] = useState(false)
 
   const surveyReady = Number.isFinite(surveyId) && surveyId > 0
+
+  const persistReview = useCallback(
+    async (nextReview: QcReviewState, checks: Set<QcCheckId>) => {
+      setReview(nextReview)
+      setReviewSaving(true)
+      try {
+        await api.setQcConfig(surveyId, {
+          disabled_checks: disabledChecksFromEnabled(checks),
+          kept_response_ids: [...nextReview.kept],
+          excluded_response_ids: [...nextReview.excluded],
+        })
+        onReviewChanged?.()
+      } catch {
+        const cfg = await api.getQcConfig(surveyId).catch(() => null)
+        if (cfg) {
+          setReview({
+            kept: new Set(cfg.kept_response_ids ?? []),
+            excluded: new Set(cfg.excluded_response_ids ?? []),
+          })
+        }
+      } finally {
+        setReviewSaving(false)
+      }
+    },
+    [surveyId, onReviewChanged],
+  )
 
   useEffect(() => {
     const cached = loadCached(surveyId)
@@ -94,6 +133,10 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
       .then((cfg) => {
         if (!cancelled) {
           setEnabledChecks(enabledChecksFromDisabled(cfg.disabled_checks ?? []))
+          setReview({
+            kept: new Set(cfg.kept_response_ids ?? []),
+            excluded: new Set(cfg.excluded_response_ids ?? []),
+          })
         }
       })
       .catch(() => {
@@ -123,13 +166,14 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
         const at = Date.now()
         setLastRunAt(at)
         saveCached(surveyId, data)
+        onReviewChanged?.()
       } catch (err) {
         setError(err instanceof Error ? err.message : 'QC scan failed')
       } finally {
         setLoading(false)
       }
     },
-    [surveyId, surveyReady],
+    [surveyId, surveyReady, onReviewChanged],
   )
 
   const toggleCheck = useCallback(
@@ -139,12 +183,17 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
       else next.delete(checkId)
       setEnabledChecks(next)
       try {
-        await api.setQcConfig(surveyId, disabledChecksFromEnabled(next))
+        await api.setQcConfig(surveyId, {
+          disabled_checks: disabledChecksFromEnabled(next),
+          kept_response_ids: [...review.kept],
+          excluded_response_ids: [...review.excluded],
+        })
+        onReviewChanged?.()
       } catch {
         setEnabledChecks(enabledChecks)
       }
     },
-    [enabledChecks, surveyId],
+    [enabledChecks, review, surveyId, onReviewChanged],
   )
 
   const metrics = useMemo(() => {
@@ -167,6 +216,49 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
 
   const enabledFlaggedCount = exportRows.length
 
+  const flaggedIdSet = useMemo(
+    () => new Set(exportRows.map((row) => row.response_id)),
+    [exportRows],
+  )
+
+  const excludedFromSampleCount = useMemo(() => {
+    return exportRows.filter((row) => !isIncludedInQcSample(row.response_id, flaggedIdSet, review)).length
+  }, [exportRows, flaggedIdSet, review])
+
+  const setInclusion = useCallback(
+    (responseId: string, include: boolean) => {
+      const next = setQcSampleInclusion(responseId, include, flaggedIdSet, review)
+      void persistReview(next, enabledChecks)
+    },
+    [flaggedIdSet, review, persistReview, enabledChecks],
+  )
+
+  const applyBulkInclusion = useCallback(
+    (include: boolean) => {
+      let next = review
+      for (const id of selectedIds) {
+        next = setQcSampleInclusion(id, include, flaggedIdSet, next)
+      }
+      void persistReview(next, enabledChecks)
+      setSelectedIds(new Set())
+    },
+    [selectedIds, flaggedIdSet, review, persistReview, enabledChecks],
+  )
+
+  const resetReview = useCallback(() => {
+    void persistReview({ kept: new Set(), excluded: new Set() }, enabledChecks)
+    setSelectedIds(new Set())
+  }, [persistReview, enabledChecks])
+
+  const toggleSelected = useCallback((responseId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(responseId)) next.delete(responseId)
+      else next.add(responseId)
+      return next
+    })
+  }, [])
+
   const filteredRows = useMemo(() => {
     let rows = activeRows
     const q = search.trim().toLowerCase()
@@ -180,6 +272,10 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
     }
     return rows
   }, [activeRows, search])
+
+  const selectAllVisible = useCallback(() => {
+    setSelectedIds(new Set(filteredRows.map((row) => row.response_id)))
+  }, [filteredRows])
 
   if (!surveyReady) {
     return (
@@ -278,7 +374,7 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {onUseQcApproved && metrics.flagged > 0 && (
+            {onUseQcApproved && result && (
               <button
                 type="button"
                 onClick={onUseQcApproved}
@@ -286,6 +382,11 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
               >
                 <CheckCircle2 size={14} />
                 Use QC Approved sample
+                {qcApprovedCount != null && (
+                  <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] tabular-nums">
+                    {qcApprovedCount}
+                  </span>
+                )}
               </button>
             )}
             {exportRows.length > 0 && (
@@ -334,12 +435,29 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <SummaryTile label="Sample size" value={metrics.total} />
           <SummaryTile label="Passed QC" value={metrics.clean} tone="pass" />
           <SummaryTile label="Failed QC" value={metrics.flagged} tone="fail" />
+          <SummaryTile
+            label="QC Approved sample"
+            value={qcApprovedCount ?? '—'}
+            tone="pass"
+          />
           <SummaryTile label="Pass rate" value={`${metrics.passRate.toFixed(1)}%`} />
         </div>
+
+        {(review.kept.size > 0 || review.excluded.size > 0) && (
+          <p className="text-xs text-slate-500">
+            Manual review: {review.kept.size} flagged kept · {review.excluded.size} excluded
+            {reviewSaving && ' · saving…'}
+            {!reviewSaving && (
+              <button type="button" onClick={resetReview} className="ml-2 text-[var(--et-teal-dark)] hover:underline">
+                Reset to auto
+              </button>
+            )}
+          </p>
+        )}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -452,22 +570,54 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
 
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
-            <h3 className="text-sm font-semibold text-slate-800">
-              Flagged records ({filteredRows.length}
-              {filterCheck !== 'all' || search ? ` of ${activeRows.length}` : ''})
-            </h3>
-            <div className="relative">
-              <Search
-                size={14}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search ID or detail…"
-                className="w-48 rounded-lg border border-slate-200 py-1.5 pl-8 pr-3 text-xs outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
-              />
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">
+                Flagged records ({filteredRows.length}
+                {filterCheck !== 'all' || search ? ` of ${activeRows.length}` : ''})
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Uncheck to remove from QC Approved analysis · {excludedFromSampleCount} excluded by default
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedIds.size > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => applyBulkInclusion(false)}
+                    className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-800 hover:bg-rose-100"
+                  >
+                    Exclude selected ({selectedIds.size})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyBulkInclusion(true)}
+                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                  >
+                    Keep selected
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={selectAllVisible}
+                className="text-xs font-medium text-slate-500 hover:text-slate-700"
+              >
+                Select all
+              </button>
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search ID or detail…"
+                  className="w-48 rounded-lg border border-slate-200 py-1.5 pl-8 pr-3 text-xs outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
+                />
+              </div>
             </div>
           </div>
           {filteredRows.length === 0 ? (
@@ -482,6 +632,8 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
+                    <th className="w-10 px-3 py-2" aria-label="Select" />
+                    <th className="px-3 py-2 font-semibold">In QC sample</th>
                     <th className="px-5 py-2 font-semibold">Response ID</th>
                     <th className="px-5 py-2 font-semibold">Checks</th>
                     <th className="px-5 py-2 font-semibold">Severity</th>
@@ -490,7 +642,14 @@ function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
                 </thead>
                 <tbody>
                   {filteredRows.map((row) => (
-                    <FlaggedTableRow key={row.response_id} row={row} />
+                    <FlaggedTableRow
+                      key={row.response_id}
+                      row={row}
+                      selected={selectedIds.has(row.response_id)}
+                      included={isIncludedInQcSample(row.response_id, flaggedIdSet, review)}
+                      onToggleSelected={() => toggleSelected(row.response_id)}
+                      onToggleInclusion={(include) => setInclusion(row.response_id, include)}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -578,9 +737,43 @@ function SeverityBadge({ severity }: { severity: 'high' | 'medium' | 'low' }) {
   )
 }
 
-function FlaggedTableRow({ row }: { row: QcFlaggedRow }) {
+function FlaggedTableRow({
+  row,
+  selected,
+  included,
+  onToggleSelected,
+  onToggleInclusion,
+}: {
+  row: QcFlaggedRow
+  selected: boolean
+  included: boolean
+  onToggleSelected: () => void
+  onToggleInclusion: (include: boolean) => void
+}) {
   return (
-    <tr className="border-t border-slate-50 hover:bg-slate-50/50">
+    <tr className={`border-t border-slate-50 hover:bg-slate-50/50 ${!included ? 'bg-rose-50/30' : ''}`}>
+      <td className="px-3 py-2.5">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelected}
+          className="h-4 w-4 rounded border-slate-300 text-[var(--et-teal)] focus:ring-[var(--et-teal)]"
+          aria-label={`Select response ${row.response_id}`}
+        />
+      </td>
+      <td className="px-3 py-2.5">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={included}
+            onChange={(e) => onToggleInclusion(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-[var(--et-teal)] focus:ring-[var(--et-teal)]"
+          />
+          <span className={included ? 'text-emerald-700' : 'text-rose-700'}>
+            {included ? 'Include' : 'Excluded'}
+          </span>
+        </label>
+      </td>
       <td className="px-5 py-2.5 font-mono text-xs font-medium text-slate-800">
         {row.response_id}
       </td>

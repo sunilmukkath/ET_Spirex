@@ -47,7 +47,7 @@ def _compute_scale_metrics(var: dict[str, Any], df: pd.DataFrame) -> dict[str, A
     kind = var.get("kind")
     metrics: dict[str, Any] = {}
 
-    if kind in ("single", "rank") or var.get("treat_as_categorical"):
+    if kind in ("single", "rank"):
         series = df[col].dropna().astype(str).str.strip()
         canonical = series.map(lambda v: canonical_answer_code(var, v))
         valid = canonical != ""
@@ -124,6 +124,40 @@ def run_question_profile(
         return {"error": "No responses match the selected filters"}
 
     kind = variable["kind"]
+    if kind == "text":
+        from app.services.location_detect import (
+            find_combined_gps_column,
+            find_lat_lng_columns,
+        )
+
+        pair = find_lat_lng_columns(
+            str(variable.get("code") or ""),
+            list(df.columns),
+            qid=variable.get("qid"),
+        )
+        combined = find_combined_gps_column(
+            str(variable.get("code") or ""),
+            str(variable.get("text") or ""),
+            list(df.columns),
+            qid=variable.get("qid"),
+        )
+        if pair or combined:
+            kind = "location"
+            if pair:
+                variable = {
+                    **variable,
+                    "kind": "location",
+                    "lat_column": pair[0],
+                    "lng_column": pair[1],
+                }
+            elif combined:
+                variable = {
+                    **variable,
+                    "kind": "location",
+                    "lat_column": combined,
+                    "lng_column": "",
+                }
+
     if kind == "single":
         return _profile_single(variable, df)
     if kind == "multi":
@@ -1267,30 +1301,58 @@ def _profile_text(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
 
 
 def _profile_location(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
-    lat_col = var.get("lat_column") or ""
-    lng_col = var.get("lng_column") or ""
+    from app.services.location_detect import (
+        extract_gps_points,
+        find_combined_gps_column,
+        find_lat_lng_columns,
+    )
+
+    lat_col = str(var.get("lat_column") or "")
+    lng_col = str(var.get("lng_column") or "")
+    combined_col = ""
+
+    if lat_col and not lng_col:
+        combined_col = lat_col
+        lat_col = ""
+        lng_col = ""
+
     if not lat_col or not lng_col:
-        pair_cols = [c for c in var.get("columns") or [] if c in df.columns]
-        if len(pair_cols) >= 2:
-            lat_col, lng_col = pair_cols[0], pair_cols[1]
-        else:
-            return {"error": "No GPS columns found", "variable": _var_summary(var)}
+        if not combined_col:
+            pair = find_lat_lng_columns(
+                str(var.get("code") or ""),
+                list(df.columns),
+                qid=var.get("qid"),
+            )
+            if pair:
+                lat_col, lng_col = pair
+            else:
+                combined_col = find_combined_gps_column(
+                    str(var.get("code") or ""),
+                    str(var.get("text") or ""),
+                    list(df.columns),
+                    qid=var.get("qid"),
+                ) or ""
+                for col in var.get("columns") or []:
+                    if col in df.columns and col not in {lat_col, lng_col}:
+                        combined_col = str(col)
+                        break
 
-    if lat_col not in df.columns or lng_col not in df.columns:
+    if not lat_col and not lng_col and not combined_col:
+        return {"error": "No GPS columns found", "variable": _var_summary(var)}
+
+    if lat_col and lng_col and (lat_col not in df.columns or lng_col not in df.columns):
+        if not combined_col:
+            return {"error": "GPS columns missing in response data", "variable": _var_summary(var)}
+
+    points = extract_gps_points(
+        df,
+        lat_column=lat_col,
+        lng_column=lng_col,
+        combined_column=combined_col,
+    )
+
+    if not points and lat_col and lng_col:
         return {"error": "GPS columns missing in response data", "variable": _var_summary(var)}
-
-    points: list[dict[str, float]] = []
-    for _, row in df.iterrows():
-        lat = pd.to_numeric(row.get(lat_col), errors="coerce")
-        lng = pd.to_numeric(row.get(lng_col), errors="coerce")
-        if pd.isna(lat) or pd.isna(lng):
-            continue
-        lat_f, lng_f = float(lat), float(lng)
-        if not (-90 <= lat_f <= 90 and -180 <= lng_f <= 180):
-            continue
-        if lat_f == 0 and lng_f == 0:
-            continue
-        points.append({"lat": lat_f, "lng": lng_f})
 
     bounds = None
     if points:

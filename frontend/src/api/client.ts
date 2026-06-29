@@ -63,8 +63,6 @@ export interface SurveyVariable {
   lng_column?: string
   custom?: boolean
   source_variable_id?: string
-  treat_as_categorical?: boolean
-  original_kind?: string
 }
 
 export interface CategoryMapping {
@@ -648,12 +646,37 @@ export const api = {
       ANALYSIS_TIMEOUT_MS,
     ),
   getQcConfig: (id: number) =>
-    fetchJson<{ disabled_checks: string[] }>(`/api/projects/${id}/qc/config`),
-  setQcConfig: (id: number, disabledChecks: string[]) =>
-    fetchJson<{ disabled_checks: string[] }>(`/api/projects/${id}/qc/config`, {
+    fetchJson<{
+      disabled_checks: string[]
+      kept_response_ids: string[]
+      excluded_response_ids: string[]
+    }>(`/api/projects/${id}/qc/config`),
+  getQcSummary: (id: number) =>
+    fetchJson<{
+      total_completed: number
+      auto_flagged_count: number
+      excluded_count: number
+      qc_approved_count: number
+      kept_flagged_count: number
+      manual_excluded_count: number
+      has_review: boolean
+    }>(`/api/projects/${id}/qc/summary`),
+  setQcConfig: (
+    id: number,
+    body: {
+      disabled_checks: string[]
+      kept_response_ids?: string[]
+      excluded_response_ids?: string[]
+    },
+  ) =>
+    fetchJson<{
+      disabled_checks: string[]
+      kept_response_ids: string[]
+      excluded_response_ids: string[]
+    }>(`/api/projects/${id}/qc/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ disabled_checks: disabledChecks }),
+      body: JSON.stringify(body),
     }),
   getCustomVariables: (id: number) =>
     fetchJson<{ variables: CustomVariable[] }>(`/api/projects/${id}/variables/custom`),
@@ -689,17 +712,6 @@ export const api = {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ variables }),
-      },
-    ),
-  getKindOverrides: (id: number) =>
-    fetchJson<{ overrides: Record<string, boolean> }>(`/api/projects/${id}/variables/kind-overrides`),
-  setKindOverride: (id: number, variableId: string, treatAsCategorical: boolean) =>
-    fetchJson<{ overrides: Record<string, boolean>; saved: boolean }>(
-      `/api/projects/${id}/variables/${variableId}/kind-override`,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ treat_as_categorical: treatAsCategorical }),
       },
     ),
   getFilterPresets: (id: number) =>

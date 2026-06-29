@@ -19,21 +19,25 @@ import {
   type CustomVariableType,
   type SurveySchema,
   type SurveyVariable,
+  type WeightConfig,
 } from '../../api/client'
 import {
   loadCustomVariableBackup,
   saveCustomVariableBackup,
 } from '../../lib/customVariableBackup'
 import { EmptyState, ErrorState } from '../States'
-import { KindOverrideSection } from './KindOverrideSection'
+import { QuestionSetupPanel, buildVariableFormFromSource } from './QuestionSetupPanel'
 
 interface Props {
   surveyId: number
   schema: SurveySchema | null
   completionStatus: string
   username?: string | null
+  weightConfig: WeightConfig
+  onWeightConfigChange: (config: WeightConfig) => Promise<void>
+  focusQuestionId?: string | null
+  onFocusQuestionConsumed?: () => void
   onChanged?: () => void
-  onSchemaChanged?: () => void
 }
 
 const EMPTY_FORM: CustomVariableInput = {
@@ -106,7 +110,18 @@ function typeLabel(v: CustomVariable): string {
   return 'Recode'
 }
 
-export function VariablesPanel({ surveyId, schema, completionStatus, username, onChanged, onSchemaChanged }: Props) {
+export function VariablesPanel({
+  surveyId,
+  schema,
+  completionStatus,
+  username,
+  weightConfig,
+  onWeightConfigChange,
+  focusQuestionId,
+  onFocusQuestionConsumed,
+  onChanged,
+}: Props) {
+  const [pageTab, setPageTab] = useState<'questions' | 'custom'>('questions')
   const [variables, setVariables] = useState<CustomVariable[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -186,13 +201,23 @@ export function VariablesPanel({ surveyId, schema, completionStatus, username, o
   }, [combineCandidates, form.source_variable_ids, inferredSharedCodes])
 
   function openCreate() {
+    setPageTab('custom')
     setCreating(true)
     setEditing(null)
     setForm(EMPTY_FORM)
     setPreview(null)
   }
 
+  function openCreateFromQuestion(type: CustomVariableType, source: SurveyVariable) {
+    setPageTab('custom')
+    setCreating(true)
+    setEditing(null)
+    setForm({ ...EMPTY_FORM, ...buildVariableFormFromSource(type, source) })
+    setPreview(null)
+  }
+
   function openEdit(v: CustomVariable) {
+    setPageTab('custom')
     setEditing(v)
     setCreating(false)
     setForm({
@@ -353,6 +378,12 @@ export function VariablesPanel({ surveyId, schema, completionStatus, username, o
     }
   }
 
+  useEffect(() => {
+    if (focusQuestionId) {
+      setPageTab('questions')
+    }
+  }, [focusQuestionId])
+
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center p-8">
@@ -364,35 +395,67 @@ export function VariablesPanel({ surveyId, schema, completionStatus, username, o
   const showForm = creating || editing
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
+    <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-6 et-scroll">
       <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="et-panel flex flex-wrap items-start justify-between gap-4 p-5">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Variable wrangler</h2>
+            <h2 className="et-section-title">Question & variable setup</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Recode answers, combine similar awareness questions, or build net scores. Saved variables appear in Explore, Crosstabs, and Data.
+              Set response weights, recodes, net scores, and combined nets per question.
             </p>
           </div>
-          {!showForm && (
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-xl bg-[var(--et-teal)] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:brightness-110"
-            >
-              <Plus size={16} /> New variable
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="et-segment">
+              <button
+                type="button"
+                onClick={() => setPageTab('questions')}
+                className={`et-segment-btn text-xs ${
+                  pageTab === 'questions' ? 'et-segment-btn-active' : 'et-segment-btn-inactive'
+                }`}
+              >
+                Questions
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageTab('custom')}
+                className={`et-segment-btn text-xs ${
+                  pageTab === 'custom' ? 'et-segment-btn-active' : 'et-segment-btn-inactive'
+                }`}
+              >
+                Custom variables ({variables.length})
+              </button>
+            </div>
+            {pageTab === 'custom' && !showForm && (
+              <button
+                type="button"
+                onClick={openCreate}
+                className="inline-flex items-center gap-2 rounded-xl bg-[var(--et-teal)] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:brightness-110"
+              >
+                <Plus size={16} /> New variable
+              </button>
+            )}
+          </div>
         </div>
 
         {error && <ErrorState message={error} />}
 
-        <KindOverrideSection
-          surveyId={surveyId}
-          variables={schema?.variables ?? []}
-          onChanged={onSchemaChanged}
-        />
+        {pageTab === 'questions' && (
+          <QuestionSetupPanel
+            variables={schema?.variables ?? []}
+            groups={schema?.groups ?? []}
+            customVariables={variables}
+            weightConfig={weightConfig}
+            onWeightConfigChange={onWeightConfigChange}
+            focusQuestionId={focusQuestionId}
+            onFocusQuestionConsumed={onFocusQuestionConsumed}
+            onCreateVariable={openCreateFromQuestion}
+            onEditVariable={openEdit}
+          />
+        )}
 
-        {showForm ? (
+        {pageTab === 'custom' && (
+          <>
+            {showForm ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-5 flex items-center justify-between">
               <h3 className="font-semibold text-slate-900">{editing ? 'Edit variable' : 'Create variable'}</h3>
@@ -769,6 +832,8 @@ export function VariablesPanel({ surveyId, schema, completionStatus, username, o
               <VariableCard key={v.id} v={v} schema={schema} onEdit={() => openEdit(v)} onDelete={() => handleDelete(v.id)} />
             ))}
           </div>
+        )}
+          </>
         )}
       </div>
     </div>
