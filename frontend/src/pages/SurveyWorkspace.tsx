@@ -1382,8 +1382,12 @@ function CrosstabsPanel({
           />
         )}
         {analyzing && (
-          <div className="flex items-center justify-center py-20">
+          <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
             <Loader2 className="animate-spin text-[var(--et-teal)]" size={32} />
+            <p className="text-sm font-medium text-slate-700">Building crosstab…</p>
+            <p className="max-w-sm text-xs text-slate-500">
+              First run can take up to 2–3 minutes while response data loads from LimeSurvey.
+            </p>
           </div>
         )}
         {bannerResult && !analyzing && (

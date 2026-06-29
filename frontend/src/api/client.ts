@@ -432,10 +432,19 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 const API_TIMEOUT_MS = 12_000
+const ANALYSIS_TIMEOUT_MS = 180_000
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+async function fetchJson<T>(
+  url: string,
+  init?: RequestInit,
+  timeoutMs: number = API_TIMEOUT_MS,
+): Promise<T> {
   const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+  let timedOut = false
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
 
   if (init?.signal) {
     init.signal.addEventListener('abort', () => controller.abort(), { once: true })
@@ -449,18 +458,24 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      throw new Error(body.detail || `Request failed (${res.status})`)
+      throw new Error(body.detail || body.error || `Request failed (${res.status})`)
     }
     return res.json()
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error(
-        'Cannot reach the ET Scout server. If running locally, start the backend on port 8000.',
-      )
+      if (init?.signal?.aborted && !timedOut) {
+        throw new Error('Request cancelled')
+      }
+      if (timedOut) {
+        throw new Error(
+          'Request timed out. Crosstabs and large surveys can take up to 3 minutes on first run — please wait and try again.',
+        )
+      }
+      throw new Error('Request was cancelled.')
     }
     if (err instanceof TypeError) {
       throw new Error(
-        'Network error — is the backend running? Use: cd backend && uvicorn app.main:app --port 8000',
+        'Network error — check your connection or try again in a moment.',
       )
     }
     throw err
@@ -531,6 +546,7 @@ export const api = {
     const data = await fetchJson<SurveySchema>(
       `/api/projects/${id}/schema?completion_status=${completionStatus}&light=${light}`,
       { signal },
+      light ? API_TIMEOUT_MS : ANALYSIS_TIMEOUT_MS,
     )
     schemaCache.set(key, { at: Date.now(), data })
     return data
@@ -543,17 +559,21 @@ export const api = {
     signal?: AbortSignal,
     filterTree?: FilterGroup | null,
   ) =>
-    fetchJson<ProfileResult>(`/api/projects/${id}/analysis/profile`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        variable_id: variableId,
-        completion_status: completionStatus,
-        filters: filterTree ? [] : filters,
-        filter_tree: filterTree ?? null,
-      }),
-      signal,
-    }),
+    fetchJson<ProfileResult>(
+      `/api/projects/${id}/analysis/profile`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          variable_id: variableId,
+          completion_status: completionStatus,
+          filters: filterTree ? [] : filters,
+          filter_tree: filterTree ?? null,
+        }),
+        signal,
+      },
+      ANALYSIS_TIMEOUT_MS,
+    ),
   runChart: (
     id: number,
     query: {
@@ -569,22 +589,26 @@ export const api = {
     },
     signal?: AbortSignal,
   ) =>
-    fetchJson<ProfileResult & BannerResult>(`/api/projects/${id}/analysis/chart`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        variable_id: query.variableId,
-        completion_status: query.completionStatus ?? 'complete',
-        filters: query.filterTree ? [] : (query.filters ?? []),
-        filter_tree: query.filterTree ?? null,
-        chart_type: query.chartType ?? 'auto',
-        bins: query.bins ?? 10,
-        banner_variable_id: query.bannerVariableId || null,
-        y_variable_id: query.yVariableId || null,
-        z_variable_id: query.zVariableId || null,
-      }),
-      signal,
-    }),
+    fetchJson<ProfileResult & BannerResult>(
+      `/api/projects/${id}/analysis/chart`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          variable_id: query.variableId,
+          completion_status: query.completionStatus ?? 'complete',
+          filters: query.filterTree ? [] : (query.filters ?? []),
+          filter_tree: query.filterTree ?? null,
+          chart_type: query.chartType ?? 'auto',
+          bins: query.bins ?? 10,
+          banner_variable_id: query.bannerVariableId || null,
+          y_variable_id: query.yVariableId || null,
+          z_variable_id: query.zVariableId || null,
+        }),
+        signal,
+      },
+      ANALYSIS_TIMEOUT_MS,
+    ),
   warmupSurvey: (id: number, completionStatus = 'complete') =>
     fetchJson<{ ok: boolean }>(
       `/api/projects/${id}/warmup?completion_status=${encodeURIComponent(completionStatus)}`,
@@ -597,6 +621,8 @@ export const api = {
   getDataQuality: (id: number, completionStatus = 'complete', refresh = false) =>
     fetchJson<DataQualityResult>(
       `/api/projects/${id}/analysis/quality?completion_status=${completionStatus}${refresh ? '&refresh=true' : ''}`,
+      undefined,
+      ANALYSIS_TIMEOUT_MS,
     ),
   getCustomVariables: (id: number) =>
     fetchJson<{ variables: CustomVariable[] }>(`/api/projects/${id}/variables/custom`),
@@ -751,14 +777,18 @@ export const api = {
     URL.revokeObjectURL(url)
   },
   runBanner: (id: number, request: BannerRequest) =>
-    fetchJson<BannerResult>(`/api/projects/${id}/analysis/banner`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...request,
-        filters: request.filter_tree ? [] : (request.filters ?? []),
-      }),
-    }),
+    fetchJson<BannerResult>(
+      `/api/projects/${id}/analysis/banner`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...request,
+          filters: request.filter_tree ? [] : (request.filters ?? []),
+        }),
+      },
+      ANALYSIS_TIMEOUT_MS,
+    ),
   runAdvancedAnalysis: (
     id: number,
     body: {
@@ -774,11 +804,15 @@ export const api = {
       method?: string
     },
   ) =>
-    fetchJson<AdvancedAnalysisResult>(`/api/projects/${id}/analysis/advanced`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }),
+    fetchJson<AdvancedAnalysisResult>(
+      `/api/projects/${id}/analysis/advanced`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      ANALYSIS_TIMEOUT_MS,
+    ),
   exportBanner: async (id: number, request: BannerRequest, filename = 'crosstab.xlsx') => {
     const res = await fetch(`/api/projects/${id}/analysis/banner/export`, {
       method: 'POST',
