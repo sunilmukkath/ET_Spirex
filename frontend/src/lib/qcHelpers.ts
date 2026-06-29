@@ -72,7 +72,10 @@ export function checkCount(id: QcCheckId, result: DataQualityResult): number {
   return result.gibberish?.count ?? 0
 }
 
-export function aggregateFlaggedRows(result: DataQualityResult): QcFlaggedRow[] {
+export function aggregateFlaggedRows(
+  result: DataQualityResult,
+  includeChecks?: Set<QcCheckId>,
+): QcFlaggedRow[] {
   const byId = new Map<string, QcFlaggedRow>()
 
   function add(
@@ -81,6 +84,7 @@ export function aggregateFlaggedRows(result: DataQualityResult): QcFlaggedRow[] 
     severity: 'high' | 'medium' | 'low',
     detail: string,
   ) {
+    if (includeChecks && !includeChecks.has(check)) return
     const id = String(responseId)
     const existing = byId.get(id)
     if (existing) {
@@ -127,6 +131,31 @@ export function aggregateFlaggedRows(result: DataQualityResult): QcFlaggedRow[] 
     if (sev !== 0) return sev
     return a.response_id.localeCompare(b.response_id, undefined, { numeric: true })
   })
+}
+
+export function computeQcMetrics(
+  result: DataQualityResult,
+  enabledChecks: Set<QcCheckId>,
+) {
+  const total = result.total_responses ?? 0
+  const rows = aggregateFlaggedRows(result, enabledChecks)
+  const flagged = rows.length
+  const clean = Math.max(0, total - flagged)
+  const passRate = total > 0 ? (clean / total) * 100 : 100
+  return { total, flagged, clean, passRate }
+}
+
+export function allCheckIds(): QcCheckId[] {
+  return QC_CHECKS.map((c) => c.id)
+}
+
+export function enabledChecksFromDisabled(disabled: string[]): Set<QcCheckId> {
+  const disabledSet = new Set(disabled)
+  return new Set(QC_CHECKS.map((c) => c.id).filter((id) => !disabledSet.has(id)))
+}
+
+export function disabledChecksFromEnabled(enabled: Set<QcCheckId>): string[] {
+  return QC_CHECKS.map((c) => c.id).filter((id) => !enabled.has(id))
 }
 
 export function exportFlaggedCsv(rows: QcFlaggedRow[], filename = 'qc_flagged.csv') {

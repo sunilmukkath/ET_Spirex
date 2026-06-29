@@ -15,9 +15,26 @@ from app.services.survey_text import clean_survey_text
 _QUALITY_CACHE: dict[int, tuple[float, dict[str, Any]]] = {}
 _QUALITY_TTL_SECONDS = 300
 
-_GIBBERISH_RE = re.compile(
-    r"^(.)\1{4,}$|^[asdfghjklqwertyuiopzxcvbnm]{6,}$|^(ha|lol|test|none|na|n/a|xxx|\.|-)+$",
-    re.IGNORECASE,
+_GIBBERISH_EXACT = {
+    "na", "n/a", "none", "lol", "xxx", "test", "ha", ".", "-", "asdf", "qwerty",
+}
+_NAME_HINTS = (
+    "name",
+    "firstname",
+    "first name",
+    "lastname",
+    "last name",
+    "surname",
+    "fullname",
+    "full name",
+    "respondent",
+    "participant",
+    "contact name",
+    "your name",
+    "fname",
+    "lname",
+    "middle name",
+    "middlename",
 )
 _TEST_RE = re.compile(
     r"\b(test(ing)?|dummy|fake|sample|null|delete|asdf|qwerty|xxx+|placeholder|not real|no answer)\b",
@@ -532,6 +549,8 @@ def _detect_gibberish(
     for var in schema.get("variables", []):
         if var.get("kind") != "text":
             continue
+        if _is_name_field(var):
+            continue
         col = next((col_index[c] for c in var.get("columns") or [] if c in col_index), None)
         if not col:
             continue
@@ -540,7 +559,9 @@ def _detect_gibberish(
             text = str(raw).strip()
             if len(text) < _MIN_TEXT_LEN:
                 continue
-            if _GIBBERISH_RE.match(text) or _is_keyboard_mash(text):
+            if _looks_like_person_name(text):
+                continue
+            if _is_gibberish_text(text) or _is_keyboard_mash(text):
                 flags.append({
                     "response_id": safe_response_id(df.at[idx, id_col] if id_col else None, idx),
                     "variable_id": str(var.get("id") or ""),
@@ -561,13 +582,54 @@ def _normalize_cell(value: Any) -> str | None:
     return text
 
 
+def _is_name_field(var: dict[str, Any]) -> bool:
+    parts = [
+        str(var.get("text") or ""),
+        str(var.get("code") or ""),
+        str(var.get("id") or ""),
+    ]
+    combined = " ".join(parts).lower()
+    return any(h in combined for h in _NAME_HINTS)
+
+
+def _looks_like_person_name(text: str) -> bool:
+    s = text.strip()
+    if len(s) < 2 or len(s) > 80:
+        return False
+    if not re.match(r"^[\w\s'.-]+$", s, re.UNICODE):
+        return False
+    words = [w for w in re.split(r"\s+", s) if w]
+    if not words or len(words) > 5:
+        return False
+    letters = re.sub(r"[^a-zA-Z]", "", s)
+    if len(letters) < 2:
+        return False
+    if any(w[0].isupper() for w in words if w and w[0].isalpha()):
+        return True
+    return len(words) <= 3 and all(1 <= len(w) <= 24 for w in words)
+
+
+def _is_gibberish_text(text: str) -> bool:
+    s = text.strip()
+    low = s.lower()
+    if low in _GIBBERISH_EXACT:
+        return True
+    if re.fullmatch(r"(.)\1{4,}", s):
+        return True
+    if re.fullmatch(r"[asdfghjklqwertyuiopzxcvbnm]{6,}", s, re.IGNORECASE):
+        return True
+    return False
+
+
 def _is_keyboard_mash(text: str) -> bool:
+    if _looks_like_person_name(text):
+        return False
     letters = re.sub(r"[^a-zA-Z]", "", text.lower())
-    if len(letters) < 5:
+    if len(letters) < 8:
         return False
     vowels = sum(1 for c in letters if c in "aeiou")
     if vowels == 0:
         return True
-    if len(letters) >= 8 and vowels / len(letters) < 0.08:
+    if len(letters) >= 10 and vowels / len(letters) < 0.08:
         return True
     return False

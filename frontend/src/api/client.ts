@@ -624,6 +624,14 @@ export const api = {
       undefined,
       ANALYSIS_TIMEOUT_MS,
     ),
+  getQcConfig: (id: number) =>
+    fetchJson<{ disabled_checks: string[] }>(`/api/projects/${id}/qc/config`),
+  setQcConfig: (id: number, disabledChecks: string[]) =>
+    fetchJson<{ disabled_checks: string[] }>(`/api/projects/${id}/qc/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disabled_checks: disabledChecks }),
+    }),
   getCustomVariables: (id: number) =>
     fetchJson<{ variables: CustomVariable[] }>(`/api/projects/${id}/variables/custom`),
   createCustomVariable: (id: number, body: CustomVariableInput) =>

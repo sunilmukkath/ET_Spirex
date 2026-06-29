@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from app.services.data_quality import response_id_column, safe_response_id
+from app.services.qc_config_store import ALL_CHECK_IDS
 
 QC_APPROVED_STATUS = "qc_approved"
 LIMESURVEY_EXPORT_STATUSES = frozenset({"complete", "all", "incomplete"})
@@ -26,15 +27,23 @@ def invalidate_flagged_cache(survey_id: int) -> None:
     _FLAGGED_CACHE.pop(survey_id, None)
 
 
-def collect_flagged_ids(quality_result: dict[str, Any]) -> set[str]:
+def collect_flagged_ids(
+    quality_result: dict[str, Any],
+    *,
+    disabled_checks: frozenset[str] | None = None,
+) -> set[str]:
+    disabled = disabled_checks or frozenset()
     flagged: set[str] = set()
-    for key in (
+    check_keys = (
         "speeders",
         "test_responses",
         "duplicate_phones",
         "straight_liners",
         "gibberish",
-    ):
+    )
+    for key in check_keys:
+        if key in disabled:
+            continue
         section = quality_result.get(key) or {}
         for item in section.get("flags", []):
             rid = item.get("response_id")
@@ -50,9 +59,11 @@ def get_flagged_response_ids(survey_id: int) -> set[str]:
         return set(cached[1])
 
     from app.services.data_quality import run_data_quality
+    from app.services.qc_config_store import enabled_check_ids
 
     result = run_data_quality(survey_id, completion_status="complete")
-    flagged = collect_flagged_ids(result)
+    disabled = frozenset(ALL_CHECK_IDS) - enabled_check_ids(survey_id)
+    flagged = collect_flagged_ids(result, disabled_checks=disabled)
     _FLAGGED_CACHE[survey_id] = (now, flagged)
     return flagged
 

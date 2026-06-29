@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -13,6 +13,9 @@ import { api, type DataQualityResult } from '../../api/client'
 import {
   aggregateFlaggedRows,
   checkCount,
+  computeQcMetrics,
+  disabledChecksFromEnabled,
+  enabledChecksFromDisabled,
   exportFlaggedCsv,
   isCheckAvailable,
   QC_CHECKS,
@@ -58,6 +61,33 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [filterCheck, setFilterCheck] = useState<QcCheckId | 'all'>('all')
   const [search, setSearch] = useState('')
+  const [enabledChecks, setEnabledChecks] = useState<Set<QcCheckId>>(
+    () => new Set(QC_CHECKS.map((c) => c.id)),
+  )
+  const [configLoading, setConfigLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    setConfigLoading(true)
+    api
+      .getQcConfig(surveyId)
+      .then((cfg) => {
+        if (!cancelled) {
+          setEnabledChecks(enabledChecksFromDisabled(cfg.disabled_checks ?? []))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEnabledChecks(new Set(QC_CHECKS.map((c) => c.id)))
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setConfigLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [surveyId])
 
   const runScan = useCallback(
     async (refresh = true) => {
@@ -79,25 +109,41 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
     [surveyId],
   )
 
+  const toggleCheck = useCallback(
+    async (checkId: QcCheckId, include: boolean) => {
+      const next = new Set(enabledChecks)
+      if (include) next.add(checkId)
+      else next.delete(checkId)
+      setEnabledChecks(next)
+      try {
+        await api.setQcConfig(surveyId, disabledChecksFromEnabled(next))
+      } catch {
+        setEnabledChecks(enabledChecks)
+      }
+    },
+    [enabledChecks, surveyId],
+  )
+
   const metrics = useMemo(() => {
     if (!result) return null
-    const total = result.total_responses ?? 0
-    const flagged = result.flagged_count ?? 0
-    const clean = result.clean_estimate ?? Math.max(0, total - flagged)
-    const passRate = total > 0 ? (clean / total) * 100 : 100
-    return { total, flagged, clean, passRate }
-  }, [result])
+    return computeQcMetrics(result, enabledChecks)
+  }, [result, enabledChecks])
 
-  const flaggedRows = useMemo(
-    () => (result ? aggregateFlaggedRows(result) : []),
-    [result],
+  const activeRows = useMemo(() => {
+    if (!result) return []
+    if (filterCheck !== 'all') {
+      return aggregateFlaggedRows(result, new Set([filterCheck]))
+    }
+    return aggregateFlaggedRows(result, enabledChecks)
+  }, [result, enabledChecks, filterCheck])
+
+  const exportRows = useMemo(
+    () => (result ? aggregateFlaggedRows(result, enabledChecks) : []),
+    [result, enabledChecks],
   )
 
   const filteredRows = useMemo(() => {
-    let rows = flaggedRows
-    if (filterCheck !== 'all') {
-      rows = rows.filter((r) => r.checks.includes(filterCheck))
-    }
+    let rows = activeRows
     const q = search.trim().toLowerCase()
     if (q) {
       rows = rows.filter(
@@ -108,7 +154,7 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
       )
     }
     return rows
-  }, [flaggedRows, filterCheck, search])
+  }, [activeRows, search])
 
   if (!result && !loading && !error) {
     return (
@@ -120,8 +166,8 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
           <h2 className="text-lg font-semibold text-slate-900">Response QC</h2>
           <p className="mt-2 text-sm text-slate-500">
             Scan completed interviews for speeders, test responses, duplicate phones,
-            straight-lining, and gibberish text. Results power the{' '}
-            <strong>QC Approved</strong> sample in the header dropdown.
+            straight-lining, and gibberish text. Toggle checks on or off to control what
+            counts toward <strong>QC Approved</strong>.
           </p>
           <button
             type="button"
@@ -161,7 +207,6 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mx-auto max-w-5xl space-y-5">
-        {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Response QC</h2>
@@ -182,10 +227,10 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
                 Use QC Approved sample
               </button>
             )}
-            {flaggedRows.length > 0 && (
+            {exportRows.length > 0 && (
               <button
                 type="button"
-                onClick={() => exportFlaggedCsv(flaggedRows, `survey_${surveyId}_qc_flags.csv`)}
+                onClick={() => exportFlaggedCsv(exportRows, `survey_${surveyId}_qc_flags.csv`)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
               >
                 <Download size={14} />
@@ -228,7 +273,6 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
           </div>
         )}
 
-        {/* Summary */}
         <div className="grid gap-3 sm:grid-cols-4">
           <SummaryTile label="Sample size" value={metrics.total} />
           <SummaryTile label="Passed QC" value={metrics.clean} tone="pass" />
@@ -236,10 +280,43 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
           <SummaryTile label="Pass rate" value={`${metrics.passRate.toFixed(1)}%`} />
         </div>
 
-        {/* Checks table */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-800">Issue type</h3>
+            <p className="text-xs text-slate-500">
+              Click a check to view only those flags. Disabled checks are excluded from pass/fail.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <IssueChip
+              label="All issues"
+              count={aggregateFlaggedRows(result, enabledChecks).length}
+              active={filterCheck === 'all'}
+              onClick={() => setFilterCheck('all')}
+            />
+            {QC_CHECKS.map((check) => {
+              const count = checkCount(check.id, result)
+              const included = enabledChecks.has(check.id)
+              return (
+                <IssueChip
+                  key={check.id}
+                  label={check.title}
+                  count={count}
+                  active={filterCheck === check.id}
+                  muted={!included}
+                  onClick={() => setFilterCheck(filterCheck === check.id ? 'all' : check.id)}
+                />
+              )
+            })}
+          </div>
+        </section>
+
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-5 py-3">
             <h3 className="text-sm font-semibold text-slate-800">QC checks</h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Turn off checks you do not want to count toward QC Approved (e.g. gibberish on name fields).
+            </p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -248,6 +325,7 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
                   <th className="px-5 py-2.5 font-semibold">Check</th>
                   <th className="px-5 py-2.5 font-semibold">Found</th>
                   <th className="px-5 py-2.5 font-semibold">Severity</th>
+                  <th className="px-5 py-2.5 font-semibold">Include in QC</th>
                   <th className="px-5 py-2.5 font-semibold">Status</th>
                 </tr>
               </thead>
@@ -255,16 +333,19 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
                 {QC_CHECKS.map((check) => {
                   const count = checkCount(check.id, result)
                   const available = isCheckAvailable(check.id, result)
+                  const included = enabledChecks.has(check.id)
                   const active = filterCheck === check.id
                   return (
                     <tr
                       key={check.id}
-                      className={`cursor-pointer border-b border-slate-50 transition hover:bg-slate-50/80 ${
+                      className={`border-b border-slate-50 transition hover:bg-slate-50/80 ${
                         active ? 'bg-[var(--et-teal-light)]/30' : ''
-                      }`}
-                      onClick={() => setFilterCheck(active ? 'all' : check.id)}
+                      } ${!included ? 'opacity-70' : ''}`}
                     >
-                      <td className="px-5 py-3">
+                      <td
+                        className="cursor-pointer px-5 py-3"
+                        onClick={() => setFilterCheck(active ? 'all' : check.id)}
+                      >
                         <p className="font-medium text-slate-900">{check.title}</p>
                         <p className="text-xs text-slate-500">{check.description}</p>
                       </td>
@@ -274,12 +355,31 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
                       <td className="px-5 py-3">
                         <SeverityBadge severity={check.severity} />
                       </td>
-                      <td className="px-5 py-3 text-xs text-slate-500">
+                      <td className="px-5 py-3">
+                        <label className="inline-flex cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={included}
+                            disabled={configLoading}
+                            onChange={(e) => toggleCheck(check.id, e.target.checked)}
+                            className="h-4 w-4 rounded border-slate-300 text-[var(--et-teal)] focus:ring-[var(--et-teal)]"
+                          />
+                          <span className="text-xs text-slate-600">
+                            {included ? 'On' : 'Off'}
+                          </span>
+                        </label>
+                      </td>
+                      <td
+                        className="cursor-pointer px-5 py-3 text-xs text-slate-500"
+                        onClick={() => setFilterCheck(active ? 'all' : check.id)}
+                      >
                         {!available
                           ? 'Not available'
                           : count === 0
                             ? 'All clear'
-                            : 'View in table ↓'}
+                            : included
+                              ? 'View flags ↓'
+                              : 'Excluded from QC'}
                       </td>
                     </tr>
                   )
@@ -287,28 +387,13 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
               </tbody>
             </table>
           </div>
-          {filterCheck !== 'all' && (
-            <div className="border-t border-slate-100 px-5 py-2 text-xs text-slate-500">
-              Filtering flagged table by{' '}
-              <strong>{QC_CHECKS.find((c) => c.id === filterCheck)?.title}</strong>
-              {' · '}
-              <button
-                type="button"
-                onClick={() => setFilterCheck('all')}
-                className="text-[var(--et-teal-dark)] hover:underline"
-              >
-                Show all
-              </button>
-            </div>
-          )}
         </section>
 
-        {/* Flagged records */}
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
             <h3 className="text-sm font-semibold text-slate-800">
               Flagged records ({filteredRows.length}
-              {filterCheck !== 'all' || search ? ` of ${flaggedRows.length}` : ''})
+              {filterCheck !== 'all' || search ? ` of ${activeRows.length}` : ''})
             </h3>
             <div className="relative">
               <Search
@@ -327,8 +412,8 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
           {filteredRows.length === 0 ? (
             <p className="flex items-center gap-2 px-5 py-8 text-sm text-slate-500">
               <CheckCircle2 size={18} className="text-[var(--et-teal)]" />
-              {flaggedRows.length === 0
-                ? 'No flagged records — sample passed all checks.'
+              {activeRows.length === 0
+                ? 'No flagged records for the selected checks.'
                 : 'No records match your filter.'}
             </p>
           ) : (
@@ -353,6 +438,43 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
         </section>
       </div>
     </div>
+  )
+}
+
+function IssueChip({
+  label,
+  count,
+  active,
+  muted,
+  onClick,
+}: {
+  label: string
+  count: number
+  active: boolean
+  muted?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+        active
+          ? 'border-[var(--et-teal)] bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]'
+          : muted
+            ? 'border-slate-200 bg-slate-50 text-slate-400'
+            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+      }`}
+    >
+      {label}
+      <span
+        className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
+          active ? 'bg-white/80' : 'bg-slate-100'
+        }`}
+      >
+        {count}
+      </span>
+    </button>
   )
 }
 

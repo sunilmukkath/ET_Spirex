@@ -210,6 +210,21 @@ def data_quality(survey_id: int, completion_status: str = "complete", refresh: b
         raise _handle_lime_error(exc) from exc
 
 
+@router.get("/projects/{survey_id}/qc/config")
+def get_qc_config_route(survey_id: int):
+    from app.services.qc_config_store import get_qc_config
+
+    return get_qc_config(survey_id).model_dump()
+
+
+@router.put("/projects/{survey_id}/qc/config")
+def put_qc_config_route(survey_id: int, body: dict):
+    from app.services.qc_config_store import QcConfig, set_qc_config
+
+    config = QcConfig.model_validate(body)
+    return set_qc_config(survey_id, config).model_dump()
+
+
 @router.get("/projects/{survey_id}/variables/{variable_id}/filter-options")
 def variable_filter_options(
     survey_id: int,
