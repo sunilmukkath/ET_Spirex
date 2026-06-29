@@ -707,12 +707,14 @@ export function SurveyWorkspace() {
           )}
 
           {mode === 'quality' && (
-            <Suspense fallback={<PanelLoader />}>
-              <ResponseQCPanel
-                surveyId={surveyId}
-                onUseQcApproved={() => setCompletionStatus('qc_approved')}
-              />
-            </Suspense>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <Suspense fallback={<PanelLoader />}>
+                <ResponseQCPanel
+                  surveyId={surveyId}
+                  onUseQcApproved={() => setCompletionStatus('qc_approved')}
+                />
+              </Suspense>
+            </div>
           )}
 
           {mode === 'multivariate' && (

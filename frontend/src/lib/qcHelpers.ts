@@ -133,6 +133,25 @@ export function aggregateFlaggedRows(
   })
 }
 
+export function normalizeQcResult(result: DataQualityResult): DataQualityResult {
+  const emptyFlags = { count: 0, flags: [] as never[] }
+  return {
+    ...result,
+    total_responses: result.total_responses ?? 0,
+    flagged_count: result.flagged_count ?? 0,
+    speeders: result.speeders ?? { ...emptyFlags, available: false },
+    test_responses: result.test_responses ?? emptyFlags,
+    duplicate_phones: result.duplicate_phones ?? {
+      ...emptyFlags,
+      available: false,
+      exclude_count: 0,
+      groups: [],
+    },
+    straight_liners: result.straight_liners ?? emptyFlags,
+    gibberish: result.gibberish ?? emptyFlags,
+  }
+}
+
 export function computeQcMetrics(
   result: DataQualityResult,
   enabledChecks: Set<QcCheckId>,

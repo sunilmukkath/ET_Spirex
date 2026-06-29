@@ -434,6 +434,26 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 const API_TIMEOUT_MS = 12_000
 const ANALYSIS_TIMEOUT_MS = 180_000
 
+function formatApiError(body: unknown, status: number): string {
+  if (body && typeof body === 'object') {
+    const record = body as { detail?: unknown; error?: unknown }
+    const detail = record.detail ?? record.error
+    if (typeof detail === 'string' && detail.trim()) return detail
+    if (Array.isArray(detail)) {
+      const parts = detail
+        .map((item) => {
+          if (item && typeof item === 'object' && 'msg' in item) {
+            return String((item as { msg: string }).msg)
+          }
+          return String(item)
+        })
+        .filter(Boolean)
+      if (parts.length) return parts.join('; ')
+    }
+  }
+  return `Request failed (${status})`
+}
+
 async function fetchJson<T>(
   url: string,
   init?: RequestInit,
@@ -458,7 +478,7 @@ async function fetchJson<T>(
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      throw new Error(body.detail || body.error || `Request failed (${res.status})`)
+      throw new Error(formatApiError(body, res.status))
     }
     return res.json()
   } catch (err) {

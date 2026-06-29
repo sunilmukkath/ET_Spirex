@@ -47,6 +47,7 @@ from app.services.analysis_bookmark_store import (
     list_analysis_bookmarks,
 )
 from app.services.weight_config_store import get_weight_config, set_weight_config
+from app.services.qc_config_store import QcConfig, get_qc_config, set_qc_config
 from app.models.workspace_prefs import (
     AnalysisBookmarkCreate,
     FilterPresetCreate,
@@ -64,6 +65,9 @@ def _handle_lime_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LimeSurveyNotConfiguredError):
         return HTTPException(status_code=503, detail=str(exc))
     if isinstance(exc, LimeSurveyError):
+        return HTTPException(status_code=502, detail=str(exc))
+    exc_name = type(exc).__name__
+    if exc_name in {"LimeSurveyStatusError", "LimeSurveyRPCError", "LimeSurveyInvalidSessionError"}:
         return HTTPException(status_code=502, detail=str(exc))
     return HTTPException(status_code=500, detail=str(exc))
 
@@ -212,16 +216,11 @@ def data_quality(survey_id: int, completion_status: str = "complete", refresh: b
 
 @router.get("/projects/{survey_id}/qc/config")
 def get_qc_config_route(survey_id: int):
-    from app.services.qc_config_store import get_qc_config
-
     return get_qc_config(survey_id).model_dump()
 
 
 @router.put("/projects/{survey_id}/qc/config")
-def put_qc_config_route(survey_id: int, body: dict):
-    from app.services.qc_config_store import QcConfig, set_qc_config
-
-    config = QcConfig.model_validate(body)
+def put_qc_config_route(survey_id: int, config: QcConfig):
     return set_qc_config(survey_id, config).model_dump()
 
 

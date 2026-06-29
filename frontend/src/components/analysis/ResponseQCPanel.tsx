@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, Component, type ReactNode } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,6 +18,7 @@ import {
   enabledChecksFromDisabled,
   exportFlaggedCsv,
   isCheckAvailable,
+  normalizeQcResult,
   QC_CHECKS,
   qcCacheKey,
   type QcCheckId,
@@ -54,9 +55,16 @@ function saveCached(surveyId: number, result: DataQualityResult) {
 }
 
 export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
-  const cached = loadCached(surveyId)
-  const [result, setResult] = useState<DataQualityResult | null>(cached?.result ?? null)
-  const [lastRunAt, setLastRunAt] = useState<number | null>(cached?.at ?? null)
+  return (
+    <QcErrorBoundary onReset={() => sessionStorage.removeItem(qcCacheKey(surveyId))}>
+      <ResponseQCPanelInner surveyId={surveyId} onUseQcApproved={onUseQcApproved} />
+    </QcErrorBoundary>
+  )
+}
+
+function ResponseQCPanelInner({ surveyId, onUseQcApproved }: Props) {
+  const [result, setResult] = useState<DataQualityResult | null>(() => loadCached(surveyId)?.result ?? null)
+  const [lastRunAt, setLastRunAt] = useState<number | null>(() => loadCached(surveyId)?.at ?? null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filterCheck, setFilterCheck] = useState<QcCheckId | 'all'>('all')
@@ -65,6 +73,18 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
     () => new Set(QC_CHECKS.map((c) => c.id)),
   )
   const [configLoading, setConfigLoading] = useState(true)
+
+  const surveyReady = Number.isFinite(surveyId) && surveyId > 0
+
+  useEffect(() => {
+    const cached = loadCached(surveyId)
+    setResult(cached?.result ?? null)
+    setLastRunAt(cached?.at ?? null)
+    setError(null)
+    setLoading(false)
+    setFilterCheck('all')
+    setSearch('')
+  }, [surveyId])
 
   useEffect(() => {
     let cancelled = false
@@ -91,11 +111,14 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
 
   const runScan = useCallback(
     async (refresh = true) => {
-      if (!Number.isFinite(surveyId) || surveyId <= 0) return
+      if (!surveyReady) {
+        setError('Invalid survey ID — return to the dashboard and open the survey again.')
+        return
+      }
       setLoading(true)
       setError(null)
       try {
-        const data = await api.getDataQuality(surveyId, 'complete', refresh)
+        const data = normalizeQcResult(await api.getDataQuality(surveyId, 'complete', refresh))
         setResult(data)
         const at = Date.now()
         setLastRunAt(at)
@@ -106,7 +129,7 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
         setLoading(false)
       }
     },
-    [surveyId],
+    [surveyId, surveyReady],
   )
 
   const toggleCheck = useCallback(
@@ -142,6 +165,8 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
     [result, enabledChecks],
   )
 
+  const enabledFlaggedCount = exportRows.length
+
   const filteredRows = useMemo(() => {
     let rows = activeRows
     const q = search.trim().toLowerCase()
@@ -156,9 +181,31 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
     return rows
   }, [activeRows, search])
 
+  if (!surveyReady) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8">
+        <ErrorState message="Invalid survey ID." />
+      </div>
+    )
+  }
+
+  if (!result && loading) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8">
+        <Loader2 className="animate-spin text-[var(--et-teal)]" size={36} />
+        <div className="text-center">
+          <h2 className="text-lg font-semibold text-slate-900">Running QC scan</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Checking completed interviews — large surveys may take a few minutes.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   if (!result && !loading && !error) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 p-8">
         <div className="max-w-md text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]">
             <ShieldCheck size={28} />
@@ -188,7 +235,7 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
 
   if (error && !result) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8">
         <ErrorState message={error} />
         <button
           type="button"
@@ -202,10 +249,24 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
     )
   }
 
-  if (!result || !metrics) return null
+  if (!result || !metrics) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8">
+        <ErrorState message="QC results could not be displayed. Try running the scan again." />
+        <button
+          type="button"
+          onClick={() => runScan(true)}
+          className="inline-flex items-center gap-2 rounded-lg bg-[var(--et-teal)] px-4 py-2 text-sm font-medium text-white"
+        >
+          <RefreshCw size={16} />
+          Run scan
+        </button>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
+    <div className="min-h-0 flex-1 overflow-y-auto p-6">
       <div className="mx-auto max-w-5xl space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -290,7 +351,7 @@ export function ResponseQCPanel({ surveyId, onUseQcApproved }: Props) {
           <div className="flex flex-wrap gap-2">
             <IssueChip
               label="All issues"
-              count={aggregateFlaggedRows(result, enabledChecks).length}
+              count={enabledFlaggedCount}
               active={filterCheck === 'all'}
               onClick={() => setFilterCheck('all')}
             />
@@ -541,4 +602,37 @@ function FlaggedTableRow({ row }: { row: QcFlaggedRow }) {
       <td className="max-w-md px-5 py-2.5 text-xs text-slate-600">{row.detail}</td>
     </tr>
   )
+}
+
+class QcErrorBoundary extends Component<
+  { children: ReactNode; onReset?: () => void },
+  { error: string | null }
+> {
+  state = { error: null as string | null }
+
+  static getDerivedStateFromError(err: Error) {
+    return { error: err.message || 'QC panel crashed' }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8">
+          <ErrorState message={this.state.error} />
+          <button
+            type="button"
+            onClick={() => {
+              this.props.onReset?.()
+              this.setState({ error: null })
+            }}
+            className="inline-flex items-center gap-2 rounded-lg bg-[var(--et-teal)] px-4 py-2 text-sm font-medium text-white"
+          >
+            <RefreshCw size={16} />
+            Reset QC view
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
