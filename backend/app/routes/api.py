@@ -22,6 +22,7 @@ from app.models.analysis import (
 )
 from app.models.auth import LoginRequest, LoginResponse
 from app.models.pinned_surveys import PinnedSurveys
+from app.models.project_workflow import ProjectWorkflow
 from app.models.team_registry import TeamRegistry, PROJECT_MODULES
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
 from app.services.auth import VALID_USERS, authenticate, get_session, list_active_sessions, logout

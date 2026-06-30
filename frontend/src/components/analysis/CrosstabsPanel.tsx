@@ -136,8 +136,6 @@ export interface CrosstabsPanelProps {
   exporting: boolean
   onRun: () => void
   onRunAllOnTotal: () => void
-  autoRunTotal: boolean
-  onAutoRunTotalChange: (enabled: boolean) => void
   onExport: () => void
   bannerResult: BannerResult | null
   schemaLoading: boolean
@@ -192,8 +190,6 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
     exporting,
     onRun,
     onRunAllOnTotal,
-    autoRunTotal,
-    onAutoRunTotalChange,
     onExport,
     bannerResult,
     schemaLoading,
@@ -293,16 +289,6 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
             {analyzing ? <Loader2 className="animate-spin" size={16} /> : <Table2 size={16} />}
             Build crosstab
           </button>
-
-          <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-600">
-            <input
-              type="checkbox"
-              checked={autoRunTotal}
-              onChange={(e) => onAutoRunTotalChange(e.target.checked)}
-              className="rounded border-slate-300 text-[var(--et-teal)]"
-            />
-            Auto-run on Total when Crosstabs opens
-          </label>
 
           {hasResults && (
             <>

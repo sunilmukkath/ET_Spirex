@@ -66,7 +66,6 @@ import {
 } from '../lib/surveyFieldDefaults'
 import {
   loadSurveySession,
-  loadUserAppSession,
   mergeSessionIntoSearch,
   saveSurveySession,
   saveUserAppSession,
@@ -199,25 +198,6 @@ export function SurveyWorkspace() {
     has_review: boolean
   } | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [autoRunCrosstabsTotal, setAutoRunCrosstabsTotal] = useState(
-    () => loadUserAppSession(user?.username ?? '')?.autoRunCrosstabsTotal ?? true,
-  )
-  const autoRunCompareAttempted = useRef(false)
-
-  useEffect(() => {
-    if (!user?.username) return
-    setAutoRunCrosstabsTotal(loadUserAppSession(user.username)?.autoRunCrosstabsTotal ?? true)
-  }, [user?.username])
-
-  useEffect(() => {
-    if (!user?.username) return
-    saveUserAppSession(user.username, { autoRunCrosstabsTotal })
-  }, [user?.username, autoRunCrosstabsTotal])
-
-  useEffect(() => {
-    autoRunCompareAttempted.current = false
-  }, [surveyId, analyzeView])
-
   const reloadQcSummary = useCallback(async () => {
     if (!surveyId) return
     try {
@@ -815,27 +795,6 @@ export function SurveyWorkspace() {
     await runBanner({ rowIds: ids, bannerLayers: [[]] })
   }, [activeSchema, runBanner])
 
-  useEffect(() => {
-    if (mode !== 'explore' || analyzeView !== 'compare' || schemaLoading) return
-    if (!autoRunCrosstabsTotal) return
-    if (analyzing || autoRunCompareAttempted.current) return
-    if (!(activeSchema?.variables ?? []).some((v) => v.can_banner)) return
-
-    autoRunCompareAttempted.current = true
-    const timer = window.setTimeout(() => {
-      void runAllOnTotal()
-    }, 400)
-    return () => window.clearTimeout(timer)
-  }, [
-    mode,
-    analyzeView,
-    schemaLoading,
-    autoRunCrosstabsTotal,
-    analyzing,
-    activeSchema,
-    runAllOnTotal,
-  ])
-
   async function refreshCrosstabTable(rowId: string, tableIndex: number) {
     const request = buildBannerRequest()
     if (!request) return
@@ -1372,8 +1331,6 @@ export function SurveyWorkspace() {
               exporting={exporting}
               onRun={() => void runBanner()}
               onRunAllOnTotal={() => void runAllOnTotal()}
-              autoRunTotal={autoRunCrosstabsTotal}
-              onAutoRunTotalChange={setAutoRunCrosstabsTotal}
               onExport={exportBanner}
               bannerResult={bannerResult}
               schemaLoading={schemaLoading}

@@ -15,7 +15,6 @@ export interface UserAppSession {
   lastPath?: string
   dashboardViewMode?: 'grid' | 'table'
   dashboardSortKey?: string
-  autoRunCrosstabsTotal?: boolean
   updatedAt: number
 }
 
