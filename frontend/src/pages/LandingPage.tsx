@@ -81,11 +81,18 @@ export function LandingPage() {
         <div className="et-grid absolute inset-0 opacity-[0.07]" />
       </div>
 
-      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <BrandLockup size="lg" variant="light" />
+      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-5 sm:gap-4 sm:px-6 sm:py-6">
+        <div className="min-w-0 flex-1">
+          <div className="sm:hidden">
+            <BrandLockup size="sm" variant="light" />
+          </div>
+          <div className="hidden sm:block">
+            <BrandLockup size="lg" variant="light" />
+          </div>
+        </div>
         <a
           href="#signin"
-          className="rounded-full border border-white/20 bg-white/5 px-5 py-2 text-sm font-medium backdrop-blur-sm transition hover:bg-white/10"
+          className="inline-flex shrink-0 items-center justify-center self-center rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium leading-none backdrop-blur-sm transition hover:bg-white/10 sm:px-5"
         >
           Sign in
         </a>
