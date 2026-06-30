@@ -105,7 +105,7 @@ export function LandingPage() {
             Survey intelligence platform
           </div>
           <h1 className="font-display text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl lg:text-[3.25rem]">
-            From fieldwork to client-ready insight.
+            Analytics that feel as sharp as your research.
           </h1>
           <p className="mt-5 max-w-lg text-base leading-relaxed text-white/75 sm:text-lg">
             ET Scout turns LimeSurvey data into explore charts, custom visualisations,
