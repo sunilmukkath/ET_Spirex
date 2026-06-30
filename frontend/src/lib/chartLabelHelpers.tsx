@@ -1,4 +1,5 @@
 import type { PieLabelRenderProps } from 'recharts'
+import type { ChartDisplayOptions } from './chartDataHelpers'
 
 /** Compact percentage for chart labels (e.g. 24%, 4.5%, 0.8%). */
 export function formatChartPct(value: number | undefined | null): string {
@@ -8,13 +9,38 @@ export function formatChartPct(value: number | undefined | null): string {
   return '0%'
 }
 
+export function formatChartCount(value: number | undefined | null): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  if (value >= 10_000) return `${(value / 1000).toFixed(1)}k`
+  return value.toLocaleString()
+}
+
+export function chartValueLabel(
+  count: number | undefined,
+  pct: number | undefined,
+  valueMode: ChartDisplayOptions['valueMode'],
+): string {
+  return valueMode === 'percent' ? formatChartPct(pct) : formatChartCount(count)
+}
+
+export function shouldShowDataLabel(
+  count: number | undefined,
+  pct: number | undefined,
+  valueMode: ChartDisplayOptions['valueMode'],
+): boolean {
+  if (valueMode === 'percent') return (pct ?? 0) >= 2
+  return (count ?? 0) > 0 && (pct ?? 0) >= 1.5
+}
+
 type BarLabelProps = {
   x?: number | string
   y?: number | string
   width?: number | string
   height?: number | string
-  payload?: { pct?: number }
+  payload?: { pct?: number; count?: number }
   layout?: 'vertical' | 'horizontal'
+  valueMode?: ChartDisplayOptions['valueMode']
+  show?: boolean
 }
 
 function num(value: number | string | undefined, fallback = 0): number {
@@ -22,17 +48,21 @@ function num(value: number | string | undefined, fallback = 0): number {
   return Number.isFinite(n) ? (n as number) : fallback
 }
 
-/** Bar end-cap label — always shows share %, not raw count. */
-export function BarPercentLabel(props: BarLabelProps) {
-  const { payload, layout = 'vertical' } = props
+/** Bar label — shows count or % based on display mode. */
+export function BarValueLabel(props: BarLabelProps) {
+  const { payload, layout = 'vertical', valueMode = 'percent', show = true } = props
+  if (!show) return null
+
+  const count = payload?.count
+  const pct = payload?.pct
+  if (!shouldShowDataLabel(count, pct, valueMode)) return null
+
+  const label = chartValueLabel(count, pct, valueMode)
+
   const x = num(props.x)
   const y = num(props.y)
   const width = num(props.width)
   const height = num(props.height)
-  const pct = payload?.pct
-  if (pct == null || pct < 2) return null
-
-  const label = formatChartPct(pct)
 
   if (layout === 'horizontal') {
     if (width < 24) return null
@@ -84,12 +114,61 @@ export function BarPercentLabel(props: BarLabelProps) {
   )
 }
 
-/** Pie slice callout — connector line + compact % badge. */
-export function PiePercentCallout(props: PieLabelRenderProps) {
-  const { cx = 0, cy = 0, midAngle = 0, outerRadius = 0, percent = 0, payload } = props
-  const pct = (payload as { pct?: number } | undefined)?.pct ?? percent * 100
+/** @deprecated Use BarValueLabel */
+export const BarPercentLabel = BarValueLabel
 
-  if (pct < 3) return null
+export type PointLabelProps = {
+  x?: number | string
+  y?: number | string
+  value?: number | string | null
+  payload?: { count?: number; pct?: number }
+  valueMode?: ChartDisplayOptions['valueMode']
+  show?: boolean
+}
+
+/** Line / area point label. */
+export function PointValueLabel(props: PointLabelProps) {
+  const { payload, valueMode = 'percent', show = true } = props
+  if (!show) return null
+
+  const count = payload?.count
+  const pct = payload?.pct
+  if (!shouldShowDataLabel(count, pct, valueMode)) return null
+
+  const x = num(props.x)
+  const y = num(props.y)
+  const label = chartValueLabel(count, pct, valueMode)
+
+  return (
+    <text
+      x={x}
+      y={y - 8}
+      textAnchor="middle"
+      fill="#475569"
+      fontSize={10}
+      fontWeight={600}
+      className="tabular-nums"
+    >
+      {label}
+    </text>
+  )
+}
+
+/** Pie slice callout — connector line + compact value badge. */
+export function PieValueCallout(
+  props: PieLabelRenderProps & {
+    valueMode?: ChartDisplayOptions['valueMode']
+    show?: boolean
+  },
+) {
+  const { cx = 0, cy = 0, midAngle = 0, outerRadius = 0, percent = 0, payload, valueMode = 'percent', show = true } =
+    props
+  if (!show) return null
+
+  const row = payload as { pct?: number; count?: number } | undefined
+  const pct = row?.pct ?? percent * 100
+  const count = row?.count
+  if (!shouldShowDataLabel(count, pct, valueMode)) return null
 
   const RADIAN = Math.PI / 180
   const angle = -midAngle * RADIAN
@@ -100,7 +179,7 @@ export function PiePercentCallout(props: PieLabelRenderProps) {
   const textX = cx + (outerRadius + 22) * Math.cos(angle)
   const textY = cy + (outerRadius + 22) * Math.sin(angle)
   const anchor = textX >= cx ? 'start' : 'end'
-  const label = formatChartPct(pct)
+  const label = chartValueLabel(count, pct, valueMode)
   const padX = anchor === 'start' ? 6 : -6
   const boxW = label.length * 6.5 + 12
   const boxX = anchor === 'start' ? textX + padX - 2 : textX + padX - boxW + 2
@@ -137,3 +216,6 @@ export function PiePercentCallout(props: PieLabelRenderProps) {
     </g>
   )
 }
+
+/** @deprecated Use PieValueCallout */
+export const PiePercentCallout = PieValueCallout

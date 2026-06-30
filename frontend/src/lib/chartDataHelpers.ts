@@ -1,11 +1,57 @@
-import type { ProfileResult, SurveyVariable } from '../api/client'
-import type { ChartPaletteId } from './chartPalettes'
+import type { BannerResult, ProfileResult, SurveyVariable } from '../api/client'
+import type { ChartPaletteId, ChartPaletteSelection } from './chartPalettes'
+import type { ChartTypeId } from './chartTypes'
 
 export interface ChartDisplayOptions {
   valueMode: 'count' | 'percent'
   maxItems: number
   paletteId: ChartPaletteId
+  paletteSelection?: ChartPaletteSelection
   colorMode: 'single' | 'multi'
+  showDataLabels: boolean
+  primaryColor?: string
+  seriesColors?: string[]
+  chartTitle?: string
+  showLegend: boolean
+  showGrid: boolean
+  /** Runtime only — used to resolve custom palette ids. */
+  userPalettes?: import('./chartPaletteStore').UserChartPalette[]
+}
+
+const VALUE_MODE_EXCLUDED: ChartTypeId[] = [
+  'map',
+  'numeric_summary',
+  'boxplot',
+  'gauge',
+  'bar_100',
+  'word_bar',
+  'word_treemap',
+  'array_heatmap',
+  'banner_heatmap',
+]
+
+export function chartSeriesLabels(
+  data: ProfileResult | BannerResult | null,
+  maxItems: number,
+): string[] {
+  if (!data || data.error) return []
+  if ('headers' in data && data.headers?.length && data.rows?.length) {
+    return (data.headers ?? []).slice(0, maxItems).map((h) => h.label)
+  }
+  if ('values' in data && data.values?.length) {
+    return data.values.slice(0, maxItems).map((v) => v.label || v.code || '')
+  }
+  if ('sections' in data && data.sections?.length) {
+    return data.sections.slice(0, maxItems).map((s) => s.subquestion || 'Item')
+  }
+  if ('top_words' in data && data.top_words?.length) {
+    return data.top_words.slice(0, maxItems).map((w) => w.word)
+  }
+  return []
+}
+
+export function chartSupportsValueMode(chartType: ChartTypeId): boolean {
+  return !VALUE_MODE_EXCLUDED.includes(chartType)
 }
 
 export interface ValueRow {

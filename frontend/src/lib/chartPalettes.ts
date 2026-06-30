@@ -1,4 +1,10 @@
+import type { ChartDisplayOptions } from './chartDataHelpers'
+import type { UserChartPalette } from './chartPaletteStore'
+
 export type ChartPaletteId = 'et_teal' | 'ocean' | 'sunset' | 'berry' | 'slate' | 'rainbow'
+
+/** Built-in palette id or `user:<paletteId>` for saved custom palettes. */
+export type ChartPaletteSelection = ChartPaletteId | `user:${string}`
 
 export interface ChartPalette {
   id: ChartPaletteId
@@ -46,6 +52,86 @@ export const CHART_PALETTES: ChartPalette[] = [
   },
 ]
 
+const DEFAULT_PALETTE = CHART_PALETTES[0]
+
 export function getPalette(id: ChartPaletteId): ChartPalette {
-  return CHART_PALETTES.find((p) => p.id === id) ?? CHART_PALETTES[0]
+  return CHART_PALETTES.find((p) => p.id === id) ?? DEFAULT_PALETTE
+}
+
+export function isUserPaletteSelection(
+  selection: ChartPaletteSelection,
+): selection is `user:${string}` {
+  return selection.startsWith('user:')
+}
+
+export function userPaletteId(selection: ChartPaletteSelection): string | null {
+  return isUserPaletteSelection(selection) ? selection.slice(5) : null
+}
+
+export function hexToRgb(hex: string): [number, number, number] {
+  const cleaned = hex.replace('#', '')
+  if (cleaned.length !== 6) return DEFAULT_PALETTE.heatmapRgb
+  const n = Number.parseInt(cleaned, 16)
+  if (!Number.isFinite(n)) return DEFAULT_PALETTE.heatmapRgb
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+export function resolveChartPalette(
+  selection: ChartPaletteSelection,
+  userPalettes: UserChartPalette[] = [],
+): { label: string; colors: string[]; heatmapRgb: [number, number, number] } {
+  const userId = userPaletteId(selection)
+  if (userId) {
+    const custom = userPalettes.find((p) => p.id === userId)
+    if (custom?.colors.length) {
+      return {
+        label: custom.label,
+        colors: custom.colors,
+        heatmapRgb: hexToRgb(custom.colors[0]),
+      }
+    }
+  }
+  const builtIn = getPalette(
+    (isUserPaletteSelection(selection) ? 'et_teal' : selection) as ChartPaletteId,
+  )
+  return builtIn
+}
+
+export function paletteSelectionFromLegacy(id: string): ChartPaletteSelection {
+  if (id.startsWith('user:')) return id as ChartPaletteSelection
+  if (CHART_PALETTES.some((p) => p.id === id)) return id as ChartPaletteId
+  return 'et_teal'
+}
+
+export function resolveChartColors(
+  options: ChartDisplayOptions,
+  userPalettes: UserChartPalette[] = [],
+): string[] {
+  const selection = options.paletteSelection ?? options.paletteId
+  const base = resolveChartPalette(selection, userPalettes).colors
+
+  if (options.seriesColors?.length) {
+    const max = Math.max(options.seriesColors.length, base.length, options.maxItems)
+    return Array.from({ length: max }, (_, i) => options.seriesColors?.[i] ?? base[i % base.length])
+  }
+
+  if (options.colorMode === 'single') {
+    return [options.primaryColor ?? base[0]]
+  }
+
+  return base
+}
+
+export function resolveHeatmapRgb(
+  options: ChartDisplayOptions,
+  userPalettes: UserChartPalette[] = [],
+): [number, number, number] {
+  const selection = options.paletteSelection ?? options.paletteId
+  if (options.colorMode === 'single' && options.primaryColor) {
+    return hexToRgb(options.primaryColor)
+  }
+  if (options.seriesColors?.[0]) {
+    return hexToRgb(options.seriesColors[0])
+  }
+  return resolveChartPalette(selection, userPalettes).heatmapRgb
 }

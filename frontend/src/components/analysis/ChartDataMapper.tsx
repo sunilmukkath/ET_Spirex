@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { CheckCircle2 } from 'lucide-react'
 import type { SurveyVariable } from '../../api/client'
 import {
   chartSlotDefs,
@@ -41,9 +42,10 @@ function SlotSelect({
 }) {
   return (
     <label className="block text-xs">
-      <span className="font-medium text-slate-700">
+      <span className="flex items-center gap-1 font-medium text-slate-700">
         {label}
         {required ? ' *' : ''}
+        {value && <CheckCircle2 size={12} className="text-emerald-500" />}
       </span>
       <select
         value={value}
@@ -84,11 +86,10 @@ export function ChartDataMapper({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Step 2 · Map variables
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Data mapping</p>
         <span className="text-[10px] text-slate-400">
-          {slotDefs.filter((s) => s.required).length} required
+          {slotDefs.filter((s) => s.required).length} required ·{' '}
+          {slotDefs.filter((s) => s.required && slots[s.id]).length} set
         </span>
       </div>
 

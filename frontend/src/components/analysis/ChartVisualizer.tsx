@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo } from 'react'
+import { lazy, Suspense, useMemo, type ComponentProps } from 'react'
 import {
   Area,
   AreaChart,
@@ -24,8 +24,8 @@ import type { BannerResult, ProfileResult } from '../../api/client'
 import type { ChartTypeId } from '../../lib/chartTypes'
 import type { ChartDisplayOptions } from '../../lib/chartDataHelpers'
 import { wordsAsValues } from '../../lib/chartDataHelpers'
-import { BarPercentLabel, formatChartPct, PiePercentCallout } from '../../lib/chartLabelHelpers'
-import { getPalette } from '../../lib/chartPalettes'
+import { BarValueLabel, formatChartCount, formatChartPct, PieValueCallout, PointValueLabel } from '../../lib/chartLabelHelpers'
+import { resolveChartColors, resolveHeatmapRgb } from '../../lib/chartPalettes'
 import {
   ArrayHeatmap,
   Bar100Chart,
@@ -51,7 +51,20 @@ const LocationMap = lazy(() =>
 )
 
 function chartColors(options: ChartDisplayOptions): string[] {
-  return getPalette(options.paletteId).colors
+  return resolveChartColors(options, options.userPalettes)
+}
+
+function ChartGrid({
+  options,
+  ...props
+}: { options: ChartDisplayOptions } & ComponentProps<typeof CartesianGrid>) {
+  if (!options.showGrid) return null
+  return <CartesianGrid {...props} />
+}
+
+function ChartLegend({ options }: { options: ChartDisplayOptions }) {
+  if (!options.showLegend) return null
+  return <Legend />
 }
 
 function barFill(options: ChartDisplayOptions, index: number): string {
@@ -131,7 +144,7 @@ function CategoryBarChart({
               : { bottom: 70, left: 8, right: 8, top: 20 }
           }
         >
-          <CartesianGrid strokeDasharray="3 3" vertical={layout !== 'horizontal'} horizontal />
+          <ChartGrid options={options} strokeDasharray="3 3" vertical={layout !== 'horizontal'} horizontal />
           {layout === 'horizontal' ? (
             <>
               <XAxis type="number" allowDecimals={options.valueMode === 'percent'} />
@@ -161,9 +174,14 @@ function CategoryBarChart({
               <Cell key={i} fill={barFill(options, i)} />
             ))}
             <LabelList
-              dataKey="pct"
+              dataKey="value"
               content={(props) => (
-                <BarPercentLabel {...props} layout={layout} />
+                <BarValueLabel
+                  {...props}
+                  layout={layout}
+                  valueMode={options.valueMode}
+                  show={options.showDataLabels}
+                />
               )}
             />
           </Bar>
@@ -202,7 +220,13 @@ function PieDonutChart({
             innerRadius={donut ? 55 : 0}
             outerRadius={92}
             paddingAngle={1}
-            label={PiePercentCallout}
+            label={(props) => (
+              <PieValueCallout
+                {...props}
+                valueMode={options.valueMode}
+                show={options.showDataLabels}
+              />
+            )}
             labelLine={false}
           >
             {chartData.map((_, i) => (
@@ -221,7 +245,7 @@ function PieDonutChart({
               ]
             }}
           />
-          <Legend />
+          <ChartLegend options={options} />
         </PieChart>
       </ResponsiveContainer>
     </div>
@@ -243,7 +267,11 @@ function BannerGroupedChart({
   const chartData = rows.map((row) => {
     const entry: Record<string, string | number> = { name: truncate(row.label, 32) }
     row.cells.forEach((cell, i) => {
-      entry[headers[i]?.label ?? `Col ${i}`] = cell.col_pct ?? 0
+      const key = headers[i]?.label ?? `Col ${i}`
+      entry[key] =
+        options.valueMode === 'percent' ? (cell.col_pct ?? 0) : (cell.count ?? 0)
+      entry[`${key}__pct`] = cell.col_pct ?? 0
+      entry[`${key}__count`] = cell.count ?? 0
     })
     return entry
   })
@@ -252,11 +280,21 @@ function BannerGroupedChart({
     <div className="h-96">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ bottom: 60, left: 8, right: 8, top: stacked ? 18 : 8 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <ChartGrid options={options} strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="name" angle={-25} textAnchor="end" interval={0} height={60} tick={{ fontSize: 10 }} />
-          <YAxis unit="%" />
-          <Tooltip formatter={(v) => [`${v}%`, 'Column %']} />
-          <Legend />
+          <YAxis allowDecimals={options.valueMode === 'percent'} unit={options.valueMode === 'percent' ? '%' : undefined} />
+          <Tooltip
+            formatter={(v, name, item) => {
+              const row = item?.payload as Record<string, number | string> | undefined
+              const pct = row?.[`${String(name)}__pct`]
+              const count = row?.[`${String(name)}__count`]
+              if (options.valueMode === 'percent') {
+                return [`${v}% (${count ?? '—'})`, String(name)]
+              }
+              return [`${v} (${formatChartPct(typeof pct === 'number' ? pct : Number(pct))})`, String(name)]
+            }}
+          />
+          <ChartLegend options={options} />
           {headers.map((h, i) => (
             <Bar
               key={h.key}
@@ -264,16 +302,32 @@ function BannerGroupedChart({
               stackId={stacked ? 'stack' : undefined}
               fill={colors[i % colors.length]}
             >
-              {stacked && (
+              {stacked && options.showDataLabels && (
                 <LabelList
                   dataKey={h.label}
                   position="center"
                   formatter={(v) => {
                     const n = typeof v === 'number' ? v : Number(v)
-                    return Number.isFinite(n) && n >= 4 ? `${Math.round(n)}%` : ''
+                    if (!Number.isFinite(n)) return ''
+                    if (options.valueMode === 'percent') {
+                      return n >= 4 ? `${Math.round(n)}%` : ''
+                    }
+                    return n >= 1 ? String(Math.round(n)) : ''
                   }}
                   className="fill-white text-[9px] font-semibold"
                   style={{ paintOrder: 'stroke', stroke: 'rgba(15,23,42,0.3)', strokeWidth: 2 }}
+                />
+              )}
+              {!stacked && options.showDataLabels && (
+                <LabelList
+                  dataKey={h.label}
+                  position="top"
+                  formatter={(v) => {
+                    const n = typeof v === 'number' ? v : Number(v)
+                    if (!Number.isFinite(n)) return ''
+                    return options.valueMode === 'percent' ? formatChartPct(n) : formatChartCount(n)
+                  }}
+                  className="fill-slate-600 text-[9px] font-semibold"
                 />
               )}
             </Bar>
@@ -287,7 +341,7 @@ function BannerGroupedChart({
 function BannerHeatmap({ data, options }: { data: BannerResult; options: ChartDisplayOptions }) {
   const headers = data.headers ?? []
   const rows = (data.rows ?? []).filter((r) => !r.is_total).slice(0, 30)
-  const [r, g, b] = getPalette(options.paletteId).heatmapRgb
+  const [r, g, b] = resolveHeatmapRgb(options, options.userPalettes)
 
   return (
     <div className="overflow-x-auto">
@@ -358,7 +412,7 @@ function NumericSummary({ data, options }: { data: ProfileResult; options: Chart
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={barData}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <ChartGrid options={options} strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="name" />
               <YAxis />
               <Tooltip />
@@ -385,11 +439,11 @@ function NumericMultiBar({ data, options }: { data: ProfileResult; options: Char
     <div className="h-80">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ bottom: 70, left: 8, right: 8 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <ChartGrid options={options} strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="name" angle={-25} textAnchor="end" interval={0} height={70} tick={{ fontSize: 10 }} />
           <YAxis />
           <Tooltip />
-          <Legend />
+          <ChartLegend options={options} />
           <Bar dataKey="mean" name="Mean" fill={colors[0]} radius={[4, 4, 0, 0]} />
           <Bar dataKey="median" name="Median" fill={colors[1] ?? colors[0]} radius={[4, 4, 0, 0]} />
         </BarChart>
@@ -444,7 +498,7 @@ function RespondentScatterChart({
       <div className="h-96">
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={{ bottom: 20, left: 12, right: 16, top: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" />
+            <ChartGrid options={options} strokeDasharray="3 3" />
             <XAxis
               type="number"
               dataKey="x"
@@ -511,7 +565,7 @@ function BubbleChart({
     <div className="h-80">
       <ResponsiveContainer width="100%" height="100%">
         <ScatterChart margin={{ bottom: 20, left: 8, right: 16 }}>
-          <CartesianGrid strokeDasharray="3 3" />
+          <ChartGrid options={options} strokeDasharray="3 3" />
           <XAxis type="number" dataKey="x" name="Category" tick={{ fontSize: 11 }} />
           <YAxis
             type="number"
@@ -560,7 +614,7 @@ function ScatterXYChart({
     <div className="h-80">
       <ResponsiveContainer width="100%" height="100%">
         <ScatterChart margin={{ bottom: 20, left: 8, right: 16 }}>
-          <CartesianGrid strokeDasharray="3 3" />
+          <ChartGrid options={options} strokeDasharray="3 3" />
           <XAxis type="number" dataKey="x" name="Category #" tick={{ fontSize: 11 }} />
           <YAxis
             type="number"
@@ -798,13 +852,31 @@ export function ChartVisualizer({ chartType, data, options }: Props) {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ bottom: 60, left: 8, right: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" />
+            <ChartGrid options={options} strokeDasharray="3 3" />
             <XAxis dataKey="name" angle={-20} textAnchor="end" height={50} tick={{ fontSize: 10 }} />
             <YAxis allowDecimals={options.valueMode === 'percent'} />
             <Tooltip
               content={(props) => <ValueTooltipContent valueMode={options.valueMode} {...props} />}
             />
-            <Line type="monotone" dataKey="value" stroke={stroke} strokeWidth={2} dot={{ fill: stroke }} />
+            <Line type="monotone" dataKey="value" stroke={stroke} strokeWidth={2} dot={{ fill: stroke }}>
+              {options.showDataLabels && (
+                <LabelList
+                  dataKey="value"
+                  content={(props) => {
+                    const p = props as { x?: number | string; y?: number | string; payload?: { count?: number; pct?: number } }
+                    return (
+                      <PointValueLabel
+                        x={p.x}
+                        y={p.y}
+                        payload={p.payload}
+                        valueMode={options.valueMode}
+                        show={options.showDataLabels}
+                      />
+                    )
+                  }}
+                />
+              )}
+            </Line>
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -823,13 +895,31 @@ export function ChartVisualizer({ chartType, data, options }: Props) {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ bottom: 60, left: 8, right: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" />
+            <ChartGrid options={options} strokeDasharray="3 3" />
             <XAxis dataKey="name" angle={-20} textAnchor="end" height={50} tick={{ fontSize: 10 }} />
             <YAxis allowDecimals={options.valueMode === 'percent'} />
             <Tooltip
               content={(props) => <ValueTooltipContent valueMode={options.valueMode} {...props} />}
             />
-            <Line type="stepAfter" dataKey="value" stroke={stroke} strokeWidth={2} dot={{ fill: stroke }} />
+            <Line type="stepAfter" dataKey="value" stroke={stroke} strokeWidth={2} dot={{ fill: stroke }}>
+              {options.showDataLabels && (
+                <LabelList
+                  dataKey="value"
+                  content={(props) => {
+                    const p = props as { x?: number | string; y?: number | string; payload?: { count?: number; pct?: number } }
+                    return (
+                      <PointValueLabel
+                        x={p.x}
+                        y={p.y}
+                        payload={p.payload}
+                        valueMode={options.valueMode}
+                        show={options.showDataLabels}
+                      />
+                    )
+                  }}
+                />
+              )}
+            </Line>
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -848,7 +938,7 @@ export function ChartVisualizer({ chartType, data, options }: Props) {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData} margin={{ bottom: 60, left: 8, right: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" />
+            <ChartGrid options={options} strokeDasharray="3 3" />
             <XAxis dataKey="name" angle={-20} textAnchor="end" height={50} tick={{ fontSize: 10 }} />
             <YAxis allowDecimals={options.valueMode === 'percent'} />
             <Tooltip
@@ -861,7 +951,25 @@ export function ChartVisualizer({ chartType, data, options }: Props) {
               fill={stroke}
               fillOpacity={0.25}
               strokeWidth={2}
-            />
+            >
+              {options.showDataLabels && (
+                <LabelList
+                  dataKey="value"
+                  content={(props) => {
+                    const p = props as { x?: number | string; y?: number | string; payload?: { count?: number; pct?: number } }
+                    return (
+                      <PointValueLabel
+                        x={p.x}
+                        y={p.y}
+                        payload={p.payload}
+                        valueMode={options.valueMode}
+                        show={options.showDataLabels}
+                      />
+                    )
+                  }}
+                />
+              )}
+            </Area>
           </AreaChart>
         </ResponsiveContainer>
       </div>

@@ -365,6 +365,12 @@ body {
 }
 
 /* ── Empty / loading states ── */
+.chart-canvas {
+  background-color: #fafbfc;
+  background-image: radial-gradient(circle at 1px 1px, rgb(148 163 184 / 0.14) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
 .et-empty-state {
   border-radius: var(--radius-xl);
   border: 1px dashed #cbd5e1;

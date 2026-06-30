@@ -23,7 +23,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { ProfileResult } from '../../api/client'
-import { getPalette } from '../../lib/chartPalettes'
+import { resolveChartColors, resolveHeatmapRgb } from '../../lib/chartPalettes'
 import {
   funnelRows,
   radarRows,
@@ -34,10 +34,14 @@ import {
   type ValueRow,
   waterfallRows,
 } from '../../lib/chartDataHelpers'
-import { BarPercentLabel, formatChartPct } from '../../lib/chartLabelHelpers'
+import { BarValueLabel, formatChartPct } from '../../lib/chartLabelHelpers'
 
 function colors(options: ChartDisplayOptions) {
-  return getPalette(options.paletteId).colors
+  return resolveChartColors(options, options.userPalettes)
+}
+
+function heatmapRgb(options: ChartDisplayOptions): [number, number, number] {
+  return resolveHeatmapRgb(options, options.userPalettes)
 }
 
 function fillAt(options: ChartDisplayOptions, i: number) {
@@ -79,10 +83,19 @@ export function LollipopChart({
           )}
           <Tooltip />
           <Bar dataKey="value" barSize={2} fill={colors(options)[0]}>
-            <LabelList
-              dataKey="pct"
-              content={(props) => <BarPercentLabel {...props} layout={layout} />}
-            />
+            {options.showDataLabels && (
+              <LabelList
+                dataKey="value"
+                content={(props) => (
+                  <BarValueLabel
+                    {...props}
+                    layout={layout}
+                    valueMode={options.valueMode}
+                    show={options.showDataLabels}
+                  />
+                )}
+              />
+            )}
           </Bar>
           <Scatter dataKey="value" fill={colors(options)[1] ?? colors(options)[0]} />
         </ComposedChart>
@@ -129,10 +142,19 @@ export function ComboChart({
           <Tooltip />
           <Legend />
           <Bar dataKey="value" name="Bars" fill={stroke} radius={[4, 4, 0, 0]}>
-            <LabelList
-              dataKey="pct"
-              content={(props) => <BarPercentLabel {...props} layout="vertical" />}
-            />
+            {options.showDataLabels && (
+              <LabelList
+                dataKey="value"
+                content={(props) => (
+                  <BarValueLabel
+                    {...props}
+                    layout="vertical"
+                    valueMode={options.valueMode}
+                    show={options.showDataLabels}
+                  />
+                )}
+              />
+            )}
           </Bar>
           <Line
             type="monotone"
@@ -230,7 +252,18 @@ export function RadarChartView({ values, options }: { values: ValueRow[]; option
           <PolarGrid />
           <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10 }} />
           <PolarRadiusAxis tick={{ fontSize: 9 }} />
-          <Radar dataKey="value" stroke={stroke} fill={stroke} fillOpacity={0.35} />
+          <Radar dataKey="value" stroke={stroke} fill={stroke} fillOpacity={0.35}>
+            {options.showDataLabels && (
+              <LabelList
+                dataKey="value"
+                formatter={(v) => {
+                  const n = typeof v === 'number' ? v : Number(v)
+                  return options.valueMode === 'percent' ? formatChartPct(n) : String(v ?? '')
+                }}
+                className="fill-slate-600 text-[9px] font-semibold"
+              />
+            )}
+          </Radar>
           <Tooltip />
           <Legend />
         </RadarChart>
@@ -249,17 +282,19 @@ export function RadialBarChartView({ values, options }: { values: ValueRow[]; op
       <ResponsiveContainer width="100%" height="100%">
         <RadialBarChart cx="50%" cy="50%" innerRadius="20%" outerRadius="90%" data={data} startAngle={90} endAngle={-270}>
           <RadialBar dataKey="value" background cornerRadius={4}>
-            <LabelList
-              dataKey="value"
-              position="insideStart"
-              formatter={(v) => {
-                const n = typeof v === 'number' ? v : Number(v)
-                return options.valueMode === 'percent' && Number.isFinite(n)
-                  ? formatChartPct(n)
-                  : String(v ?? '')
-              }}
-              className="fill-slate-700 text-[9px] font-semibold"
-            />
+            {options.showDataLabels && (
+              <LabelList
+                dataKey="value"
+                position="insideStart"
+                formatter={(v) => {
+                  const n = typeof v === 'number' ? v : Number(v)
+                  return options.valueMode === 'percent' && Number.isFinite(n)
+                    ? formatChartPct(n)
+                    : String(v ?? '')
+                }}
+                className="fill-slate-700 text-[9px] font-semibold"
+              />
+            )}
           </RadialBar>
           <Legend />
           <Tooltip />
@@ -307,10 +342,19 @@ export function WaterfallChart({ values, options }: { values: ValueRow[]; option
             {rows.map((_, i) => (
               <Cell key={i} fill={fillAt(options, i)} />
             ))}
-            <LabelList
-              dataKey="pct"
-              content={(props) => <BarPercentLabel {...props} layout="vertical" />}
-            />
+            {options.showDataLabels && (
+              <LabelList
+                dataKey="value"
+                content={(props) => (
+                  <BarValueLabel
+                    {...props}
+                    layout="vertical"
+                    valueMode={options.valueMode}
+                    show={options.showDataLabels}
+                  />
+                )}
+              />
+            )}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -344,7 +388,7 @@ export function BoxPlotChart({ data, options }: { data: ProfileResult; options: 
 }
 
 export function CategoryHeatmapStrip({ values, options }: { values: ValueRow[]; options: ChartDisplayOptions }) {
-  const [r, g, b] = getPalette(options.paletteId).heatmapRgb
+  const [r, g, b] = heatmapRgb(options)
   const rows = toChartRows(values, options)
   const max = Math.max(...rows.map((row) => row.value), 1)
 
@@ -373,7 +417,7 @@ export function CategoryHeatmapStrip({ values, options }: { values: ValueRow[]; 
 }
 
 export function ArrayHeatmap({ data, options }: { data: ProfileResult; options: ChartDisplayOptions }) {
-  const [r, g, b] = getPalette(options.paletteId).heatmapRgb
+  const [r, g, b] = heatmapRgb(options)
   const sections = data.sections ?? []
   const headers = sections[0]?.values?.map((v) => v.label || v.code) ?? []
 
@@ -475,10 +519,19 @@ function CategoryBarChart100({
             {data.map((_, i) => (
               <Cell key={i} fill={fillAt(options, i)} />
             ))}
-            <LabelList
-              dataKey="pct"
-              content={(props) => <BarPercentLabel {...props} layout={layout} />}
-            />
+            {options.showDataLabels && (
+              <LabelList
+                dataKey="value"
+                content={(props) => (
+                  <BarValueLabel
+                    {...props}
+                    layout={layout}
+                    valueMode="percent"
+                    show={options.showDataLabels}
+                  />
+                )}
+              />
+            )}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
