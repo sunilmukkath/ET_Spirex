@@ -108,10 +108,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const result = await api.login(username, password)
+    setAuthToken(result.token)
     const me = await api.getMe()
     const state = { token: result.token, username: result.username, role: me.role }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-    setAuthToken(result.token)
     setUser(state)
   }, [])
 
