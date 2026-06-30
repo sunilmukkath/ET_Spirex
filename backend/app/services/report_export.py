@@ -15,7 +15,7 @@ def _safe_text(text: str, max_len: int = 120) -> str:
     return cleaned.encode("latin-1", errors="replace").decode("latin-1")
 
 
-def profile_to_pdf(result: dict[str, Any], title: str) -> bytes:
+def profile_to_pdf(result: dict[str, Any], title: str, *, narrative: str | None = None) -> bytes:
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -75,10 +75,20 @@ def profile_to_pdf(result: dict[str, Any], title: str) -> bytes:
             if result.get(key) is not None:
                 pdf.cell(0, 6, f"{label}: {result[key]}", ln=True)
 
+    if narrative and narrative.strip():
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Key insights", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        for line in narrative.strip().splitlines():
+            line = line.strip()
+            if line:
+                pdf.multi_cell(0, 6, _safe_text(line, 200))
+
     return bytes(pdf.output())
 
 
-def banner_to_pdf(result: dict[str, Any], title: str) -> bytes:
+def banner_to_pdf(result: dict[str, Any], title: str, *, narrative: str | None = None) -> bytes:
     pdf = FPDF(orientation="L")
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
@@ -119,10 +129,41 @@ def banner_to_pdf(result: dict[str, Any], title: str) -> bytes:
             pdf.set_font("Helvetica", "", 8)
         pdf.ln(4)
 
+    if narrative and narrative.strip():
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, "Key insights", ln=True)
+        pdf.set_font("Helvetica", "", 9)
+        for line in narrative.strip().splitlines():
+            line = line.strip()
+            if line:
+                pdf.multi_cell(0, 6, _safe_text(line, 200))
+        pdf.ln(2)
+
     return bytes(pdf.output())
 
 
-def profile_to_pptx(result: dict[str, Any], title: str) -> bytes:
+def _append_narrative_block(tf, narrative: str | None) -> None:
+    if not narrative or not narrative.strip():
+        return
+    sep = tf.add_paragraph()
+    sep.text = ""
+    heading = tf.add_paragraph()
+    heading.text = "Key insights"
+    heading.font.size = Pt(14)
+    heading.font.bold = True
+    for line in narrative.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if not line.startswith("•"):
+            line = f"• {line.lstrip('-* ')}"
+        para = tf.add_paragraph()
+        para.text = line
+        para.font.size = Pt(12)
+        para.level = 0
+
+
+def profile_to_pptx(result: dict[str, Any], title: str, *, narrative: str | None = None) -> bytes:
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[5])
     slide.shapes.title.text = _safe_text(title, 80)
@@ -156,12 +197,14 @@ def profile_to_pptx(result: dict[str, Any], title: str) -> bytes:
                 para.text = f"{row.get('label')}: {row.get('percentage')}% (n={row.get('count')})"
                 para.font.size = Pt(12)
 
+        _append_narrative_block(tf, narrative)
+
     buf = io.BytesIO()
     prs.save(buf)
     return buf.getvalue()
 
 
-def banner_to_pptx(result: dict[str, Any], title: str) -> bytes:
+def banner_to_pptx(result: dict[str, Any], title: str, *, narrative: str | None = None) -> bytes:
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[5])
     slide.shapes.title.text = _safe_text(title, 80)
@@ -185,6 +228,8 @@ def banner_to_pptx(result: dict[str, Any], title: str) -> bytes:
                 pct = cells[1].get("col_pct") if len(cells) > 1 else None
                 para.text = f"{label}: {pct}%" if pct is not None else str(label)
                 para.font.size = Pt(11)
+
+        _append_narrative_block(tf, narrative)
 
     buf = io.BytesIO()
     prs.save(buf)

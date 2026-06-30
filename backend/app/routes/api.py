@@ -64,9 +64,16 @@ from app.models.workspace_prefs import (
     AnalysisBookmarkCreate,
     FilterPresetCreate,
     ReportExportRequest,
+    ReportNarrativeRequest,
     WeightConfig,
 )
 from app.services.report_export import banner_to_pdf, banner_to_pptx, profile_to_pdf, profile_to_pptx
+from app.services.ai_narrative import (
+    ai_status,
+    banner_context,
+    generate_narrative,
+    profile_context,
+)
 from app.services.raw_data import get_raw_data_page, raw_data_to_csv
 from app.services.response_store import get_responses
 from app.services.project_workflow_store import (
@@ -635,6 +642,49 @@ def get_variable_setup_defaults(
     return {"value_weights": default_value_weights(var)}
 
 
+@router.get("/ai/status")
+def get_ai_status(authorization: str | None = Header(default=None)):
+    _optional_username(authorization)
+    return ai_status()
+
+
+@router.post("/projects/{survey_id}/analysis/report-narrative")
+def preview_report_narrative(
+    survey_id: int,
+    body: ReportNarrativeRequest,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    if not ai_status()["configured"]:
+        raise HTTPException(
+            status_code=503,
+            detail="AI not configured. Set ANTHROPIC_API_KEY or Azure OpenAI env vars on the server.",
+        )
+    try:
+        if body.report_type == "banner" and body.banner_request:
+            result = run_banner_table(survey_id, **body.banner_request)
+            ctx = banner_context(result)
+        elif body.variable_id:
+            result = run_question_profile(
+                survey_id,
+                body.variable_id,
+                completion_status=body.completion_status,
+                filters=[f for f in body.filters] if not body.filter_tree else None,
+                filter_tree=body.filter_tree,
+            )
+            ctx = profile_context(result)
+        else:
+            raise HTTPException(status_code=400, detail="variable_id or banner_request required")
+        narrative = generate_narrative(ctx)
+        if not narrative:
+            raise HTTPException(status_code=503, detail="AI narrative unavailable")
+        return {"narrative": narrative, "context_type": ctx.get("type")}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI narrative failed: {exc}") from exc
+
+
 @router.post("/projects/{survey_id}/analysis/report")
 def export_analysis_report(
     survey_id: int,
@@ -642,11 +692,26 @@ def export_analysis_report(
     authorization: str | None = Header(default=None),
 ):
     _optional_username(authorization)
+    if body.ai_narrative and not ai_status()["configured"]:
+        raise HTTPException(
+            status_code=503,
+            detail="AI not configured. Set ANTHROPIC_API_KEY or Azure OpenAI env vars on the server.",
+        )
     title = f"Survey {survey_id} report"
     fmt = (body.format or "pdf").lower()
+    narrative: str | None = None
     if body.report_type == "banner" and body.banner_request:
         result = run_banner_table(survey_id, **body.banner_request)
-        data = banner_to_pdf(result, title) if fmt == "pdf" else banner_to_pptx(result, title)
+        if body.ai_narrative:
+            try:
+                narrative = generate_narrative(banner_context(result))
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"AI narrative failed: {exc}") from exc
+        data = (
+            banner_to_pdf(result, title, narrative=narrative)
+            if fmt == "pdf"
+            else banner_to_pptx(result, title, narrative=narrative)
+        )
         media = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         ext = "pdf" if fmt == "pdf" else "pptx"
     elif body.variable_id:
@@ -657,7 +722,16 @@ def export_analysis_report(
             filters=[f for f in body.filters] if not body.filter_tree else None,
             filter_tree=body.filter_tree,
         )
-        data = profile_to_pdf(result, title) if fmt == "pdf" else profile_to_pptx(result, title)
+        if body.ai_narrative:
+            try:
+                narrative = generate_narrative(profile_context(result))
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"AI narrative failed: {exc}") from exc
+        data = (
+            profile_to_pdf(result, title, narrative=narrative)
+            if fmt == "pdf"
+            else profile_to_pptx(result, title, narrative=narrative)
+        )
         media = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         ext = "pdf" if fmt == "pdf" else "pptx"
     else:

@@ -44,3 +44,13 @@ class ReportExportRequest(BaseModel):
     filters: list[dict] = Field(default_factory=list)
     filter_tree: dict | None = None
     banner_request: dict | None = None
+    ai_narrative: bool = False
+
+
+class ReportNarrativeRequest(BaseModel):
+    report_type: str = "profile"
+    variable_id: str | None = None
+    completion_status: str = "complete"
+    filters: list[dict] = Field(default_factory=list)
+    filter_tree: dict | None = None
+    banner_request: dict | None = None

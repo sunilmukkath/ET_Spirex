@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Download, FileText, Loader2, Plus, Trash2 } from 'lucide-react'
-import { api, type AnalysisBookmark, type BannerRequest, type SurveyVariable } from '../../api/client'
+import { Download, FileText, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
+import {
+  api,
+  type AiStatus,
+  type AnalysisBookmark,
+  type BannerRequest,
+  type SurveyVariable,
+} from '../../api/client'
 import { filterPayload } from '../../lib/filterTree'
 import type { FilterGroup, FilterSpec } from '../../api/client'
 
@@ -38,6 +44,11 @@ export function ReportBuilderPanel({
   const [sections, setSections] = useState<ReportSection[]>([newSection()])
   const [bookmarks, setBookmarks] = useState<AnalysisBookmark[]>([])
   const [format, setFormat] = useState<'pdf' | 'pptx'>('pdf')
+  const [aiNarrative, setAiNarrative] = useState(false)
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null)
+  const [previewSectionId, setPreviewSectionId] = useState<string | null>(null)
+  const [previewText, setPreviewText] = useState<string | null>(null)
+  const [previewing, setPreviewing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,6 +59,13 @@ export function ReportBuilderPanel({
       .catch(() => setBookmarks([]))
   }, [surveyId])
 
+  useEffect(() => {
+    api
+      .getAiStatus()
+      .then(setAiStatus)
+      .catch(() => setAiStatus({ configured: false, provider: null, model: null, hints: {} }))
+  }, [])
+
   const crosstabBookmarks = bookmarks.filter((b) => b.kind === 'crosstab')
 
   const addSection = () => setSections((s) => [...s, newSection()])
@@ -55,42 +73,65 @@ export function ReportBuilderPanel({
   const updateSection = (id: string, patch: Partial<ReportSection>) =>
     setSections((s) => s.map((x) => (x.id === id ? { ...x, ...patch } : x)))
 
-  const exportSection = useCallback(
-    async (section: ReportSection) => {
+  const sectionPayload = useCallback(
+    (section: ReportSection) => {
       const payload = filterPayload(filters, filterTree)
       if (section.kind === 'profile' && section.variable_id) {
-        await api.exportReport(
-          surveyId,
-          {
-            format,
-            report_type: 'profile',
-            variable_id: section.variable_id,
-            completion_status: completionStatus,
-            filters: payload.filters,
-            filter_tree: payload.filter_tree,
-          },
-          `${section.label.replace(/\W+/g, '_')}.${format === 'pdf' ? 'pdf' : 'pptx'}`,
-        )
-        return
+        return {
+          report_type: 'profile' as const,
+          variable_id: section.variable_id,
+          completion_status: completionStatus,
+          filters: payload.filters,
+          filter_tree: payload.filter_tree,
+        }
       }
       if (section.kind === 'banner' && section.bookmark_id) {
         const bm = crosstabBookmarks.find((b) => b.id === section.bookmark_id)
         const req = bm?.config?.banner_request as BannerRequest | undefined
-        if (!req) throw new Error('Bookmark has no crosstab configuration')
-        await api.exportReport(
-          surveyId,
-          {
-            format,
-            report_type: 'banner',
-            completion_status: completionStatus,
-            banner_request: req,
-          },
-          `${section.label.replace(/\W+/g, '_')}.${format === 'pdf' ? 'pdf' : 'pptx'}`,
-        )
+        if (!req) return null
+        return {
+          report_type: 'banner' as const,
+          completion_status: completionStatus,
+          banner_request: req,
+        }
       }
+      return null
     },
-    [surveyId, completionStatus, filters, filterTree, format, crosstabBookmarks],
+    [completionStatus, filters, filterTree, crosstabBookmarks],
   )
+
+  const exportSection = useCallback(
+    async (section: ReportSection) => {
+      const base = sectionPayload(section)
+      if (!base) throw new Error('Section is not configured')
+      await api.exportReport(
+        surveyId,
+        { ...base, format, ai_narrative: aiNarrative },
+        `${section.label.replace(/\W+/g, '_')}.${format === 'pdf' ? 'pdf' : 'pptx'}`,
+      )
+    },
+    [surveyId, format, aiNarrative, sectionPayload],
+  )
+
+  async function handlePreview(section: ReportSection) {
+    const base = sectionPayload(section)
+    if (!base) {
+      setError('Configure this section before previewing AI narrative')
+      return
+    }
+    setPreviewing(true)
+    setPreviewSectionId(section.id)
+    setError(null)
+    try {
+      const res = await api.previewReportNarrative(surveyId, base)
+      setPreviewText(res.narrative)
+    } catch (err) {
+      setPreviewText(null)
+      setError(err instanceof Error ? err.message : 'AI preview failed')
+    } finally {
+      setPreviewing(false)
+    }
+  }
 
   async function handleExportAll() {
     setExporting(true)
@@ -107,6 +148,8 @@ export function ReportBuilderPanel({
       setExporting(false)
     }
   }
+
+  const aiReady = aiStatus?.configured === true
 
   return (
     <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll">
@@ -133,6 +176,30 @@ export function ReportBuilderPanel({
               <option value="pptx">PowerPoint</option>
             </select>
           </label>
+
+          <label
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+              aiReady
+                ? 'border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/30'
+                : 'border-slate-200 bg-slate-50 text-slate-400'
+            }`}
+            title={
+              aiReady
+                ? `Using ${aiStatus?.provider} (${aiStatus?.model})`
+                : 'Add ANTHROPIC_API_KEY or Azure OpenAI keys on the server (Settings)'
+            }
+          >
+            <input
+              type="checkbox"
+              checked={aiNarrative}
+              disabled={!aiReady}
+              onChange={(e) => setAiNarrative(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-[var(--et-teal)]"
+            />
+            <Sparkles size={14} className={aiReady ? 'text-[var(--et-teal)]' : ''} />
+            <span className="font-medium">AI insights</span>
+          </label>
+
           <button
             type="button"
             onClick={addSection}
@@ -142,6 +209,20 @@ export function ReportBuilderPanel({
             Add section
           </button>
         </div>
+
+        {!aiReady && (
+          <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+            <span className="font-semibold text-slate-700">AI optional.</span> Connect Claude API (
+            {aiStatus?.hints?.anthropic ?? 'console.anthropic.com'}) or Azure OpenAI in server env vars.
+            Claude.ai Pro does not include API access.
+          </p>
+        )}
+
+        {aiReady && (
+          <p className="text-xs text-[var(--et-teal-dark)]">
+            AI connected: {aiStatus?.provider} · {aiStatus?.model}
+          </p>
+        )}
 
         <div className="space-y-3">
           {sections.map((section, index) => (
@@ -169,6 +250,20 @@ export function ReportBuilderPanel({
                   <option value="profile">Question profile</option>
                   <option value="banner">Saved crosstab</option>
                 </select>
+                {aiReady && (
+                  <button
+                    type="button"
+                    onClick={() => void handlePreview(section)}
+                    disabled={previewing}
+                    className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {previewing && previewSectionId === section.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      'Preview AI'
+                    )}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => removeSection(section.id)}
@@ -204,6 +299,12 @@ export function ReportBuilderPanel({
                     </option>
                   ))}
                 </select>
+              )}
+
+              {previewSectionId === section.id && previewText && (
+                <div className="mt-3 rounded-lg border border-[var(--et-teal)]/20 bg-[var(--et-teal-light)]/20 p-3 text-xs leading-relaxed text-slate-700 whitespace-pre-wrap">
+                  {previewText}
+                </div>
               )}
             </div>
           ))}

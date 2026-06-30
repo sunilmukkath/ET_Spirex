@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Save, Settings, Shield, Users, Wifi, WifiOff } from 'lucide-react'
-import { api, type GlobalRole, type TeamRegistry } from '../api/client'
+import { Loader2, Save, Settings, Shield, Sparkles, Users, Wifi, WifiOff } from 'lucide-react'
+import { api, type AiStatus, type GlobalRole, type TeamRegistry } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { TEAM_USERS } from '../auth/AuthContext'
 
@@ -15,6 +15,7 @@ export function AdminSettingsPage() {
   const [connection, setConnection] = useState<Awaited<ReturnType<typeof api.getConnection>> | null>(null)
   const [sessions, setSessions] = useState<{ username: string; last_seen: number }[]>([])
   const [registry, setRegistry] = useState<TeamRegistry | null>(null)
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null)
   const [savingRoles, setSavingRoles] = useState(false)
   const [roleError, setRoleError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -26,11 +27,13 @@ export function AdminSettingsPage() {
         .then((r) => (r.ok ? r.json() : { sessions: [] }))
         .catch(() => ({ sessions: [] })),
       api.getTeamRegistry().catch(() => null),
+      api.getAiStatus().catch(() => null),
     ])
-      .then(([conn, sess, reg]) => {
+      .then(([conn, sess, reg, ai]) => {
         setConnection(conn)
         setSessions(sess.sessions ?? [])
         setRegistry(reg)
+        setAiStatus(ai)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -149,6 +152,35 @@ export function AdminSettingsPage() {
         <p className="mt-3 text-[10px] text-slate-400">
           {ROLE_LABELS.admin} · {ROLE_LABELS.manager} · {ROLE_LABELS.member}
         </p>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-2">
+          <Sparkles size={18} className="text-[var(--et-teal)]" />
+          <h2 className="text-sm font-semibold text-slate-900">AI report narratives</h2>
+        </div>
+        <p className="mt-2 text-sm text-slate-600">
+          {aiStatus?.configured
+            ? `Connected — ${aiStatus.provider} (${aiStatus.model})`
+            : 'Not configured on this server'}
+        </p>
+        {!aiStatus?.configured && (
+          <div className="mt-3 space-y-2 text-xs leading-relaxed text-slate-500">
+            <p>
+              <span className="font-medium text-slate-700">Claude (recommended):</span> create an API key at{' '}
+              <span className="font-mono">console.anthropic.com</span> and set{' '}
+              <span className="font-mono">ANTHROPIC_API_KEY</span> on the server. A claude.ai Pro subscription does
+              not include API access.
+            </p>
+            <p>
+              <span className="font-medium text-slate-700">Azure OpenAI:</span> pay-as-you-go (new Azure accounts may
+              get trial credits — not permanently free). Set{' '}
+              <span className="font-mono">AZURE_OPENAI_ENDPOINT</span>,{' '}
+              <span className="font-mono">AZURE_OPENAI_API_KEY</span>, and{' '}
+              <span className="font-mono">AZURE_OPENAI_DEPLOYMENT</span>.
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

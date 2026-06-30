@@ -778,6 +778,13 @@ export interface ConnectionStatus {
   message?: string
 }
 
+export interface AiStatus {
+  configured: boolean
+  provider: 'anthropic' | 'azure' | null
+  model: string | null
+  hints: Record<string, string>
+}
+
 let authToken: string | null = null
 
 export function setAuthToken(token: string | null) {
@@ -960,6 +967,29 @@ export const api = {
       body: JSON.stringify({ survey_ids: surveyIds }),
     }),
   getConnection: () => fetchJson<ConnectionStatus>('/api/connection'),
+  getAiStatus: () => fetchJson<AiStatus>('/api/ai/status'),
+  previewReportNarrative: (
+    id: number,
+    body: {
+      report_type: 'profile' | 'banner'
+      variable_id?: string
+      completion_status?: string
+      filters?: FilterSpec[]
+      filter_tree?: FilterGroup | null
+      banner_request?: BannerRequest
+    },
+  ) =>
+    fetchJson<{ narrative: string; context_type: string }>(
+      `/api/projects/${id}/analysis/report-narrative`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          filters: body.filter_tree ? [] : (body.filters ?? []),
+        }),
+      },
+    ),
   getProjects: (opts?: { limit?: number; includeStats?: boolean }) => {
     const params = new URLSearchParams()
     if (opts?.limit != null) params.set('limit', String(opts.limit))
@@ -1284,6 +1314,7 @@ export const api = {
       filters?: FilterSpec[]
       filter_tree?: FilterGroup | null
       banner_request?: BannerRequest
+      ai_narrative?: boolean
     },
     filename = 'report.pdf',
   ) => {
