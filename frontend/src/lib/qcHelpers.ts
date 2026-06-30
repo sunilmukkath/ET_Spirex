@@ -98,6 +98,15 @@ export function isCheckAvailable(id: QcCheckId, result: DataQualityResult): bool
   return true
 }
 
+export function checkUnavailableMessage(id: QcCheckId, result: DataQualityResult): string | null {
+  if (id === 'interviewer_gps_proximity') return result.interviewer_gps_proximity?.message ?? null
+  if (id === 'interviewer_short_gap') return result.interviewer_short_gap?.message ?? null
+  if (id === 'interviewer_duplicates') return result.interviewer_duplicates?.message ?? null
+  if (id === 'duplicate_phones') return result.duplicate_phones?.message ?? null
+  if (id === 'speeders') return result.speeders?.message ?? null
+  return null
+}
+
 export function checkCount(id: QcCheckId, result: DataQualityResult): number {
   if (id === 'speeders') return result.speeders?.count ?? 0
   if (id === 'test_responses') return result.test_responses?.count ?? 0

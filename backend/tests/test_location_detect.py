@@ -21,6 +21,12 @@ def test_question_code_gps_pair():
     assert find_lat_lng_columns("Location", cols) == ("LocationGPSLat", "LocationGPSLng")
 
 
+def test_unrelated_code_does_not_match_sgqa_gps_pair():
+    cols = ["id", "INT", "12345X78X901GPSLat", "12345X78X901GPSLng"]
+    assert find_lat_lng_columns("INT", cols, qid=100) is None
+    assert find_lat_lng_columns("INT", cols) is None
+
+
 def test_combined_coordinate_parsing():
     assert parse_coordinate_value("51.5074, -0.1278") == (51.5074, -0.1278)
     assert parse_coordinate_value('{"latitude": -33.86, "longitude": 151.20}') == (-33.86, 151.2)

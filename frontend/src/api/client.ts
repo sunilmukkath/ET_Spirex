@@ -673,6 +673,8 @@ export interface DataQualityResult {
     count: number
     proximity_meters?: number
     gps_variable_id?: string | null
+    sessions_total?: number
+    sessions_with_gps?: number
     by_interviewer?: {
       interviewer: string
       flagged_count: number

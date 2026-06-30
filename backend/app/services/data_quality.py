@@ -125,6 +125,9 @@ def run_data_quality(
             light=True,
         )
         _attach_export_columns(schema, df_columns)
+        from app.services.location_detect import enrich_schema_location
+
+        enrich_schema_location(schema, df_columns)
         from app.services.custom_variables import apply_custom_variables
 
         schema, df = apply_custom_variables(survey_id, schema, df)
@@ -1000,38 +1003,25 @@ def _gps_source_for_variable(
     schema: dict[str, Any],
     variable_id: str,
 ) -> dict[str, str] | None:
-    from app.services.location_detect import find_combined_gps_column, find_lat_lng_columns
+    from app.services.location_detect import resolve_gps_source_for_variable
     from app.services.question_schema import get_variable
 
     var = get_variable(schema, variable_id)
     if not var:
         return None
 
-    df_columns = [str(c) for c in df.columns]
-    lat = str(var.get("lat_column") or "")
-    lng = str(var.get("lng_column") or "")
-    if lat and lng and lat in df.columns and lng in df.columns:
-        return {"lat_col": lat, "lng_col": lng, "combined_col": ""}
-    if lat and lat in df.columns and not lng:
-        return {"lat_col": "", "lng_col": "", "combined_col": lat}
+    resolved = resolve_gps_source_for_variable(var, [str(c) for c in df.columns])
+    if not resolved:
+        return None
 
-    pair = find_lat_lng_columns(
-        str(var.get("code") or ""),
-        df_columns,
-        qid=var.get("qid"),
-    )
-    if pair:
-        return {"lat_col": pair[0], "lng_col": pair[1], "combined_col": ""}
-
-    combined = find_combined_gps_column(
-        str(var.get("code") or ""),
-        str(var.get("text") or ""),
-        df_columns,
-        qid=var.get("qid"),
-    )
-    if combined:
-        return {"lat_col": "", "lng_col": "", "combined_col": combined}
-    return None
+    lat = resolved.get("lat_col") or ""
+    lng = resolved.get("lng_col") or ""
+    combined = resolved.get("combined_col") or ""
+    if lat and lng and (lat not in df.columns or lng not in df.columns):
+        return None
+    if combined and combined not in df.columns:
+        return None
+    return resolved
 
 
 def _resolve_survey_gps_source(
@@ -1044,22 +1034,21 @@ def _resolve_survey_gps_source(
         resolved = _gps_source_for_variable(df, schema, gps_variable_id)
         if resolved:
             return resolved
+        return {"lat_col": "", "lng_col": "", "combined_col": ""}
 
     from app.services.location_detect import (
         find_combined_gps_column,
         index_gps_column_pairs,
+        resolve_gps_source_for_variable,
     )
 
     df_columns = [str(c) for c in df.columns]
     for var in schema.get("variables", []):
         if var.get("kind") != "location":
             continue
-        lat = str(var.get("lat_column") or "")
-        lng = str(var.get("lng_column") or "")
-        if lat and lng and lat in df.columns and lng in df.columns:
-            return {"lat_col": lat, "lng_col": lng, "combined_col": ""}
-        if lat and lat in df.columns and not lng:
-            return {"lat_col": "", "lng_col": "", "combined_col": lat}
+        resolved = resolve_gps_source_for_variable(var, df_columns)
+        if resolved:
+            return resolved
 
     pairs = index_gps_column_pairs(df_columns)
     if pairs:
@@ -1086,12 +1075,20 @@ def _row_gps_point(df: pd.DataFrame, idx: Any, gps: dict[str, str]) -> tuple[flo
     lng_col = gps.get("lng_col") or ""
     combined = gps.get("combined_col") or ""
     if lat_col and lng_col and lat_col in df.columns and lng_col in df.columns:
-        lat = pd.to_numeric(df.at[idx, lat_col], errors="coerce")
-        lng = pd.to_numeric(df.at[idx, lng_col], errors="coerce")
+        lat_raw = df.at[idx, lat_col]
+        lng_raw = df.at[idx, lng_col]
+        lat = pd.to_numeric(lat_raw, errors="coerce")
+        lng = pd.to_numeric(lng_raw, errors="coerce")
         if pd.notna(lat) and pd.notna(lng):
             lat_f, lng_f = float(lat), float(lng)
             if _valid_point(lat_f, lng_f):
                 return lat_f, lng_f
+        parsed = parse_coordinate_value(lat_raw)
+        if parsed:
+            return parsed
+        parsed = parse_coordinate_value(f"{lat_raw},{lng_raw}")
+        if parsed:
+            return parsed
     if combined and combined in df.columns:
         return parse_coordinate_value(df.at[idx, combined])
     return None
@@ -1227,6 +1224,26 @@ def _detect_interviewer_gps_proximity(
     flagged_ids: set[str] = set()
     by_interviewer_summary: list[dict[str, Any]] = []
     groups: dict[str, list[dict[str, Any]]] = prep["groups"]
+    sessions_total = sum(len(sessions) for sessions in groups.values())
+    sessions_with_gps = sum(
+        1 for sessions in groups.values() for session in sessions if session.get("gps")
+    )
+
+    if sessions_with_gps < 2:
+        return {
+            "available": False,
+            "message": (
+                f"Only {sessions_with_gps} interview(s) have valid GPS coordinates "
+                f"(need at least 2 for proximity checks)."
+            ),
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+            "proximity_meters": proximity_meters,
+            "gps_variable_id": gps_variable_id,
+            "sessions_total": sessions_total,
+            "sessions_with_gps": sessions_with_gps,
+        }
 
     for interviewer, sessions in groups.items():
         located = [s for s in sessions if s.get("gps")]
@@ -1280,6 +1297,8 @@ def _detect_interviewer_gps_proximity(
         "by_interviewer": by_interviewer_summary,
         "proximity_meters": proximity_meters,
         "gps_variable_id": gps_variable_id,
+        "sessions_total": sessions_total,
+        "sessions_with_gps": sessions_with_gps,
     }
 
 

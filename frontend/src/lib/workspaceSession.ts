@@ -6,6 +6,7 @@ export interface SurveyWorkspaceSession {
   sideRowIds?: string[]
   bannerLayers?: string[][]
   metric?: string
+  setupExpandedQuestionId?: string | null
   updatedAt: number
 }
 
@@ -47,9 +48,11 @@ export function loadSurveySession(username: string, surveyId: number): SurveyWor
 export function saveSurveySession(
   username: string,
   surveyId: number,
-  session: Omit<SurveyWorkspaceSession, 'updatedAt'>,
+  session: Partial<Omit<SurveyWorkspaceSession, 'updatedAt'>>,
 ) {
+  const current = loadSurveySession(username, surveyId)
   writeJson(surveyKey(username, surveyId), {
+    ...current,
     ...session,
     updatedAt: Date.now(),
   })

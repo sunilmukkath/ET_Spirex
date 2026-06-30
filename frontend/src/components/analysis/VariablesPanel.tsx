@@ -478,6 +478,7 @@ export function VariablesPanel({
             customVariables={variables}
             focusQuestionId={focusQuestionId}
             onFocusQuestionConsumed={onFocusQuestionConsumed}
+            username={username}
             onCreateVariable={openCreateFromQuestion}
             onEditVariable={openEdit}
             onChanged={onChanged}

@@ -15,6 +15,7 @@ import {
   checkCount,
   computeQcMetrics,
   CUSTOM_RULES_CHECK,
+  checkUnavailableMessage,
   disabledChecksFromEnabled,
   enabledChecksFromDisabled,
   enrichFlaggedRowsWithInterviewers,
@@ -705,6 +706,7 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
                 {QC_CHECKS.map((check) => {
                   const count = checkCount(check.id, result)
                   const available = isCheckAvailable(check.id, result)
+                  const unavailableMessage = checkUnavailableMessage(check.id, result)
                   const included = enabledChecks.has(check.id)
                   const active = filterCheck === check.id
                   return (
@@ -746,9 +748,12 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
                         onClick={() => setFilterCheck(active ? 'all' : check.id)}
                       >
                         {!available
-                          ? 'Not available'
+                          ? unavailableMessage ?? 'Not available'
                           : count === 0
-                            ? 'All clear'
+                            ? check.id === 'interviewer_gps_proximity' &&
+                              result.interviewer_gps_proximity?.sessions_with_gps != null
+                              ? `${result.interviewer_gps_proximity.sessions_with_gps} with GPS · all clear`
+                              : 'All clear'
                             : included
                               ? 'View flags ↓'
                               : 'Excluded from QC'}

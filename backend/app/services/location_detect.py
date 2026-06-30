@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import pandas as pd
 
@@ -77,8 +78,9 @@ def find_lat_lng_columns(
         for base, lat_col, lng_col in index_gps_column_pairs(df_columns):
             if _qid_from_gps_base(base) == qid:
                 return lat_col, lng_col
-            if f"X{qid}" in lat_col or f"X{qid}" in lng_col:
-                return lat_col, lng_col
+
+    if not code:
+        return None
 
     lat_cols = [c for c in df_columns if str(c).startswith(code) and "lat" in str(c).lower()]
     lng_cols = [
@@ -90,21 +92,6 @@ def find_lat_lng_columns(
     if lat_cols and lng_cols:
         return str(lat_cols[0]), str(lng_cols[0])
 
-    for lat in df_columns:
-        lat_s = str(lat)
-        if "gpslat" not in lat_s.lower() and not lat_s.lower().endswith("lat"):
-            continue
-        base = lat_s
-        for suffix in ("GPSLat", "gpslat", "Lat", "lat", "_lat", "_latitude", "latitude"):
-            if lat_s.lower().endswith(suffix.lower()):
-                base = lat_s[: -len(suffix)]
-                break
-        for lng in df_columns:
-            lng_s = str(lng)
-            if lng_s == lat_s:
-                continue
-            if base and base in lng_s and any(x in lng_s.lower() for x in ("lng", "lon", "long")):
-                return lat_s, lng_s
     return None
 
 
@@ -229,6 +216,96 @@ def _apply_location_pair(
         variable.lat_column = lat_col
         variable.lng_column = lng_col
         variable.columns = [lat_col, lng_col]
+
+
+def enrich_schema_location(schema: dict[str, Any], df_columns: list[str]) -> None:
+    """Tag location variables with export lat/lng columns (used when schema is built light)."""
+    from app.services.question_types import SurveyVariable, get_type_info
+
+    variables: list[SurveyVariable] = []
+    for var in schema.get("variables", []):
+        ls_type = str(var.get("ls_type") or "")
+        info = get_type_info(ls_type) if ls_type else None
+        kind = str(var.get("kind") or "unknown")
+        if kind == "unknown" and info:
+            kind = info.kind
+        variables.append(
+            SurveyVariable(
+                id=str(var.get("id") or ""),
+                qid=int(var.get("qid") or 0),
+                code=str(var.get("code") or ""),
+                text=str(var.get("text") or ""),
+                ls_type=ls_type,
+                kind=kind,  # type: ignore[arg-type]
+                type_label=str(var.get("type_label") or (info.label if info else "")),
+                group_id=int(var.get("group_id") or 0),
+                group_title=str(var.get("group_title") or ""),
+                group_order=int(var.get("group_order") or 0),
+                question_order=int(var.get("question_order") or 0),
+                columns=[str(c) for c in (var.get("columns") or [])],
+                lat_column=str(var.get("lat_column") or ""),
+                lng_column=str(var.get("lng_column") or ""),
+            )
+        )
+
+    apply_location_kind(variables, df_columns)
+
+    by_id = {v.id: v for v in variables}
+    for var in schema.get("variables", []):
+        sv = by_id.get(str(var.get("id") or ""))
+        if not sv or sv.kind != "location":
+            continue
+        var["kind"] = "location"
+        var["type_label"] = sv.type_label
+        var["lat_column"] = sv.lat_column
+        var["lng_column"] = sv.lng_column
+        var["columns"] = sv.columns
+        var["metrics"] = list(sv.metrics)
+        var["can_banner"] = sv.can_banner
+
+
+def resolve_gps_source_for_variable(
+    var: dict[str, Any],
+    df_columns: list[str],
+) -> dict[str, str] | None:
+    """Resolve lat/lng or combined GPS columns for one survey variable."""
+    lat_col = str(var.get("lat_column") or "")
+    lng_col = str(var.get("lng_column") or "")
+    combined_col = ""
+
+    if lat_col and not lng_col:
+        combined_col = lat_col
+        lat_col = ""
+        lng_col = ""
+
+    if not lat_col or not lng_col:
+        if not combined_col:
+            pair = find_lat_lng_columns(
+                str(var.get("code") or ""),
+                df_columns,
+                qid=var.get("qid"),
+            )
+            if pair:
+                lat_col, lng_col = pair
+            else:
+                combined_col = find_combined_gps_column(
+                    str(var.get("code") or ""),
+                    str(var.get("text") or ""),
+                    df_columns,
+                    qid=var.get("qid"),
+                ) or ""
+                if not combined_col:
+                    for col in var.get("columns") or []:
+                        col_s = str(col)
+                        if col_s in df_columns:
+                            combined_col = col_s
+                            break
+
+    if lat_col and lng_col:
+        return {"lat_col": lat_col, "lng_col": lng_col, "combined_col": ""}
+    if combined_col:
+        return {"lat_col": "", "lng_col": "", "combined_col": combined_col}
+    return None
 
 
 def apply_location_kind(variables: list[SurveyVariable], df_columns: list[str]) -> None:
