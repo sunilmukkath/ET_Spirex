@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, Lock, User } from 'lucide-react'
+import { api } from '../api/client'
 import { TEAM_USERS, useAuth } from '../auth/AuthContext'
 
 interface Props {
@@ -9,10 +10,28 @@ interface Props {
 
 export function SignInForm({ onSuccess, compact }: Props) {
   const { login } = useAuth()
+  const [teamUsers, setTeamUsers] = useState<string[]>([...TEAM_USERS])
   const [username, setUsername] = useState<string>(TEAM_USERS[0])
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .getAuthUsers()
+      .then((res) => {
+        if (cancelled || !res.users?.length) return
+        setTeamUsers(res.users)
+        setUsername((current) => (res.users.includes(current) ? current : res.users[0]))
+      })
+      .catch(() => {
+        /* keep local fallback list */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -57,7 +76,7 @@ export function SignInForm({ onSuccess, compact }: Props) {
           onChange={(e) => setUsername(e.target.value)}
           className="w-full rounded-xl border border-white/15 bg-[var(--et-navy)]/80 px-4 py-3 text-sm text-white outline-none ring-[var(--et-teal)] focus:ring-2"
         >
-          {TEAM_USERS.map((u) => (
+          {teamUsers.map((u) => (
             <option key={u} value={u}>
               {u}
             </option>

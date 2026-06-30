@@ -126,7 +126,8 @@ def auth_login(body: LoginRequest):
     token = authenticate(body.username, body.password)
     if not token:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    return LoginResponse(token=token, username=body.username)
+    username = str(body.username or "").strip()
+    return LoginResponse(token=token, username=username)
 
 
 @router.post("/auth/logout")

@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-VALID_USERS = frozenset({"Sunil", "Tony", "Ravi", "Aneena", "Shilaja", "Palani"})
+VALID_USERS = frozenset({"Sunil", "Tony", "Ravi", "Aneena", "Shilaja", "Palani", "Bagya"})
 DEFAULT_PASSWORD = "ET@2026"
 SESSION_TTL_SECONDS = 60 * 60 * 12  # 12 hours
 
@@ -22,14 +22,16 @@ _sessions: dict[str, SessionRecord] = {}
 
 
 def authenticate(username: str, password: str) -> str | None:
-    if username not in VALID_USERS:
+    name = str(username or "").strip()
+    secret = str(password or "").strip()
+    if name not in VALID_USERS:
         return None
-    if password != DEFAULT_PASSWORD:
+    if secret != DEFAULT_PASSWORD:
         return None
     token = secrets.token_urlsafe(32)
     now = time.time()
     _sessions[token] = SessionRecord(
-        username=username,
+        username=name,
         token=token,
         login_at=now,
         last_seen=now,
