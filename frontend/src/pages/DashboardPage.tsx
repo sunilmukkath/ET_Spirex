@@ -10,6 +10,7 @@ import {
   List,
   Pin,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
   User,
@@ -20,6 +21,11 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import { api, type ConnectionStatus, type Project } from '../api/client'
 import { usePinnedSurveys } from '../hooks/usePinnedSurveys'
+import {
+  loadUserAppSession,
+  resolveSurveyHref,
+  saveUserAppSession,
+} from '../lib/workspaceSession'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState, ErrorState, LoadingState, SkeletonBlock } from '../components/States'
 
@@ -131,6 +137,10 @@ function mergeStats(projects: Project[], stats: Record<string, { completed: numb
 
 export function DashboardPage() {
   const { user } = useAuth()
+  const appSession = useMemo(
+    () => (user?.username ? loadUserAppSession(user.username) : null),
+    [user?.username],
+  )
   const [connection, setConnection] = useState<ConnectionStatus | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
@@ -139,12 +149,29 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [sortKey, setSortKey] = useState<SortKey>('newest')
-  const [viewMode, setViewMode] = useState<ViewMode>('grid')
+  const [sortKey, setSortKey] = useState<SortKey>(
+    () => (appSession?.dashboardSortKey as SortKey | undefined) ?? 'newest',
+  )
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    () => (appSession?.dashboardViewMode as ViewMode | undefined) ?? 'grid',
+  )
   const { pinnedIds, pinnedSet, toggle: togglePinned } = usePinnedSurveys()
   const [showPinnedOnly, setShowPinnedOnly] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const loadGeneration = useRef(0)
+
+  useEffect(() => {
+    if (!user?.username) return
+    saveUserAppSession(user.username, {
+      dashboardViewMode: viewMode,
+      dashboardSortKey: sortKey,
+    })
+  }, [user?.username, viewMode, sortKey])
+
+  const resumePath = useMemo(() => {
+    if (!user?.username || !appSession?.lastSurveyId) return null
+    return resolveSurveyHref(user.username, appSession.lastSurveyId)
+  }, [user?.username, appSession?.lastSurveyId])
 
   const loadProjects = useCallback(async (generation: number) => {
     const [conn, data] = await Promise.all([api.getConnection(), api.getProjects()])
@@ -311,6 +338,28 @@ export function DashboardPage() {
         </div>
       )}
 
+      {resumePath && appSession?.lastSurveyTitle && (
+        <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <RotateCcw size={16} className="shrink-0 text-[var(--et-teal)]" />
+              <p className="text-sm text-slate-600">
+                Continue where you left off:{' '}
+                <span className="font-semibold text-slate-900">{appSession.lastSurveyTitle}</span>
+              </p>
+            </div>
+            <Link
+              to={resumePath}
+              state={{ title: appSession.lastSurveyTitle }}
+              className="inline-flex items-center gap-1 rounded-lg bg-[var(--et-teal)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+            >
+              Resume
+              <ChevronRight size={14} />
+            </Link>
+          </div>
+        </section>
+      )}
+
       {pinnedProjects.length > 0 && !showPinnedOnly && !search.trim() && statusFilter === 'all' && (
         <section className="rounded-xl border border-[var(--et-teal)]/20 bg-[var(--et-teal-light)]/25 p-4 shadow-sm sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -334,6 +383,7 @@ export function DashboardPage() {
               <PinnedSurveyChip
                 key={project.id}
                 project={project}
+                openHref={resolveSurveyHref(user?.username, project.id)}
                 isPinned
                 onTogglePin={() => void togglePinned(project.id)}
               />
@@ -487,6 +537,7 @@ export function DashboardPage() {
             <SurveyCard
               key={project.id}
               project={project}
+              openHref={resolveSurveyHref(user?.username, project.id)}
               isPinned={pinnedSet.has(project.id)}
               onTogglePin={() => void togglePinned(project.id)}
             />
@@ -496,6 +547,7 @@ export function DashboardPage() {
         <SurveyTable
           projects={filtered}
           pinnedSet={pinnedSet}
+          surveyHref={(id) => resolveSurveyHref(user?.username, id)}
           onTogglePin={(id) => void togglePinned(id)}
         />
       )}
@@ -505,10 +557,12 @@ export function DashboardPage() {
 
 function PinnedSurveyChip({
   project,
+  openHref,
   isPinned,
   onTogglePin,
 }: {
   project: Project
+  openHref: string
   isPinned: boolean
   onTogglePin: () => void
 }) {
@@ -522,7 +576,7 @@ function PinnedSurveyChip({
       >
         <Pin size={14} className={isPinned ? 'fill-current' : ''} />
       </button>
-      <Link to={`/projects/${project.id}?mode=home`} state={{ title: project.title }} className="block pr-8">
+      <Link to={openHref} state={{ title: project.title }} className="block pr-8">
         <div className="flex items-center gap-2">
           <StatusBadge status={project.status} />
           <span className="font-mono text-[10px] text-slate-400">#{project.id}</span>
@@ -540,10 +594,12 @@ function PinnedSurveyChip({
 
 function SurveyCard({
   project,
+  openHref,
   isPinned,
   onTogglePin,
 }: {
   project: Project
+  openHref: string
   isPinned: boolean
   onTogglePin: () => void
 }) {
@@ -565,7 +621,7 @@ function SurveyCard({
       </button>
 
       <Link
-        to={`/projects/${project.id}?mode=home`}
+        to={openHref}
         state={{ title: project.title }}
         className="flex flex-1 flex-col"
       >
@@ -664,10 +720,12 @@ function QuickAction({ to, icon, label }: { to: string; icon: React.ReactNode; l
 function SurveyTable({
   projects,
   pinnedSet,
+  surveyHref,
   onTogglePin,
 }: {
   projects: Project[]
   pinnedSet: Set<number>
+  surveyHref: (id: number) => string
   onTogglePin: (id: number) => void
 }) {
   return (
@@ -704,7 +762,7 @@ function SurveyTable({
                   </td>
                   <td className="px-4 py-3">
                     <Link
-                      to={`/projects/${project.id}?mode=home`}
+                      to={surveyHref(project.id)}
                       state={{ title: project.title }}
                       className="font-medium text-slate-900 hover:text-[var(--et-teal-dark)]"
                     >
@@ -734,7 +792,8 @@ function SurveyTable({
                   <td className="px-4 py-3 text-xs text-slate-500">{String(project.owner ?? '—')}</td>
                   <td className="px-4 py-3">
                     <Link
-                      to={`/projects/${project.id}?mode=home`}
+                      to={surveyHref(project.id)}
+                      state={{ title: project.title }}
                       className="inline-flex items-center gap-1 text-xs font-medium text-[var(--et-teal)] hover:underline"
                     >
                       Open

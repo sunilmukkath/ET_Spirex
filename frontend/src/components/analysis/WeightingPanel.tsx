@@ -66,7 +66,7 @@ export function WeightingPanel({ surveyId, variables }: Props) {
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-slate-900">Survey weighting</h3>
           <p className="mt-1 text-xs text-slate-500">
-            Apply a numeric weight variable to distributions, means, and crosstab counts across Profile, Compare, and Charts.
+            Apply a numeric weight variable to distributions, means, and crosstab counts across Profile, Crosstabs, and Charts.
           </p>
         </div>
       </div>

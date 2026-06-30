@@ -52,6 +52,14 @@ import { ProjectWorkflowPanel } from '../components/analysis/ProjectWorkflowPane
 import { ReportBuilderPanel } from '../components/analysis/ReportBuilderPanel'
 import { filterPayload, treeToFlatFilters } from '../lib/filterTree'
 import type { ChartTypeId } from '../lib/chartTypes'
+import {
+  loadSurveySession,
+  loadUserAppSession,
+  mergeSessionIntoSearch,
+  saveSurveySession,
+  saveUserAppSession,
+  surveyEntryUsesDefaults,
+} from '../lib/workspaceSession'
 
 const DataPanel = lazy(() =>
   import('../components/analysis/DataPanel').then((m) => ({ default: m.DataPanel })),
@@ -107,7 +115,7 @@ function parseMode(raw: string | null): Mode {
 }
 
 function parseAnalyzeView(rawMode: string | null, rawView: string | null): AnalyzeView {
-  if (rawMode === 'crosstabs' || rawMode === 'compare' || rawView === 'compare') return 'compare'
+  if (rawMode === 'crosstabs' || rawMode === 'compare' || rawView === 'compare' || rawView === 'crosstabs') return 'compare'
   return 'profile'
 }
 
@@ -175,6 +183,24 @@ export function SurveyWorkspace() {
     has_review: boolean
   } | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [autoRunCrosstabsTotal, setAutoRunCrosstabsTotal] = useState(
+    () => loadUserAppSession(user?.username ?? '')?.autoRunCrosstabsTotal ?? true,
+  )
+  const autoRunCompareAttempted = useRef(false)
+
+  useEffect(() => {
+    if (!user?.username) return
+    setAutoRunCrosstabsTotal(loadUserAppSession(user.username)?.autoRunCrosstabsTotal ?? true)
+  }, [user?.username])
+
+  useEffect(() => {
+    if (!user?.username) return
+    saveUserAppSession(user.username, { autoRunCrosstabsTotal })
+  }, [user?.username, autoRunCrosstabsTotal])
+
+  useEffect(() => {
+    autoRunCompareAttempted.current = false
+  }, [surveyId, analyzeView])
 
   const reloadQcSummary = useCallback(async () => {
     if (!surveyId) return
@@ -195,6 +221,44 @@ export function SurveyWorkspace() {
   }, [surveyId, reloadQcSummary])
 
   useEffect(() => {
+    if (!user?.username || !Number.isFinite(surveyId)) return
+
+    const qs = searchParams.toString()
+    if (!surveyEntryUsesDefaults(qs ? `?${qs}` : '')) return
+
+    const saved = loadSurveySession(user.username, surveyId)
+    if (!saved) return
+
+    setSearchParams((prev) => mergeSessionIntoSearch(prev, saved), { replace: true })
+    if (saved.selectedQuestionId) setSelectedId(saved.selectedQuestionId)
+  }, [user?.username, surveyId, setSearchParams])
+
+  useEffect(() => {
+    if (!user?.username || !Number.isFinite(surveyId)) return
+    saveSurveySession(user.username, surveyId, {
+      mode: rawModeParam || 'home',
+      view: searchParams.get('view') || undefined,
+      responses: completionStatus,
+      selectedQuestionId: selectedId,
+    })
+    const qs = searchParams.toString()
+    saveUserAppSession(user.username, {
+      lastSurveyId: surveyId,
+      lastSurveyTitle: project?.title || navTitle || undefined,
+      lastPath: qs ? `/projects/${surveyId}?${qs}` : `/projects/${surveyId}`,
+    })
+  }, [
+    user?.username,
+    surveyId,
+    rawModeParam,
+    searchParams,
+    completionStatus,
+    selectedId,
+    project?.title,
+    navTitle,
+  ])
+
+  useEffect(() => {
     if (!surveyId) return
     reloadQcSummary()
   }, [surveyId, schemaVersion, reloadQcSummary])
@@ -208,7 +272,7 @@ export function SurveyWorkspace() {
     if (raw === 'crosstabs' || raw === 'compare') {
       setSearchParams((prev) => {
         prev.set('mode', 'explore')
-        prev.set('view', 'compare')
+        prev.set('view', 'crosstabs')
         return prev
       }, { replace: true })
       return
@@ -295,7 +359,7 @@ export function SurveyWorkspace() {
     (view: AnalyzeView) => {
       setSearchParams((prev) => {
         prev.set('mode', 'explore')
-        if (view === 'compare') prev.set('view', 'compare')
+        if (view === 'compare') prev.set('view', 'crosstabs')
         else prev.delete('view')
         return prev
       }, { replace: true })
@@ -323,8 +387,8 @@ export function SurveyWorkspace() {
         } else if (targetMode === 'quality') {
           prev.set('mode', 'fields')
           prev.set('view', 'team')
-        } else if (view === 'compare') {
-          prev.set('view', 'compare')
+        } else if (view === 'compare' || view === 'crosstabs') {
+          prev.set('view', 'crosstabs')
         } else if (view === 'profile') {
           prev.delete('view')
         } else if (targetMode !== 'explore' && targetMode !== 'fields') {
@@ -416,10 +480,13 @@ export function SurveyWorkspace() {
     if (tree) setFilters([])
   }
 
-  function buildBannerRequest() {
-    const rowIds = sideRowIds.length > 0 ? sideRowIds : selectedId ? [selectedId] : []
+  function buildBannerRequest(overrides?: { rowIds?: string[]; bannerLayers?: string[][] }) {
+    const rowIds =
+      overrides?.rowIds ??
+      (sideRowIds.length > 0 ? sideRowIds : selectedId ? [selectedId] : [])
     if (rowIds.length === 0) return null
-    const layers = bannerLayers.filter((layer) => layer.length > 0)
+    const sourceLayers = overrides?.bannerLayers ?? bannerLayers
+    const layers = sourceLayers.filter((layer) => layer.length > 0)
     const flatBannerIds = layers.flat()
     const row_filters: Record<string, FilterSpec[]> = {}
     for (const id of rowIds) {
@@ -578,9 +645,9 @@ export function SurveyWorkspace() {
     return () => clearTimeout(t)
   }, [mode, analyzeView, selectedId, schemaLoading, filters, filterTree, runProfile])
 
-  async function runBanner() {
-    const request = buildBannerRequest()
-    if (!request || bannerIds.length === 0 || sideRowIds.length === 0) return
+  const runBanner = useCallback(async (overrides?: { rowIds?: string[]; bannerLayers?: string[][] }) => {
+    const request = buildBannerRequest(overrides)
+    if (!request) return
 
     bannerAbort.current?.abort()
     const ctrl = new AbortController()
@@ -629,7 +696,55 @@ export function SurveyWorkspace() {
         setBannerProgress(null)
       }
     }
-  }
+  }, [
+    surveyId,
+    completionStatus,
+    sideRowIds,
+    selectedId,
+    bannerLayers,
+    showCounts,
+    showColPct,
+    showRowPct,
+    sigEnabled,
+    confidenceLevel,
+    metric,
+    filters,
+    filterTree,
+    tableFilters,
+  ])
+
+  const runAllOnTotal = useCallback(async () => {
+    const ids = (activeSchema?.variables ?? [])
+      .filter((v) => v.can_banner)
+      .map((v) => v.id)
+    if (ids.length === 0) return
+    setSideRowIds(ids)
+    setBannerLayers([[]])
+    setSelectedId(ids[0])
+    setBannerResult(null)
+    await runBanner({ rowIds: ids, bannerLayers: [[]] })
+  }, [activeSchema, runBanner])
+
+  useEffect(() => {
+    if (mode !== 'explore' || analyzeView !== 'compare' || schemaLoading) return
+    if (!autoRunCrosstabsTotal) return
+    if (analyzing || autoRunCompareAttempted.current) return
+    if (!(activeSchema?.variables ?? []).some((v) => v.can_banner)) return
+
+    autoRunCompareAttempted.current = true
+    const timer = window.setTimeout(() => {
+      void runAllOnTotal()
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [
+    mode,
+    analyzeView,
+    schemaLoading,
+    autoRunCrosstabsTotal,
+    analyzing,
+    activeSchema,
+    runAllOnTotal,
+  ])
 
   async function refreshCrosstabTable(rowId: string, tableIndex: number) {
     const request = buildBannerRequest()
@@ -955,7 +1070,7 @@ export function SurveyWorkspace() {
                   onClick={() => setAnalyzeView('compare')}
                   icon={<Table2 size={14} />}
                 >
-                  Compare
+                  Crosstabs
                 </AnalyzeViewButton>
               </div>
               <p className="hidden text-xs text-slate-500 sm:block">
@@ -1159,7 +1274,10 @@ export function SurveyWorkspace() {
               analyzing={analyzing}
               bannerProgress={bannerProgress}
               exporting={exporting}
-              onRun={runBanner}
+              onRun={() => void runBanner()}
+              onRunAllOnTotal={() => void runAllOnTotal()}
+              autoRunTotal={autoRunCrosstabsTotal}
+              onAutoRunTotalChange={setAutoRunCrosstabsTotal}
               onExport={exportBanner}
               bannerResult={bannerResult}
               schemaLoading={schemaLoading}
@@ -1173,7 +1291,7 @@ export function SurveyWorkspace() {
               buildBookmarkConfig={() => {
                 const req = buildBannerRequest()
                 return {
-                  name: `Compare ${sideRowIds.length}×${bannerIds.length}${bannerLayers.filter((l) => l.length > 0).length > 1 ? ` (${bannerLayers.filter((l) => l.length > 0).length} layers)` : ''}`,
+                  name: `Crosstabs ${sideRowIds.length}×${bannerIds.length}${bannerLayers.filter((l) => l.length > 0).length > 1 ? ` (${bannerLayers.filter((l) => l.length > 0).length} layers)` : ''}`,
                   config: {
                     side_row_ids: sideRowIds,
                     banner_ids: bannerIds,

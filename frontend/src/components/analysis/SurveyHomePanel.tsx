@@ -141,8 +141,8 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
           />
           <QuickLink
             icon={<Table2 size={18} />}
-            title="Questions — Compare"
-            desc="Crosstab rows against banner columns"
+            title="Crosstabs"
+            desc="Multi-banner tables with significance testing"
             onClick={() => onNavigate('explore', 'compare')}
           />
           <QuickLink

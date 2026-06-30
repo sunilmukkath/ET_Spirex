@@ -135,6 +135,9 @@ export interface CrosstabsPanelProps {
   bannerProgress?: { done: number; total: number } | null
   exporting: boolean
   onRun: () => void
+  onRunAllOnTotal: () => void
+  autoRunTotal: boolean
+  onAutoRunTotalChange: (enabled: boolean) => void
   onExport: () => void
   bannerResult: BannerResult | null
   schemaLoading: boolean
@@ -188,6 +191,9 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
     bannerProgress,
     exporting,
     onRun,
+    onRunAllOnTotal,
+    autoRunTotal,
+    onAutoRunTotalChange,
     onExport,
     bannerResult,
     schemaLoading,
@@ -203,7 +209,8 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
     exportingReport,
   } = props
 
-  const canRun = sideRowVars.length > 0 && bannerVars.length > 0 && !schemaLoading
+  const canRun = sideRowVars.length > 0 && !schemaLoading
+  const canRunAllOnTotal = (variables.filter((v) => v.can_banner).length > 0) && !schemaLoading
   const hasResults = Boolean(bannerResult && !bannerResult.error)
 
   const [setupOpen, setSetupOpen] = useState(true)
@@ -267,13 +274,35 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
           <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
+            onClick={onRunAllOnTotal}
+            disabled={!canRunAllOnTotal || analyzing}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--et-teal)]/40 bg-[var(--et-teal-light)]/50 px-3 py-2 text-sm font-medium text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)] disabled:opacity-40 sm:px-4"
+            title="Add every banner-ready question as a side row and build tables with Total column only"
+          >
+            {analyzing ? <Loader2 className="animate-spin" size={16} /> : <Table2 size={16} />}
+            Run all on Total
+          </button>
+
+          <button
+            type="button"
             onClick={onRun}
-            disabled={!canRun || analyzing}
+            disabled={!canRun || analyzing || bannerVars.length === 0}
             className="inline-flex items-center gap-2 rounded-lg bg-[var(--et-teal)] px-3 py-2 text-sm font-medium text-white hover:bg-[var(--accent-hover)] disabled:opacity-40 sm:px-4"
+            title={bannerVars.length === 0 ? 'Add at least one banner column, or use Run all on Total' : undefined}
           >
             {analyzing ? <Loader2 className="animate-spin" size={16} /> : <Table2 size={16} />}
             Build crosstab
           </button>
+
+          <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={autoRunTotal}
+              onChange={(e) => onAutoRunTotalChange(e.target.checked)}
+              className="rounded border-slate-300 text-[var(--et-teal)]"
+            />
+            Auto-run on Total when Crosstabs opens
+          </label>
 
           {hasResults && (
             <>

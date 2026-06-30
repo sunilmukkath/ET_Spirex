@@ -22,7 +22,7 @@ const FEATURES = [
   },
   {
     icon: Layers,
-    title: 'Questions & compare',
+    title: 'Questions & crosstabs',
     desc: 'Profile distributions and multi-banner crosstabs with significance testing.',
   },
   {

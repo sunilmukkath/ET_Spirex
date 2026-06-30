@@ -64,7 +64,7 @@ export function ProfileResults({
           onClick={onCompareQuestion}
           className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/40 px-3 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)]"
         >
-          Compare this question →
+          Crosstab this question →
         </button>
       )}
       {onConfigureQuestion && (

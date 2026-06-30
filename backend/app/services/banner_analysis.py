@@ -441,9 +441,6 @@ def _build_banner_table(
     resolved_metric = metric if metric != "auto" else _default_metric(row_var)
     base_n = len(df)
 
-    if not banner_columns:
-        return {"error": "Banner variables have no valid data columns"}
-
     column_masks = _banner_masks(df, banner_columns)
 
     if row_var["kind"] in ("single",) or (
@@ -725,7 +722,7 @@ def _resolve_banner_columns(
 ) -> dict[str, Any]:
     layers_ids = _normalize_banner_layers(banner_variable_ids, banner_layers)
     if not layers_ids:
-        return {"error": "No banner variables selected", "columns": [], "banner_vars": []}
+        return {"columns": [], "banner_vars": [], "layer_specs_list": [], "header_rows": None}
 
     layer_specs_list: list[list[dict[str, Any]]] = []
     banner_vars: list[dict[str, Any]] = []
