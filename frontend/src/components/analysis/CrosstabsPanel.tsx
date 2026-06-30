@@ -132,6 +132,7 @@ export interface CrosstabsPanelProps {
   confidenceLevel: number
   onConfidenceLevelChange: (v: number) => void
   analyzing: boolean
+  bannerProgress?: { done: number; total: number } | null
   exporting: boolean
   onRun: () => void
   onExport: () => void
@@ -184,6 +185,7 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
     confidenceLevel,
     onConfidenceLevelChange,
     analyzing,
+    bannerProgress,
     exporting,
     onRun,
     onExport,
@@ -495,16 +497,32 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
             description="Add side row and banner questions, set table options, then build the crosstab."
           />
         )}
-        {analyzing && (
+        {analyzing && !bannerResult && (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center sm:py-20">
             <Loader2 className="animate-spin text-[var(--et-teal)]" size={32} />
             <p className="text-sm font-medium text-slate-700">Building crosstab…</p>
             <p className="max-w-sm px-4 text-xs text-slate-500">
-              First run can take up to 2–3 minutes while response data loads from LimeSurvey.
+              Large studies load response data first, then build tables in batches so nothing times out.
             </p>
           </div>
         )}
-        {bannerResult && !analyzing && (
+        {analyzing && bannerResult && bannerProgress && (
+          <div className="mb-4 flex items-center gap-3 rounded-xl border border-[var(--et-teal)]/25 bg-[var(--et-teal-light)]/40 px-4 py-3">
+            <Loader2 className="shrink-0 animate-spin text-[var(--et-teal)]" size={18} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-slate-800">
+                Building table {bannerProgress.done} of {bannerProgress.total}…
+              </p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/80">
+                <div
+                  className="h-full rounded-full bg-[var(--et-teal)] transition-all duration-300"
+                  style={{ width: `${Math.round((bannerProgress.done / bannerProgress.total) * 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+        {bannerResult && (
           <div className="animate-fade-in rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-6">
             <CrosstabsResults
               result={bannerResult}

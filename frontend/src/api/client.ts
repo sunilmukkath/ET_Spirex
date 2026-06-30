@@ -680,7 +680,8 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 const API_TIMEOUT_MS = 12_000
-const ANALYSIS_TIMEOUT_MS = 180_000
+/** Per-request ceiling for analysis calls (crosstabs run in chunks for large builds). */
+const ANALYSIS_TIMEOUT_MS = 600_000
 
 function formatApiError(body: unknown, status: number): string {
   if (body && typeof body === 'object') {
@@ -736,7 +737,7 @@ async function fetchJson<T>(
       }
       if (timedOut) {
         throw new Error(
-          'Request timed out. Crosstabs and large surveys can take up to 3 minutes on first run — please wait and try again.',
+          'Request timed out. Large crosstab builds run in batches — try fewer tables per build or wait for data to finish loading.',
         )
       }
       throw new Error('Request was cancelled.')
@@ -1162,7 +1163,7 @@ export const api = {
     a.click()
     URL.revokeObjectURL(url)
   },
-  runBanner: (id: number, request: BannerRequest) =>
+  runBanner: (id: number, request: BannerRequest, signal?: AbortSignal) =>
     fetchJson<BannerResult>(
       `/api/projects/${id}/analysis/banner`,
       {
@@ -1172,6 +1173,7 @@ export const api = {
           ...request,
           filters: request.filter_tree ? [] : (request.filters ?? []),
         }),
+        signal,
       },
       ANALYSIS_TIMEOUT_MS,
     ),

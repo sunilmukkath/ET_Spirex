@@ -15,7 +15,12 @@ from app.services.answer_labels import (
     label_for_answer,
     normalize_answer_code,
 )
-from app.services.analysis_context import load_analysis_context, load_filtered_context
+from app.services.analysis_context import (
+    _filter_tree_digest,
+    _filters_digest,
+    load_analysis_context,
+    load_filtered_context,
+)
 from app.services.question_schema import get_variable
 from app.services.variable_columns import find_variable_column as _find_column
 from app.services.weighting import weight_series, weighted_mean, weighted_pct, weighted_sum
@@ -258,13 +263,32 @@ def run_banner_table(
     else:
         schema, df_raw = load_analysis_context(survey_id, completion_status=completion_status)
     tables = []
+    banner_setup_cache: dict[str, dict[str, Any]] = {}
     for rid in row_ids:
+        row_f = _row_filters(rid)
+        if filter_tree:
+            df_for_banners = _apply_filters(df_raw, schema, row_f) if row_f else df_raw
+            setup_key = f"{_filter_tree_digest(filter_tree)}:{_filters_digest(row_f)}"
+        else:
+            df_for_banners = _apply_filters(df_raw, schema, row_f)
+            setup_key = _filters_digest(row_f)
+
+        banner_setup = banner_setup_cache.get(setup_key)
+        if banner_setup is None:
+            banner_setup = _resolve_banner_columns(
+                schema,
+                banner_variable_ids=banner_variable_ids,
+                banner_layers=banner_layers,
+                df=df_for_banners,
+            )
+            banner_setup_cache[setup_key] = banner_setup
+
         table = _build_banner_table(
             survey_id,
             row_variable_id=rid,
             banner_variable_ids=banner_variable_ids,
             banner_layers=banner_layers,
-            filters=_row_filters(rid),
+            filters=row_f,
             filter_tree=None,
             completion_status=completion_status,
             show_counts=show_counts,
@@ -275,6 +299,7 @@ def run_banner_table(
             metric=metric,
             schema=schema,
             df_raw=df_raw,
+            banner_setup=banner_setup,
         )
         tables.append(table)
 
@@ -310,6 +335,7 @@ def _build_banner_table(
     metric: str = "auto",
     schema: dict[str, Any] | None = None,
     df_raw: pd.DataFrame | None = None,
+    banner_setup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if schema is None or df_raw is None:
         schema, df = load_filtered_context(
@@ -327,7 +353,7 @@ def _build_banner_table(
     if not row_var["can_banner"]:
         return {"error": f"'{row_var['text']}' cannot be used as a banner row"}
 
-    banner_setup = _resolve_banner_columns(
+    banner_setup = banner_setup or _resolve_banner_columns(
         schema,
         banner_variable_ids=banner_variable_ids,
         banner_layers=banner_layers,

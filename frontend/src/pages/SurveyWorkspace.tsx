@@ -16,6 +16,12 @@ import {
   Table2,
 } from 'lucide-react'
 import {
+  bannerChunkRequest,
+  bannerTablesFromResult,
+  chunkBannerRowIds,
+  mergeBannerChunkResults,
+} from '../lib/bannerRun'
+import {
   api,
   invalidateSchemaCache,
   type AnalysisBookmark,
@@ -134,6 +140,7 @@ export function SurveyWorkspace() {
   const [sideRowIds, setSideRowIds] = useState<string[]>([])
   const [profileResult, setProfileResult] = useState<ProfileResult | null>(null)
   const [bannerResult, setBannerResult] = useState<BannerResult | null>(null)
+  const [bannerProgress, setBannerProgress] = useState<{ done: number; total: number } | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [metric, setMetric] = useState('auto')
@@ -375,6 +382,7 @@ export function SurveyWorkspace() {
   }, [])
 
   const profileAbort = useRef<AbortController | null>(null)
+  const bannerAbort = useRef<AbortController | null>(null)
   const initialized = useRef(false)
 
   const setMode = (m: Mode) => {
@@ -559,14 +567,53 @@ export function SurveyWorkspace() {
   async function runBanner() {
     const request = buildBannerRequest()
     if (!request || bannerIds.length === 0 || sideRowIds.length === 0) return
+
+    bannerAbort.current?.abort()
+    const ctrl = new AbortController()
+    bannerAbort.current = ctrl
+
     setAnalyzing(true)
+    setBannerProgress(null)
     setBannerResult(null)
+
+    const rowIds = request.row_variable_ids ?? [request.row_variable_id]
+    const chunks = chunkBannerRowIds(rowIds)
+
     try {
-      setBannerResult(await api.runBanner(surveyId, request))
+      await api.warmupSurvey(surveyId, completionStatus).catch(() => {})
+
+      const allTables: BannerResult[] = []
+      if (chunks.length > 1) {
+        setBannerProgress({ done: 0, total: rowIds.length })
+      }
+
+      for (const chunkIds of chunks) {
+        if (ctrl.signal.aborted) return
+        const chunkResult = await api.runBanner(
+          surveyId,
+          chunks.length > 1 ? bannerChunkRequest(request, chunkIds) : request,
+          ctrl.signal,
+        )
+        if (ctrl.signal.aborted) return
+
+        allTables.push(...bannerTablesFromResult(chunkResult))
+
+        if (chunks.length > 1) {
+          setBannerProgress({ done: allTables.length, total: rowIds.length })
+          setBannerResult(mergeBannerChunkResults(allTables, request))
+        } else {
+          setBannerResult(chunkResult)
+        }
+      }
     } catch (err) {
-      setBannerResult({ error: err instanceof Error ? err.message : 'Crosstab failed' })
+      if (!ctrl.signal.aborted) {
+        setBannerResult({ error: err instanceof Error ? err.message : 'Crosstab failed' })
+      }
     } finally {
-      setAnalyzing(false)
+      if (!ctrl.signal.aborted) {
+        setAnalyzing(false)
+        setBannerProgress(null)
+      }
     }
   }
 
@@ -1087,6 +1134,7 @@ export function SurveyWorkspace() {
               confidenceLevel={confidenceLevel}
               onConfidenceLevelChange={setConfidenceLevel}
               analyzing={analyzing}
+              bannerProgress={bannerProgress}
               exporting={exporting}
               onRun={runBanner}
               onExport={exportBanner}
