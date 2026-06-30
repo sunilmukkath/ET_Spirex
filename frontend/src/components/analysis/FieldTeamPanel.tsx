@@ -3,19 +3,30 @@ import { Download, Loader2, Users } from 'lucide-react'
 import { api, type InterviewerQcResult, type QcConfig, type SurveyVariable } from '../../api/client'
 import { InterviewerQcTab } from './InterviewerQcTab'
 
+function defaultQcConfig(): QcConfig {
+  return {
+    disabled_checks: [],
+    kept_response_ids: [],
+    excluded_response_ids: [],
+    thresholds: {
+      speeder_time_basis: 'average',
+      speeder_custom_reference_seconds: null,
+      speeder_min_seconds: 0,
+      speeder_median_fraction: 0.25,
+      min_array_items_straight_line: 4,
+      min_text_length_gibberish: 3,
+    },
+    custom_rules: [],
+  }
+}
+
 interface Props {
   surveyId: number
   variables: SurveyVariable[]
 }
 
 export function FieldTeamPanel({ surveyId, variables }: Props) {
-  const [qcConfig, setQcConfig] = useState<QcConfig>({
-    disabled_checks: [],
-    kept_response_ids: [],
-    excluded_response_ids: [],
-    thresholds: {},
-    custom_rules: [],
-  })
+  const [qcConfig, setQcConfig] = useState<QcConfig>(defaultQcConfig())
   const [stats, setStats] = useState<InterviewerQcResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
@@ -93,7 +104,7 @@ export function FieldTeamPanel({ surveyId, variables }: Props) {
           </button>
         </div>
 
-        {stats && stats.total_completed > 0 && (
+        {stats && (stats.total_completed ?? 0) > 0 && (
           <div className="mt-3 flex flex-wrap gap-3 text-sm">
             <span className="rounded-lg bg-slate-50 px-3 py-1.5 ring-1 ring-slate-200">
               <span className="text-slate-500">Completed </span>

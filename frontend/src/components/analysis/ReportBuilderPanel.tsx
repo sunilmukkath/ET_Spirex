@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Download, FileText, Loader2, Plus, Trash2 } from 'lucide-react'
-import { api, type AnalysisBookmark, type SurveyVariable } from '../../api/client'
+import { api, type AnalysisBookmark, type BannerRequest, type SurveyVariable } from '../../api/client'
 import { filterPayload } from '../../lib/filterTree'
 import type { FilterGroup, FilterSpec } from '../../api/client'
 
@@ -75,7 +75,7 @@ export function ReportBuilderPanel({
       }
       if (section.kind === 'banner' && section.bookmark_id) {
         const bm = crosstabBookmarks.find((b) => b.id === section.bookmark_id)
-        const req = bm?.config?.banner_request as Record<string, unknown> | undefined
+        const req = bm?.config?.banner_request as BannerRequest | undefined
         if (!req) throw new Error('Bookmark has no crosstab configuration')
         await api.exportReport(
           surveyId,

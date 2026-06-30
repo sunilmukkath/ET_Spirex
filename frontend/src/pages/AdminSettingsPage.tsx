@@ -43,7 +43,7 @@ export function AdminSettingsPage() {
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-900">Signed in</h2>
-        <p className="mt-2 text-sm text-slate-600">{user?.display_name ?? user?.username ?? '—'}</p>
+        <p className="mt-2 text-sm text-slate-600">{user?.username ?? '—'}</p>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

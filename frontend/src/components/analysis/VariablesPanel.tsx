@@ -25,6 +25,7 @@ import {
   saveCustomVariableBackup,
 } from '../../lib/customVariableBackup'
 import { EmptyState, ErrorState } from '../States'
+import { QuestionSetupPanel, buildVariableFormFromSource } from './QuestionSetupPanel'
 import { WeightingPanel } from './WeightingPanel'
 
 interface Props {

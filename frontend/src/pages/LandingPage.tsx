@@ -1,6 +1,5 @@
 import { Navigate, useNavigate } from 'react-router-dom'
 import {
-  BarChart3,
   Database,
   Layers,
   PieChart,
