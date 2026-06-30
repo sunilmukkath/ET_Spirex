@@ -9,6 +9,8 @@ import {
 } from 'react'
 import { api, setAuthToken } from '../api/client'
 
+import type { GlobalRole } from '../api/client'
+
 const STORAGE_KEY = 'et_scout_auth'
 const LEGACY_STORAGE_KEY = 'et_spirex_auth'
 
@@ -17,6 +19,7 @@ export const TEAM_USERS = ['Sunil', 'Tony', 'Ravi', 'Aneena', 'Shilaja', 'Palani
 interface AuthState {
   username: string
   token: string
+  role?: GlobalRole
 }
 
 interface AuthContextValue {
@@ -26,6 +29,7 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refreshSessions: () => Promise<void>
+  isAdmin: boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -82,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthToken(stored.token)
       try {
         const me = await api.getMe()
-        if (!cancelled) setUser({ token: stored.token, username: me.username })
+        if (!cancelled) setUser({ token: stored.token, username: me.username, role: me.role })
       } catch {
         localStorage.removeItem(STORAGE_KEY)
         setAuthToken(null)
@@ -104,7 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const result = await api.login(username, password)
-    const state = { token: result.token, username: result.username }
+    const me = await api.getMe()
+    const state = { token: result.token, username: result.username, role: me.role }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     setAuthToken(result.token)
     setUser(state)
@@ -123,7 +128,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, loading, activeSessions, login, logout, refreshSessions }),
+    () => ({
+      user,
+      loading,
+      activeSessions,
+      login,
+      logout,
+      refreshSessions,
+      isAdmin: user?.role === 'admin',
+    }),
     [user, loading, activeSessions, login, logout, refreshSessions],
   )
 

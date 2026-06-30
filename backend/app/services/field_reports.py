@@ -53,6 +53,8 @@ def _flagged_checks_by_response(quality: dict[str, Any], disabled: frozenset[str
         "straight_liners": "Straight-lining",
         "gibberish": "Gibberish",
         "interviewer_duplicates": "Duplicate answers",
+        "interviewer_gps_proximity": "GPS proximity",
+        "interviewer_short_gap": "Short interview gap",
         "custom_rules": "Custom rules",
     }
     for key, title in mapping.items():

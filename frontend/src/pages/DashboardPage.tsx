@@ -8,10 +8,10 @@ import {
   Globe,
   LayoutGrid,
   List,
+  Pin,
   RefreshCw,
   Search,
   ShieldCheck,
-  Star,
   User,
   Wifi,
   WifiOff,
@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { api, type ConnectionStatus, type Project } from '../api/client'
-import { loadFavoriteSurveyIds, toggleFavoriteSurveyId } from '../lib/dashboardFavorites'
+import { usePinnedSurveys } from '../hooks/usePinnedSurveys'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState, ErrorState, LoadingState, SkeletonBlock } from '../components/States'
 
@@ -70,12 +70,16 @@ function matchesSearch(project: Project, query: string): boolean {
   return false
 }
 
-function sortProjects(projects: Project[], sortKey: SortKey, favoriteIds: number[]): Project[] {
-  const favSet = new Set(favoriteIds)
+function sortProjects(projects: Project[], sortKey: SortKey, pinnedIds: number[]): Project[] {
+  const pinOrder = new Map(pinnedIds.map((id, index) => [id, index]))
+  const isPinned = (id: number) => pinOrder.has(id)
   return [...projects].sort((a, b) => {
-    const aFav = favSet.has(a.id) ? 0 : 1
-    const bFav = favSet.has(b.id) ? 0 : 1
-    if (aFav !== bFav) return aFav - bFav
+    const aPinned = isPinned(a.id)
+    const bPinned = isPinned(b.id)
+    if (aPinned !== bPinned) return aPinned ? -1 : 1
+    if (aPinned && bPinned) {
+      return (pinOrder.get(a.id) ?? 0) - (pinOrder.get(b.id) ?? 0)
+    }
 
     switch (sortKey) {
       case 'name':
@@ -137,8 +141,8 @@ export function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('newest')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  const [favorites, setFavorites] = useState<number[]>(() => loadFavoriteSurveyIds())
-  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+  const { pinnedIds, pinnedSet, toggle: togglePinned } = usePinnedSurveys()
+  const [showPinnedOnly, setShowPinnedOnly] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const loadGeneration = useRef(0)
 
@@ -213,16 +217,19 @@ export function DashboardPage() {
     }
   }, [loadProjects, loadStats])
 
-  const favoriteSet = useMemo(() => new Set(favorites), [favorites])
-
   const filtered = useMemo(() => {
     const rows = projects.filter((p) => {
       const matchesStatus = statusFilter === 'all' || p.status === statusFilter
-      const matchesFav = !showFavoritesOnly || favoriteSet.has(p.id)
-      return matchesSearch(p, search) && matchesStatus && matchesFav
+      const matchesPin = !showPinnedOnly || pinnedSet.has(p.id)
+      return matchesSearch(p, search) && matchesStatus && matchesPin
     })
-    return sortProjects(rows, sortKey, showFavoritesOnly ? [] : favorites)
-  }, [projects, search, statusFilter, showFavoritesOnly, favoriteSet, sortKey, favorites])
+    return sortProjects(rows, sortKey, showPinnedOnly ? [] : pinnedIds)
+  }, [projects, search, statusFilter, showPinnedOnly, pinnedSet, sortKey, pinnedIds])
+
+  const pinnedProjects = useMemo(() => {
+    const byId = new Map(projects.map((p) => [p.id, p]))
+    return pinnedIds.map((id) => byId.get(id)).filter((p): p is Project => Boolean(p))
+  }, [projects, pinnedIds])
 
   const counts = useMemo(
     () => ({
@@ -240,7 +247,7 @@ export function DashboardPage() {
   )
 
   const hasActiveFilters =
-    search.trim() !== '' || statusFilter !== 'all' || showFavoritesOnly || sortKey !== 'newest'
+    search.trim() !== '' || statusFilter !== 'all' || showPinnedOnly || sortKey !== 'newest'
 
   const statsProgress = projects.length ? Math.round((statsLoaded / projects.length) * 100) : 0
 
@@ -302,6 +309,37 @@ export function DashboardPage() {
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           {error}
         </div>
+      )}
+
+      {pinnedProjects.length > 0 && !showPinnedOnly && !search.trim() && statusFilter === 'all' && (
+        <section className="rounded-xl border border-[var(--et-teal)]/20 bg-[var(--et-teal-light)]/25 p-4 shadow-sm sm:p-5">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Pin size={16} className="text-[var(--et-teal-dark)]" />
+              <h3 className="text-sm font-semibold text-slate-900">Pinned surveys</h3>
+              <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                {pinnedProjects.length}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowPinnedOnly(true)}
+              className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+            >
+              View all pinned
+            </button>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1 et-scroll">
+            {pinnedProjects.map((project) => (
+              <PinnedSurveyChip
+                key={project.id}
+                project={project}
+                isPinned
+                onTogglePin={() => void togglePinned(project.id)}
+              />
+            ))}
+          </div>
+        </section>
       )}
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -401,12 +439,12 @@ export function DashboardPage() {
           ))}
           <button
             type="button"
-            onClick={() => setShowFavoritesOnly((v) => !v)}
-            className={`et-chip ${showFavoritesOnly ? 'et-chip-active' : 'et-chip-inactive'}`}
+            onClick={() => setShowPinnedOnly((v) => !v)}
+            className={`et-chip ${showPinnedOnly ? 'et-chip-active' : 'et-chip-inactive'}`}
           >
-            <Star size={14} className={showFavoritesOnly ? 'fill-current' : ''} />
-            Favorites
-            <span className="opacity-60">{favorites.length}</span>
+            <Pin size={14} className={showPinnedOnly ? 'fill-current' : ''} />
+            Pinned
+            <span className="opacity-60">{pinnedIds.length}</span>
           </button>
           {hasActiveFilters && (
             <button
@@ -414,7 +452,7 @@ export function DashboardPage() {
               onClick={() => {
                 setSearch('')
                 setStatusFilter('all')
-                setShowFavoritesOnly(false)
+                setShowPinnedOnly(false)
                 setSortKey('newest')
               }}
               className="et-chip et-chip-inactive text-slate-500"
@@ -428,8 +466,8 @@ export function DashboardPage() {
         <p className="text-xs text-slate-500">
           Showing <span className="font-semibold text-slate-700">{filtered.length}</span> of{' '}
           {projects.length} surveys
-          {!showFavoritesOnly && favorites.length > 0 && sortKey === 'newest' && (
-            <span className="text-slate-400"> · Favorites pinned to top</span>
+          {!showPinnedOnly && pinnedIds.length > 0 && sortKey === 'newest' && (
+            <span className="text-slate-400"> · Pinned surveys shown first</span>
           )}
         </p>
       </section>
@@ -438,8 +476,8 @@ export function DashboardPage() {
         <EmptyState
           title="No surveys found"
           description={
-            showFavoritesOnly
-              ? 'Star surveys to add them to your favorites, or turn off the favorites filter.'
+            showPinnedOnly
+              ? 'Pin surveys from the list below, or turn off the pinned filter.'
               : 'Try a different search term or status filter.'
           }
         />
@@ -449,30 +487,65 @@ export function DashboardPage() {
             <SurveyCard
               key={project.id}
               project={project}
-              isFavorite={favoriteSet.has(project.id)}
-              onToggleFavorite={() => setFavorites(toggleFavoriteSurveyId(project.id))}
+              isPinned={pinnedSet.has(project.id)}
+              onTogglePin={() => void togglePinned(project.id)}
             />
           ))}
         </div>
       ) : (
         <SurveyTable
           projects={filtered}
-          favoriteSet={favoriteSet}
-          onToggleFavorite={(id) => setFavorites(toggleFavoriteSurveyId(id))}
+          pinnedSet={pinnedSet}
+          onTogglePin={(id) => void togglePinned(id)}
         />
       )}
     </div>
   )
 }
 
-function SurveyCard({
+function PinnedSurveyChip({
   project,
-  isFavorite,
-  onToggleFavorite,
+  isPinned,
+  onTogglePin,
 }: {
   project: Project
-  isFavorite: boolean
-  onToggleFavorite: () => void
+  isPinned: boolean
+  onTogglePin: () => void
+}) {
+  return (
+    <article className="relative w-[min(100%,18rem)] shrink-0 rounded-xl border border-white/80 bg-white p-4 shadow-sm">
+      <button
+        type="button"
+        onClick={onTogglePin}
+        className="absolute right-2 top-2 rounded-lg p-1.5 text-[var(--et-teal)] hover:bg-slate-50"
+        aria-label={isPinned ? 'Unpin survey' : 'Pin survey'}
+      >
+        <Pin size={14} className={isPinned ? 'fill-current' : ''} />
+      </button>
+      <Link to={`/projects/${project.id}?mode=home`} state={{ title: project.title }} className="block pr-8">
+        <div className="flex items-center gap-2">
+          <StatusBadge status={project.status} />
+          <span className="font-mono text-[10px] text-slate-400">#{project.id}</span>
+        </div>
+        <h4 className="mt-2 line-clamp-2 text-sm font-semibold text-slate-900">{project.title}</h4>
+        {project.responses.loaded && (
+          <p className="mt-1 text-xs text-slate-500">
+            {project.responses.completed.toLocaleString()} completed
+          </p>
+        )}
+      </Link>
+    </article>
+  )
+}
+
+function SurveyCard({
+  project,
+  isPinned,
+  onTogglePin,
+}: {
+  project: Project
+  isPinned: boolean
+  onTogglePin: () => void
 }) {
   const expiryHint = formatRelativeExpiry(project.expire_date)
   const loaded = project.responses.loaded
@@ -483,12 +556,12 @@ function SurveyCard({
         type="button"
         onClick={(e) => {
           e.preventDefault()
-          onToggleFavorite()
+          onTogglePin()
         }}
-        className="absolute right-3 top-3 z-10 rounded-lg p-1.5 text-slate-300 hover:bg-slate-50 hover:text-amber-500"
-        aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
+        className="absolute right-3 top-3 z-10 rounded-lg p-1.5 text-slate-300 hover:bg-slate-50 hover:text-[var(--et-teal)]"
+        aria-label={isPinned ? 'Unpin survey' : 'Pin survey'}
       >
-        <Star size={16} className={isFavorite ? 'fill-amber-400 text-amber-500' : ''} />
+        <Pin size={16} className={isPinned ? 'fill-[var(--et-teal)] text-[var(--et-teal)]' : ''} />
       </button>
 
       <Link
@@ -590,12 +663,12 @@ function QuickAction({ to, icon, label }: { to: string; icon: React.ReactNode; l
 
 function SurveyTable({
   projects,
-  favoriteSet,
-  onToggleFavorite,
+  pinnedSet,
+  onTogglePin,
 }: {
   projects: Project[]
-  favoriteSet: Set<number>
-  onToggleFavorite: (id: number) => void
+  pinnedSet: Set<number>
+  onTogglePin: (id: number) => void
 }) {
   return (
     <div className="et-panel overflow-hidden">
@@ -603,7 +676,7 @@ function SurveyTable({
         <table className="w-full min-w-[720px] text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="w-10 px-3 py-3" aria-label="Favorite" />
+              <th className="w-10 px-3 py-3" aria-label="Pin" />
               <th className="px-4 py-3 font-semibold">Survey</th>
               <th className="px-4 py-3 font-semibold">Status</th>
               <th className="px-4 py-3 font-semibold">Responses</th>
@@ -615,18 +688,18 @@ function SurveyTable({
           </thead>
           <tbody>
             {projects.map((project) => {
-              const isFavorite = favoriteSet.has(project.id)
+              const isPinned = pinnedSet.has(project.id)
               const loaded = project.responses.loaded
               return (
                 <tr key={project.id} className="border-t border-slate-100 hover:bg-slate-50/80">
                   <td className="px-3 py-3">
                     <button
                       type="button"
-                      onClick={() => onToggleFavorite(project.id)}
-                      className="rounded-md p-1 text-slate-300 hover:text-amber-500"
-                      aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
+                      onClick={() => onTogglePin(project.id)}
+                      className="rounded-md p-1 text-slate-300 hover:text-[var(--et-teal)]"
+                      aria-label={isPinned ? 'Unpin survey' : 'Pin survey'}
                     >
-                      <Star size={15} className={isFavorite ? 'fill-amber-400 text-amber-500' : ''} />
+                      <Pin size={15} className={isPinned ? 'fill-[var(--et-teal)] text-[var(--et-teal)]' : ''} />
                     </button>
                   </td>
                   <td className="px-4 py-3">

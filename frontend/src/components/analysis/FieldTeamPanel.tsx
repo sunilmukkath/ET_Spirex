@@ -16,6 +16,8 @@ function defaultQcConfig(): QcConfig {
       min_array_items_straight_line: 4,
       min_text_length_gibberish: 3,
       interviewer_duplicate_similarity_pct: 85,
+      interviewer_gps_proximity_meters: 10,
+      interviewer_min_gap_seconds: 300,
     },
     custom_rules: [],
     straight_line_variable_ids: null,

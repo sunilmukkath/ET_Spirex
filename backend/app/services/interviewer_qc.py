@@ -18,6 +18,8 @@ CHECK_COLUMNS = [
     "Straight-lining",
     "Gibberish",
     "Duplicate answers",
+    "GPS proximity",
+    "Short interview gap",
     "Custom rules",
     "Manual exclusion",
 ]
@@ -60,6 +62,8 @@ def interviewer_qc_stats(survey_id: int, interviewer_variable_id: str | None = N
             "straight_liners",
             "gibberish",
             "interviewer_duplicates",
+            "interviewer_gps_proximity",
+            "interviewer_short_gap",
             "custom_rules",
         }
     ) - enabled_check_ids(survey_id)

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   BarChart3,
   ClipboardList,
+  Kanban,
   Layers,
   Loader2,
   Table2,
@@ -149,6 +150,12 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
             title="Charts"
             desc="Build and export visualisations"
             onClick={() => onNavigate('charts')}
+          />
+          <QuickLink
+            icon={<Kanban size={18} />}
+            title="Workflow & tasks"
+            desc="Team assignments, module access, and project task tracker"
+            onClick={() => onNavigate('workflow')}
           />
           <QuickLink
             icon={<ClipboardList size={18} />}

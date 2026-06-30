@@ -7,9 +7,11 @@ import {
   Database,
   FileText,
   Home,
+  Kanban,
   Layers,
   Loader2,
   PanelLeft,
+  Pin,
   ShieldCheck,
   Sigma,
   SlidersHorizontal,
@@ -36,6 +38,7 @@ import {
   type SurveyVariable,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { usePinnedSurveys } from '../hooks/usePinnedSurveys'
 import { BrandLogo } from '../components/BrandLogo'
 import { ExplorePanel } from '../components/analysis/ExplorePanel'
 import { CrosstabsPanel } from '../components/analysis/CrosstabsPanel'
@@ -45,6 +48,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { ErrorState } from '../components/States'
 import { FieldOperationsPanel, type FieldView } from '../components/analysis/FieldOperationsPanel'
 import { SurveyHomePanel } from '../components/analysis/SurveyHomePanel'
+import { ProjectWorkflowPanel } from '../components/analysis/ProjectWorkflowPanel'
 import { ReportBuilderPanel } from '../components/analysis/ReportBuilderPanel'
 import { filterPayload, treeToFlatFilters } from '../lib/filterTree'
 import type { ChartTypeId } from '../lib/chartTypes'
@@ -83,6 +87,7 @@ type Mode =
   | 'fields'
   | 'data'
   | 'multivariate'
+  | 'workflow'
 type AnalyzeView = 'profile' | 'compare'
 
 function parseMode(raw: string | null): Mode {
@@ -96,6 +101,7 @@ function parseMode(raw: string | null): Mode {
   if (raw === 'fields' || raw === 'quotas' || raw === 'field-management') return 'fields'
   if (raw === 'data') return 'data'
   if (raw === 'multivariate' || raw === 'advanced' || raw === 'statistics') return 'multivariate'
+  if (raw === 'workflow' || raw === 'tasks' || raw === 'team-workflow') return 'workflow'
   if (raw === 'explore' || raw === 'questions') return 'explore'
   return 'home'
 }
@@ -120,6 +126,7 @@ function parseFieldView(rawMode: string | null, rawView: string | null): FieldVi
 
 export function SurveyWorkspace() {
   const { user } = useAuth()
+  const { isPinned, toggle: togglePinned } = usePinnedSurveys()
   const { id } = useParams()
   const location = useLocation()
   const navTitle = (location.state as { title?: string } | null)?.title
@@ -790,6 +797,20 @@ export function SurveyWorkspace() {
           </div>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void togglePinned(surveyId)}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
+                isPinned(surveyId)
+                  ? 'border-[var(--et-teal)] bg-[var(--et-teal-light)]/60 text-[var(--et-teal-dark)]'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-800'
+              }`}
+              title={isPinned(surveyId) ? 'Unpin from surveys page' : 'Pin to surveys page'}
+            >
+              <Pin size={14} className={isPinned(surveyId) ? 'fill-current' : ''} />
+              {isPinned(surveyId) ? 'Pinned' : 'Pin'}
+            </button>
+
             <select
               value={completionStatus}
               onChange={(e) => setCompletionStatus(e.target.value)}
@@ -858,6 +879,9 @@ export function SurveyWorkspace() {
           <div className="et-segment">
             <ModeButton active={mode === 'fields'} onClick={() => setMode('fields')} icon={<ClipboardList size={15} />}>
               Field manage
+            </ModeButton>
+            <ModeButton active={mode === 'workflow'} onClick={() => setMode('workflow')} icon={<Kanban size={15} />}>
+              Workflow
             </ModeButton>
             <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
               Data Setup
@@ -951,6 +975,14 @@ export function SurveyWorkspace() {
 
           {mode === 'home' && (
             <SurveyHomePanel surveyId={surveyId} onNavigate={navigateWorkspace} />
+          )}
+
+          {mode === 'workflow' && user && (
+            <ProjectWorkflowPanel
+              surveyId={surveyId}
+              currentUser={user.username}
+              globalRole={user.role}
+            />
           )}
 
           {mode === 'fields' && (

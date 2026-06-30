@@ -19,6 +19,8 @@ from app.models.analysis import (
     ProjectStatsRequest,
 )
 from app.models.auth import LoginRequest, LoginResponse
+from app.models.pinned_surveys import PinnedSurveys
+from app.models.team_registry import TeamRegistry, PROJECT_MODULES
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
 from app.services.auth import VALID_USERS, authenticate, get_session, list_active_sessions, logout
 from app.services.banner_analysis import run_banner_table, run_chart_data, run_question_profile, get_filter_options
@@ -64,6 +66,19 @@ from app.models.workspace_prefs import (
 from app.services.report_export import banner_to_pdf, banner_to_pptx, profile_to_pdf, profile_to_pptx
 from app.services.raw_data import get_raw_data_page, raw_data_to_csv
 from app.services.response_store import get_responses
+from app.services.project_workflow_store import (
+    can_manage_project_team,
+    get_project_workflow,
+    set_project_workflow,
+    workflow_access_summary,
+)
+from app.services.pinned_survey_store import get_pinned_survey_ids, set_pinned_survey_ids
+from app.services.team_registry_store import (
+    get_global_role,
+    get_team_registry,
+    is_global_admin,
+    set_team_registry,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -114,7 +129,11 @@ def auth_me(authorization: str | None = Header(default=None)):
     record = get_session(_extract_token(authorization))
     if not record:
         raise HTTPException(status_code=401, detail="Not signed in")
-    return {"username": record.username, "login_at": record.login_at}
+    return {
+        "username": record.username,
+        "login_at": record.login_at,
+        "role": get_global_role(record.username),
+    }
 
 
 @router.get("/auth/sessions")
@@ -135,6 +154,81 @@ def _extract_token(authorization: str | None) -> str | None:
 def _optional_username(authorization: str | None) -> str | None:
     record = get_session(_extract_token(authorization))
     return record.username if record else None
+
+
+@router.get("/me/pinned-surveys")
+def pinned_surveys_get(authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return {"survey_ids": get_pinned_survey_ids(record.username)}
+
+
+@router.put("/me/pinned-surveys")
+def pinned_surveys_update(
+    body: PinnedSurveys,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    saved = set_pinned_survey_ids(record.username, body.survey_ids)
+    return {"survey_ids": saved}
+
+
+@router.get("/team/registry")
+def team_registry(authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return get_team_registry()
+
+
+@router.put("/team/registry")
+def team_registry_update(
+    body: TeamRegistry,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not is_global_admin(record.username):
+        raise HTTPException(status_code=403, detail="Only admins can update team roles")
+    return set_team_registry(body)
+
+
+@router.get("/projects/{survey_id}/workflow")
+def project_workflow_get(
+    survey_id: int,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    workflow = get_project_workflow(survey_id)
+    return {
+        "workflow": workflow,
+        "access": workflow_access_summary(record.username, survey_id),
+        "modules": list(PROJECT_MODULES),
+    }
+
+
+@router.put("/projects/{survey_id}/workflow")
+def project_workflow_update(
+    survey_id: int,
+    body: ProjectWorkflow,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not can_manage_project_team(record.username, survey_id):
+        raise HTTPException(status_code=403, detail="You do not have permission to edit project workflow")
+    saved = set_project_workflow(survey_id, body)
+    return {
+        "workflow": saved,
+        "access": workflow_access_summary(record.username, survey_id),
+    }
 
 
 @router.get("/connection")

@@ -18,6 +18,8 @@ interface Props {
   savingConfig: boolean
   hasScan: boolean
   duplicateStats?: DataQualityResult['interviewer_duplicates'] | null
+  gpsProximityStats?: DataQualityResult['interviewer_gps_proximity'] | null
+  shortGapStats?: DataQualityResult['interviewer_short_gap'] | null
 }
 
 export function InterviewerQcTab({
@@ -29,6 +31,8 @@ export function InterviewerQcTab({
   savingConfig,
   hasScan,
   duplicateStats,
+  gpsProximityStats,
+  shortGapStats,
 }: Props) {
   const [stats, setStats] = useState<InterviewerQcResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -179,6 +183,44 @@ export function InterviewerQcTab({
                   {' — '}
                   {row.flagged_count} flagged record{row.flagged_count === 1 ? '' : 's'}
                   {row.max_similarity_pct ? ` (up to ${row.max_similarity_pct}% match)` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {gpsProximityStats?.available === false && gpsProximityStats.message && (
+          <p className="mt-3 text-sm text-amber-800">{gpsProximityStats.message}</p>
+        )}
+        {gpsProximityStats?.available && (gpsProximityStats.by_interviewer?.length ?? 0) > 0 && (
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50/80 p-3">
+            <p className="text-xs font-semibold text-rose-900">
+              Same GPS spot (within {gpsProximityStats.proximity_meters ?? 10}m)
+            </p>
+            <ul className="mt-2 space-y-1 text-xs text-rose-900/90">
+              {gpsProximityStats.by_interviewer?.map((row) => (
+                <li key={row.interviewer}>
+                  <span className="font-medium">{row.interviewer}</span>
+                  {' — '}
+                  {row.flagged_count} flagged record{row.flagged_count === 1 ? '' : 's'}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {shortGapStats?.available === false && shortGapStats.message && (
+          <p className="mt-3 text-sm text-amber-800">{shortGapStats.message}</p>
+        )}
+        {shortGapStats?.available && (shortGapStats.by_interviewer?.length ?? 0) > 0 && (
+          <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50/80 p-3">
+            <p className="text-xs font-semibold text-orange-900">
+              Short gaps between interviews (&lt;{Math.round((shortGapStats.min_gap_seconds ?? 300) / 60)} min)
+            </p>
+            <ul className="mt-2 space-y-1 text-xs text-orange-900/90">
+              {shortGapStats.by_interviewer?.map((row) => (
+                <li key={row.interviewer}>
+                  <span className="font-medium">{row.interviewer}</span>
+                  {' — '}
+                  {row.flagged_count} flagged record{row.flagged_count === 1 ? '' : 's'}
                 </li>
               ))}
             </ul>

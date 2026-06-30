@@ -7,6 +7,8 @@ export type QcCheckId =
   | 'straight_liners'
   | 'gibberish'
   | 'interviewer_duplicates'
+  | 'interviewer_gps_proximity'
+  | 'interviewer_short_gap'
   | 'custom_rules'
 
 export const QC_CHECKS: {
@@ -51,6 +53,18 @@ export const QC_CHECKS: {
     description: 'Same answers on most questions vs another record by the same interviewer',
     severity: 'high',
   },
+  {
+    id: 'interviewer_gps_proximity',
+    title: 'Interviewer GPS proximity',
+    description: 'Two interviews by the same interviewer within 10 metres (requires GPS in export)',
+    severity: 'high',
+  },
+  {
+    id: 'interviewer_short_gap',
+    title: 'Interviewer short gap',
+    description: 'Less than 5 minutes between consecutive interviews by the same interviewer',
+    severity: 'high',
+  },
 ]
 
 export const CUSTOM_RULES_CHECK = {
@@ -78,6 +92,8 @@ export function isCheckAvailable(id: QcCheckId, result: DataQualityResult): bool
   if (id === 'speeders') return result.speeders?.available !== false
   if (id === 'duplicate_phones') return result.duplicate_phones?.available !== false
   if (id === 'interviewer_duplicates') return result.interviewer_duplicates?.available !== false
+  if (id === 'interviewer_gps_proximity') return result.interviewer_gps_proximity?.available !== false
+  if (id === 'interviewer_short_gap') return result.interviewer_short_gap?.available !== false
   if (id === 'custom_rules') return (result.custom_rules?.count ?? 0) > 0 || result.custom_rules?.available === true
   return true
 }
@@ -89,6 +105,8 @@ export function checkCount(id: QcCheckId, result: DataQualityResult): number {
   if (id === 'straight_liners') return result.straight_liners?.count ?? 0
   if (id === 'gibberish') return result.gibberish?.count ?? 0
   if (id === 'interviewer_duplicates') return result.interviewer_duplicates?.count ?? 0
+  if (id === 'interviewer_gps_proximity') return result.interviewer_gps_proximity?.count ?? 0
+  if (id === 'interviewer_short_gap') return result.interviewer_short_gap?.count ?? 0
   if (id === 'custom_rules') return result.custom_rules?.count ?? 0
   return 0
 }
@@ -155,6 +173,24 @@ export function aggregateFlaggedRows(
         `${f.similarity_pct ?? '?'}% match with ${f.match_response_id ?? 'another record'} (${f.interviewer ?? 'interviewer'})`,
     )
   }
+  for (const f of result.interviewer_gps_proximity?.flags ?? []) {
+    add(
+      f.response_id,
+      'interviewer_gps_proximity',
+      'high',
+      f.reason ??
+        `Within ${f.distance_meters ?? '?'}m of ${f.match_response_id ?? 'another record'} (${f.interviewer ?? 'interviewer'})`,
+    )
+  }
+  for (const f of result.interviewer_short_gap?.flags ?? []) {
+    add(
+      f.response_id,
+      'interviewer_short_gap',
+      'high',
+      f.reason ??
+        `${f.gap_seconds ?? '?'}s after ${f.match_response_id ?? 'prior record'} (${f.interviewer ?? 'interviewer'})`,
+    )
+  }
   for (const f of result.custom_rules?.flags ?? []) {
     add(f.response_id, 'custom_rules', 'medium', f.reason ?? f.rule_name ?? 'Custom rule')
   }
@@ -183,6 +219,16 @@ export function normalizeQcResult(result: DataQualityResult): DataQualityResult 
     straight_liners: result.straight_liners ?? emptyFlags,
     gibberish: result.gibberish ?? emptyFlags,
     interviewer_duplicates: result.interviewer_duplicates ?? {
+      ...emptyFlags,
+      available: false,
+      by_interviewer: [],
+    },
+    interviewer_gps_proximity: result.interviewer_gps_proximity ?? {
+      ...emptyFlags,
+      available: false,
+      by_interviewer: [],
+    },
+    interviewer_short_gap: result.interviewer_short_gap ?? {
       ...emptyFlags,
       available: false,
       by_interviewer: [],

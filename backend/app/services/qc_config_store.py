@@ -14,6 +14,8 @@ ALL_CHECK_IDS = frozenset({
     "straight_liners",
     "gibberish",
     "interviewer_duplicates",
+    "interviewer_gps_proximity",
+    "interviewer_short_gap",
     "custom_rules",
 })
 
@@ -44,6 +46,14 @@ def _normalize_thresholds(raw: dict | None) -> QcThresholds:
         interviewer_duplicate_similarity_pct=min(
             100.0,
             max(50.0, float(raw.get("interviewer_duplicate_similarity_pct", 85) or 85)),
+        ),
+        interviewer_gps_proximity_meters=min(
+            500.0,
+            max(1.0, float(raw.get("interviewer_gps_proximity_meters", 10) or 10)),
+        ),
+        interviewer_min_gap_seconds=min(
+            86400.0,
+            max(60.0, float(raw.get("interviewer_min_gap_seconds", 300) or 300)),
         ),
     )
 

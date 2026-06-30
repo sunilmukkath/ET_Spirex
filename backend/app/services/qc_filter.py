@@ -41,6 +41,8 @@ def collect_flagged_ids(
         "straight_liners",
         "gibberish",
         "interviewer_duplicates",
+        "interviewer_gps_proximity",
+        "interviewer_short_gap",
         "custom_rules",
     )
     for key in check_keys:

@@ -10,6 +10,8 @@ const DEFAULT_THRESHOLDS: QcConfig['thresholds'] = {
   min_array_items_straight_line: 4,
   min_text_length_gibberish: 3,
   interviewer_duplicate_similarity_pct: 85,
+  interviewer_gps_proximity_meters: 10,
+  interviewer_min_gap_seconds: 300,
 }
 
 function formatDuration(seconds: number | undefined | null): string {
@@ -461,17 +463,17 @@ export function QcSettingsPanel({
 
           <div>
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Interviewer duplicate answers
+              Interviewer field checks
             </p>
-            <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+            <div className="space-y-4 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
               <p className="text-xs text-slate-600">
-                For each interviewer, compare completed records and flag later duplicates when
-                closed-ended answers match above the threshold. Requires an interviewer question in QC
-                or Field team settings.
+                Require an interviewer question in QC or Field manage settings. Checks duplicate
+                answers, interviews at the same GPS spot, and back-to-back completes with too little
+                time between them.
               </p>
               <label className="block max-w-xs text-xs">
                 <span className="mb-1 block font-medium text-slate-600">
-                  Similarity threshold (%)
+                  Duplicate answer similarity (%)
                 </span>
                 <input
                   type="number"
@@ -491,14 +493,59 @@ export function QcSettingsPanel({
                 />
                 <span className="mt-1 block text-[10px] text-slate-400">
                   Flag when {thresholds.interviewer_duplicate_similarity_pct ?? 85}% or more of
-                  comparable answers are identical to an earlier record by the same interviewer
-                  (typical range 80–90%)
+                  comparable answers match an earlier record by the same interviewer
                 </span>
               </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs">
+                  <span className="mb-1 block font-medium text-slate-600">GPS proximity (metres)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={500}
+                    step={1}
+                    value={thresholds.interviewer_gps_proximity_meters ?? 10}
+                    onChange={(e) =>
+                      updateThresholds({
+                        interviewer_gps_proximity_meters: Math.min(
+                          500,
+                          Math.max(1, Number(e.target.value) || 10),
+                        ),
+                      })
+                    }
+                    className="et-input w-full"
+                  />
+                  <span className="mt-1 block text-[10px] text-slate-400">
+                    Flag when two interviews by the same interviewer are within this distance
+                  </span>
+                </label>
+                <label className="text-xs">
+                  <span className="mb-1 block font-medium text-slate-600">Minimum gap (minutes)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    step={1}
+                    value={Math.round((thresholds.interviewer_min_gap_seconds ?? 300) / 60)}
+                    onChange={(e) =>
+                      updateThresholds({
+                        interviewer_min_gap_seconds: Math.min(
+                          86400,
+                          Math.max(60, (Number(e.target.value) || 5) * 60),
+                        ),
+                      })
+                    }
+                    className="et-input w-full"
+                  />
+                  <span className="mt-1 block text-[10px] text-slate-400">
+                    Minimum time between consecutive interviews by the same interviewer
+                  </span>
+                </label>
+              </div>
               {!config.interviewer_variable_id && (
                 <p className="text-xs text-amber-800">
-                  Set the interviewer variable on the <strong>By interviewer</strong> tab or in Field
-                  team quotas so this check can run.
+                  Set the interviewer variable on the <strong>Team & quality</strong> tab or in Field
+                  manage quotas so these checks can run.
                 </p>
               )}
             </div>

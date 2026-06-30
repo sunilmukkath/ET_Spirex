@@ -11,6 +11,8 @@ class QcThresholds(BaseModel):
     min_array_items_straight_line: int = 4
     min_text_length_gibberish: int = 3
     interviewer_duplicate_similarity_pct: float = 85.0
+    interviewer_gps_proximity_meters: float = 10.0
+    interviewer_min_gap_seconds: float = 300.0
 
 
 class QcCustomRule(BaseModel):

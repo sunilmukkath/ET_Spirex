@@ -139,6 +139,8 @@ def run_data_quality(
     thresholds = qc_cfg.thresholds
     custom_rule_payload = [r.model_dump() for r in qc_cfg.custom_rules]
 
+    interviewer_id = resolve_interviewer_variable_id(survey_id)
+
     speeders = _detect_speeders(
         df,
         min_seconds=thresholds.speeder_min_seconds,
@@ -165,13 +167,35 @@ def run_data_quality(
         df,
         schema,
         col_index,
-        interviewer_variable_id=resolve_interviewer_variable_id(survey_id),
+        interviewer_variable_id=interviewer_id,
         similarity_threshold=thresholds.interviewer_duplicate_similarity_pct / 100.0,
+    )
+    interviewer_gps_proximity = _detect_interviewer_gps_proximity(
+        df,
+        schema,
+        interviewer_variable_id=interviewer_id,
+        proximity_meters=thresholds.interviewer_gps_proximity_meters,
+    )
+    interviewer_short_gap = _detect_interviewer_short_gap(
+        df,
+        schema,
+        interviewer_variable_id=interviewer_id,
+        min_gap_seconds=thresholds.interviewer_min_gap_seconds,
     )
     custom_rules = _detect_custom_rules(df, schema, custom_rule_payload)
 
     flagged_ids: set[str] = set()
-    for section in (speeders, test_responses, duplicate_phones, straight_liners, gibberish, interviewer_duplicates, custom_rules):
+    for section in (
+        speeders,
+        test_responses,
+        duplicate_phones,
+        straight_liners,
+        gibberish,
+        interviewer_duplicates,
+        interviewer_gps_proximity,
+        interviewer_short_gap,
+        custom_rules,
+    ):
         for item in section.get("flags", []):
             rid = item.get("response_id")
             if rid is not None:
@@ -192,6 +216,20 @@ def run_data_quality(
             "id": "interviewer_duplicates",
             "title": "Interviewer duplicate answers",
             "count": interviewer_duplicates.get("count", 0),
+            "severity": "high",
+        })
+    if interviewer_gps_proximity.get("available", True):
+        checks.append({
+            "id": "interviewer_gps_proximity",
+            "title": "Interviewer GPS proximity",
+            "count": interviewer_gps_proximity.get("count", 0),
+            "severity": "high",
+        })
+    if interviewer_short_gap.get("available", True):
+        checks.append({
+            "id": "interviewer_short_gap",
+            "title": "Interviewer short gap",
+            "count": interviewer_short_gap.get("count", 0),
             "severity": "high",
         })
 
@@ -216,6 +254,8 @@ def run_data_quality(
         "straight_liners": straight_liners,
         "gibberish": gibberish,
         "interviewer_duplicates": interviewer_duplicates,
+        "interviewer_gps_proximity": interviewer_gps_proximity,
+        "interviewer_short_gap": interviewer_short_gap,
         "custom_rules": custom_rules,
     })
     _QUALITY_CACHE[survey_id] = (now, result)
@@ -269,6 +309,20 @@ def _empty_result() -> dict[str, Any]:
         "straight_liners": empty_flags,
         "gibberish": empty_flags,
         "interviewer_duplicates": {
+            "available": False,
+            "message": "No responses",
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+        },
+        "interviewer_gps_proximity": {
+            "available": False,
+            "message": "No responses",
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+        },
+        "interviewer_short_gap": {
             "available": False,
             "message": "No responses",
             "count": 0,
@@ -928,6 +982,325 @@ def _detect_interviewer_duplicate_answers(
         "by_interviewer": by_interviewer_summary,
         "threshold_pct": round(similarity_threshold * 100, 1),
         "comparable_fields": len(compare_cols),
+    }
+
+
+def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius = 6_371_000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * radius * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _resolve_survey_gps_source(df: pd.DataFrame, schema: dict[str, Any]) -> dict[str, str]:
+    from app.services.location_detect import (
+        find_combined_gps_column,
+        index_gps_column_pairs,
+    )
+
+    df_columns = [str(c) for c in df.columns]
+    for var in schema.get("variables", []):
+        if var.get("kind") != "location":
+            continue
+        lat = str(var.get("lat_column") or "")
+        lng = str(var.get("lng_column") or "")
+        if lat and lng and lat in df.columns and lng in df.columns:
+            return {"lat_col": lat, "lng_col": lng, "combined_col": ""}
+        if lat and lat in df.columns and not lng:
+            return {"lat_col": "", "lng_col": "", "combined_col": lat}
+
+    pairs = index_gps_column_pairs(df_columns)
+    if pairs:
+        _, lat_col, lng_col = pairs[0]
+        return {"lat_col": lat_col, "lng_col": lng_col, "combined_col": ""}
+
+    for var in schema.get("variables", []):
+        combined = find_combined_gps_column(
+            str(var.get("code") or ""),
+            str(var.get("text") or ""),
+            df_columns,
+            qid=var.get("qid"),
+        )
+        if combined:
+            return {"lat_col": "", "lng_col": "", "combined_col": combined}
+
+    return {"lat_col": "", "lng_col": "", "combined_col": ""}
+
+
+def _row_gps_point(df: pd.DataFrame, idx: Any, gps: dict[str, str]) -> tuple[float, float] | None:
+    from app.services.location_detect import _valid_point, parse_coordinate_value
+
+    lat_col = gps.get("lat_col") or ""
+    lng_col = gps.get("lng_col") or ""
+    combined = gps.get("combined_col") or ""
+    if lat_col and lng_col and lat_col in df.columns and lng_col in df.columns:
+        lat = pd.to_numeric(df.at[idx, lat_col], errors="coerce")
+        lng = pd.to_numeric(df.at[idx, lng_col], errors="coerce")
+        if pd.notna(lat) and pd.notna(lng):
+            lat_f, lng_f = float(lat), float(lng)
+            if _valid_point(lat_f, lng_f):
+                return lat_f, lng_f
+    if combined and combined in df.columns:
+        return parse_coordinate_value(df.at[idx, combined])
+    return None
+
+
+def _prepare_interviewer_sessions(
+    df: pd.DataFrame,
+    schema: dict[str, Any],
+    *,
+    interviewer_variable_id: str | None,
+) -> dict[str, Any]:
+    if not interviewer_variable_id:
+        return {
+            "available": False,
+            "message": "Select an interviewer question in QC or Field manage settings.",
+            "groups": {},
+            "has_gps": False,
+            "has_time": False,
+        }
+
+    from app.services.field_reports import _interviewer_labels
+    from app.services.question_schema import get_variable
+    from app.services.variable_columns import find_variable_column
+
+    var = get_variable(schema, interviewer_variable_id)
+    if not var:
+        return {
+            "available": False,
+            "message": "Interviewer question not found in this survey.",
+            "groups": {},
+            "has_gps": False,
+            "has_time": False,
+        }
+
+    interviewer_col = find_variable_column(var, df)
+    if not interviewer_col:
+        return {
+            "available": False,
+            "message": "Interviewer question has no data column in export.",
+            "groups": {},
+            "has_gps": False,
+            "has_time": False,
+        }
+
+    interviewers = _interviewer_labels(schema, var, df)
+    id_col = response_id_column(df)
+    _, end_col = _find_time_columns(df)
+    gps_source = _resolve_survey_gps_source(df, schema)
+    has_gps = bool(
+        (gps_source.get("lat_col") and gps_source.get("lng_col"))
+        or gps_source.get("combined_col")
+    )
+    has_time = bool(end_col)
+
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for idx in df.index:
+        name = str(interviewers.at[idx]).strip() or "Unknown"
+        if name == "Unknown":
+            continue
+        timestamp = None
+        if end_col:
+            timestamp = pd.to_datetime(df.at[idx, end_col], errors="coerce")
+            if pd.isna(timestamp):
+                timestamp = None
+        gps = _row_gps_point(df, idx, gps_source) if has_gps else None
+        rid = str(safe_response_id(df.at[idx, id_col] if id_col else None, idx))
+        groups[name].append(
+            {
+                "response_id": rid,
+                "timestamp": timestamp,
+                "gps": gps,
+            }
+        )
+
+    return {
+        "available": True,
+        "groups": dict(groups),
+        "has_gps": has_gps,
+        "has_time": has_time,
+    }
+
+
+def _session_sort_key(session: dict[str, Any]) -> tuple[Any, ...]:
+    ts = session.get("timestamp")
+    if ts is not None and not pd.isna(ts):
+        return (0, ts, session.get("response_id", ""))
+    return (1, str(session.get("response_id", "")))
+
+
+def _detect_interviewer_gps_proximity(
+    df: pd.DataFrame,
+    schema: dict[str, Any],
+    *,
+    interviewer_variable_id: str | None,
+    proximity_meters: float = 10.0,
+) -> dict[str, Any]:
+    prep = _prepare_interviewer_sessions(
+        df,
+        schema,
+        interviewer_variable_id=interviewer_variable_id,
+    )
+    if not prep.get("available"):
+        return {
+            "available": False,
+            "message": prep.get("message"),
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+            "proximity_meters": proximity_meters,
+        }
+    if not prep.get("has_gps"):
+        return {
+            "available": False,
+            "message": "No GPS / location columns found in survey export.",
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+            "proximity_meters": proximity_meters,
+        }
+
+    flags: list[dict[str, Any]] = []
+    flagged_ids: set[str] = set()
+    by_interviewer_summary: list[dict[str, Any]] = []
+    groups: dict[str, list[dict[str, Any]]] = prep["groups"]
+
+    for interviewer, sessions in groups.items():
+        located = [s for s in sessions if s.get("gps")]
+        if len(located) < 2:
+            continue
+        sorted_sessions = sorted(located, key=_session_sort_key)
+        interviewer_flags = 0
+
+        for i in range(len(sorted_sessions)):
+            sess_a = sorted_sessions[i]
+            gps_a = sess_a["gps"]
+            for j in range(i + 1, len(sorted_sessions)):
+                sess_b = sorted_sessions[j]
+                gps_b = sess_b["gps"]
+                distance = _haversine_meters(gps_a[0], gps_a[1], gps_b[0], gps_b[1])
+                if distance > proximity_meters:
+                    continue
+                later = sess_b
+                match = sess_a
+                if _session_sort_key(sess_a) > _session_sort_key(sess_b):
+                    later, match = sess_b, sess_a
+                rid = str(later["response_id"])
+                if rid in flagged_ids:
+                    continue
+                flagged_ids.add(rid)
+                interviewer_flags += 1
+                flags.append({
+                    "response_id": rid,
+                    "interviewer": interviewer,
+                    "match_response_id": match["response_id"],
+                    "distance_meters": round(distance, 1),
+                    "reason": (
+                        f"Within {round(distance, 1)}m of record {match['response_id']} "
+                        f"(≤ {proximity_meters:g}m, interviewer: {interviewer})"
+                    ),
+                })
+
+        if interviewer_flags > 0:
+            by_interviewer_summary.append({
+                "interviewer": interviewer,
+                "flagged_count": interviewer_flags,
+                "completed": len(sessions),
+            })
+
+    by_interviewer_summary.sort(key=lambda row: (-row["flagged_count"], row["interviewer"]))
+
+    return {
+        "available": True,
+        "count": len(flags),
+        "flags": flags[:_MAX_FLAGS],
+        "by_interviewer": by_interviewer_summary,
+        "proximity_meters": proximity_meters,
+    }
+
+
+def _detect_interviewer_short_gap(
+    df: pd.DataFrame,
+    schema: dict[str, Any],
+    *,
+    interviewer_variable_id: str | None,
+    min_gap_seconds: float = 300.0,
+) -> dict[str, Any]:
+    prep = _prepare_interviewer_sessions(
+        df,
+        schema,
+        interviewer_variable_id=interviewer_variable_id,
+    )
+    if not prep.get("available"):
+        return {
+            "available": False,
+            "message": prep.get("message"),
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+            "min_gap_seconds": min_gap_seconds,
+        }
+    if not prep.get("has_time"):
+        return {
+            "available": False,
+            "message": "Submit date column not found — cannot check interview gaps.",
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+            "min_gap_seconds": min_gap_seconds,
+        }
+
+    flags: list[dict[str, Any]] = []
+    flagged_ids: set[str] = set()
+    by_interviewer_summary: list[dict[str, Any]] = []
+    groups: dict[str, list[dict[str, Any]]] = prep["groups"]
+
+    for interviewer, sessions in groups.items():
+        timed = [s for s in sessions if s.get("timestamp") is not None and not pd.isna(s["timestamp"])]
+        if len(timed) < 2:
+            continue
+        sorted_sessions = sorted(timed, key=_session_sort_key)
+        interviewer_flags = 0
+
+        for i in range(1, len(sorted_sessions)):
+            prev_sess = sorted_sessions[i - 1]
+            curr_sess = sorted_sessions[i]
+            gap = (curr_sess["timestamp"] - prev_sess["timestamp"]).total_seconds()
+            if gap >= min_gap_seconds:
+                continue
+            rid = str(curr_sess["response_id"])
+            if rid in flagged_ids:
+                continue
+            flagged_ids.add(rid)
+            interviewer_flags += 1
+            flags.append({
+                "response_id": rid,
+                "interviewer": interviewer,
+                "match_response_id": prev_sess["response_id"],
+                "gap_seconds": round(gap, 1),
+                "reason": (
+                    f"Only {round(gap)}s after record {prev_sess['response_id']} "
+                    f"(min {int(min_gap_seconds)}s, interviewer: {interviewer})"
+                ),
+            })
+
+        if interviewer_flags > 0:
+            by_interviewer_summary.append({
+                "interviewer": interviewer,
+                "flagged_count": interviewer_flags,
+                "completed": len(sessions),
+            })
+
+    by_interviewer_summary.sort(key=lambda row: (-row["flagged_count"], row["interviewer"]))
+
+    return {
+        "available": True,
+        "count": len(flags),
+        "flags": flags[:_MAX_FLAGS],
+        "by_interviewer": by_interviewer_summary,
+        "min_gap_seconds": min_gap_seconds,
     }
 
 

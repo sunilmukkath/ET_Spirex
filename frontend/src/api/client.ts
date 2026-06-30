@@ -447,6 +447,8 @@ export interface QcThresholds {
   min_array_items_straight_line: number
   min_text_length_gibberish: number
   interviewer_duplicate_similarity_pct?: number
+  interviewer_gps_proximity_meters?: number
+  interviewer_min_gap_seconds?: number
 }
 
 export interface QcCustomRule {
@@ -464,6 +466,79 @@ export interface QcConfig {
   custom_rules: QcCustomRule[]
   interviewer_variable_id?: string | null
   straight_line_variable_ids?: string[] | null
+}
+
+export type GlobalRole = 'admin' | 'manager' | 'member'
+export type ProjectModule =
+  | 'programming'
+  | 'field'
+  | 'research'
+  | 'finance'
+  | 'client'
+  | 'analysis'
+  | 'qc'
+  | 'export'
+export type TaskCategory =
+  | 'programming'
+  | 'field'
+  | 'research'
+  | 'finance'
+  | 'client_request'
+  | 'general'
+export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done'
+export type TaskPriority = 'low' | 'medium' | 'high'
+
+export interface TeamUser {
+  username: string
+  role: GlobalRole
+}
+
+export interface TeamRegistry {
+  users: TeamUser[]
+}
+
+export interface ProjectMember {
+  username: string
+  project_role: 'lead' | 'contributor'
+  is_project_manager: boolean
+  modules: ProjectModule[]
+}
+
+export interface ProjectTask {
+  id: string
+  title: string
+  description?: string
+  category: TaskCategory
+  assignee?: string | null
+  status: TaskStatus
+  priority: TaskPriority
+  due_date?: string | null
+  created_by?: string | null
+  created_at?: number | null
+  updated_at?: number | null
+}
+
+export interface ProjectWorkflow {
+  members: ProjectMember[]
+  tasks: ProjectTask[]
+  notes?: string
+}
+
+export interface WorkflowAccess {
+  username: string | null
+  global_role: GlobalRole
+  is_project_manager: boolean
+  can_manage_team: boolean
+  project_role: 'lead' | 'contributor' | null
+  modules: ProjectModule[]
+  assigned_tasks: number
+  open_tasks: number
+}
+
+export interface ProjectWorkflowResponse {
+  workflow: ProjectWorkflow
+  access: WorkflowAccess
+  modules: ProjectModule[]
 }
 
 export interface InterviewerQcRow {
@@ -588,6 +663,42 @@ export interface DataQualityResult {
       similarity_pct: number
       matched_fields: number
       comparable_fields: number
+      reason?: string
+    }[]
+  }
+  interviewer_gps_proximity?: {
+    available?: boolean
+    message?: string
+    count: number
+    proximity_meters?: number
+    by_interviewer?: {
+      interviewer: string
+      flagged_count: number
+      completed: number
+    }[]
+    flags: {
+      response_id: string | number
+      interviewer: string
+      match_response_id: string | number
+      distance_meters?: number
+      reason?: string
+    }[]
+  }
+  interviewer_short_gap?: {
+    available?: boolean
+    message?: string
+    count: number
+    min_gap_seconds?: number
+    by_interviewer?: {
+      interviewer: string
+      flagged_count: number
+      completed: number
+    }[]
+    flags: {
+      response_id: string | number
+      interviewer: string
+      match_response_id: string | number
+      gap_seconds?: number
       reason?: string
     }[]
   }
@@ -779,12 +890,33 @@ export const api = {
     }),
   logout: () =>
     fetchJson<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
-  getMe: () => fetchJson<{ username: string; login_at: number }>('/api/auth/me'),
+  getMe: () => fetchJson<{ username: string; login_at: number; role?: GlobalRole }>('/api/auth/me'),
   getActiveSessions: () =>
     fetchJson<{ sessions: { username: string; login_at: number; last_seen: number }[] }>(
       '/api/auth/sessions',
     ),
   getAuthUsers: () => fetchJson<{ users: string[] }>('/api/auth/users'),
+  getTeamRegistry: () => fetchJson<TeamRegistry>('/api/team/registry'),
+  setTeamRegistry: (body: TeamRegistry) =>
+    fetchJson<TeamRegistry>('/api/team/registry', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  getProjectWorkflow: (id: number) => fetchJson<ProjectWorkflowResponse>(`/api/projects/${id}/workflow`),
+  setProjectWorkflow: (id: number, workflow: ProjectWorkflow) =>
+    fetchJson<ProjectWorkflowResponse>(`/api/projects/${id}/workflow`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(workflow),
+    }),
+  getPinnedSurveys: () => fetchJson<{ survey_ids: number[] }>('/api/me/pinned-surveys'),
+  setPinnedSurveys: (surveyIds: number[]) =>
+    fetchJson<{ survey_ids: number[] }>('/api/me/pinned-surveys', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ survey_ids: surveyIds }),
+    }),
   getConnection: () => fetchJson<ConnectionStatus>('/api/connection'),
   getProjects: (opts?: { limit?: number; includeStats?: boolean }) => {
     const params = new URLSearchParams()
