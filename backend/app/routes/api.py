@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -101,7 +103,16 @@ def _handle_lime_error(exc: Exception) -> HTTPException:
 
 @router.get("/health")
 def health():
-    return {"status": "ok"}
+    commit = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT")
+    return {
+        "status": "ok",
+        "git_commit": commit,
+        "features": {
+            "pinned_surveys": True,
+            "project_workflow": True,
+            "crosstabs_total_only": True,
+        },
+    }
 
 
 @router.get("/auth/users")

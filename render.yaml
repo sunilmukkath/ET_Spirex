@@ -12,6 +12,8 @@ services:
     name: et-spirex
     runtime: docker
     plan: free
+    autoDeploy: true
+    branch: main
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     envVars:
