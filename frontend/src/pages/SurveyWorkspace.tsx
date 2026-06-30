@@ -262,10 +262,20 @@ export function SurveyWorkspace() {
     navTitle,
   ])
 
+  // Background QC summary on Home after schema is ready (toolbar count) — does not block first paint.
   useEffect(() => {
-    if (!surveyId) return
+    if (!surveyId || !schema || mode !== 'home') return
+    const timer = window.setTimeout(() => {
+      reloadQcSummary()
+    }, 4000)
+    return () => window.clearTimeout(timer)
+  }, [surveyId, schema, mode, reloadQcSummary])
+
+  // QC summary when Field tab is active (immediate).
+  useEffect(() => {
+    if (!surveyId || mode !== 'fields') return
     reloadQcSummary()
-  }, [surveyId, schemaVersion, reloadQcSummary])
+  }, [surveyId, mode, schemaVersion, reloadQcSummary])
 
   useEffect(() => {
     setMobileNavOpen(false)
@@ -592,16 +602,13 @@ export function SurveyWorkspace() {
       if (saved?.metric) setMetric(saved.metric)
     }
 
-    // Phase 1: fast question list (~1s) — sidebar usable immediately
+    // Phase 1: fast question list — sidebar usable immediately
     api.getSchema(surveyId, completionStatus, true)
       .then((data) => {
         if (cancelled) return
         setSchema(data)
         pickDefaults(data)
         setSchemaLoading(false)
-        api.warmupSurvey(surveyId, completionStatus)
-          .then(() => markSurveyWarmed(surveyId, completionStatus))
-          .catch(() => {})
       })
       .catch((err) => {
         if (!cancelled) {
@@ -610,8 +617,15 @@ export function SurveyWorkspace() {
         }
       })
 
-    // Phase 2: full enrichment in background (~10–15s) — answer options, banners
+    return () => { cancelled = true }
+  }, [surveyId, completionStatus, schemaVersion, user?.username])
+
+  // Phase 2: full enrichment — defer on Home so opening a survey stays fast
+  useEffect(() => {
+    if (!surveyId || mode === 'home') return
+    let cancelled = false
     setEnriching(true)
+
     api.getSchema(surveyId, completionStatus, false)
       .then((data) => {
         if (cancelled) return
@@ -623,7 +637,7 @@ export function SurveyWorkspace() {
       })
 
     return () => { cancelled = true }
-  }, [surveyId, completionStatus, schemaVersion, user?.username])
+  }, [surveyId, completionStatus, schemaVersion, mode])
 
   useEffect(() => {
     if (!surveyId) return

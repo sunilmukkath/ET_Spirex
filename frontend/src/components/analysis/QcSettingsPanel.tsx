@@ -71,7 +71,7 @@ export function QcSettingsPanel({
   straightLineStats,
 }: Props) {
   const { user } = useAuth()
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const [straightSearch, setStraightSearch] = useState('')
   const thresholds = { ...DEFAULT_THRESHOLDS, ...config.thresholds }
   const rules = config.custom_rules ?? []

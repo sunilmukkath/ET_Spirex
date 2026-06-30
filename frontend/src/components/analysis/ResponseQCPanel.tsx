@@ -610,87 +610,11 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
           </div>
         )}
 
-        <QcSettingsPanel
-          variables={variables}
-          config={qcConfig}
-          onChange={setQcConfig}
-          onSave={() => saveQcSettings(qcConfig)}
-          saving={settingsSaving}
-          speederStats={result?.speeders}
-          straightLineStats={result?.straight_liners}
-        />
-
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <SummaryTile label="Sample size" value={metrics.total} />
-          <SummaryTile label="Passed QC" value={metrics.clean} tone="pass" />
-          <SummaryTile label="Failed QC" value={metrics.flagged} tone="fail" />
-          <SummaryTile
-            label="QC Approved sample"
-            value={qcApprovedCount ?? '—'}
-            tone="pass"
-          />
-          <SummaryTile label="Pass rate" value={`${metrics.passRate.toFixed(1)}%`} />
-        </div>
-
-        {(review.kept.size > 0 || review.excluded.size > 0) && (
-          <p className="text-xs text-slate-500">
-            Manual review: {review.kept.size} flagged kept · {review.excluded.size} excluded
-            {reviewSaving && ' · saving…'}
-            {!reviewSaving && (
-              <button type="button" onClick={resetReview} className="ml-2 text-[var(--et-teal-dark)] hover:underline">
-                Reset to auto
-              </button>
-            )}
-          </p>
-        )}
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-800">Issue type</h3>
-            <p className="text-xs text-slate-500">
-              Click a check to view only those flags. Disabled checks are excluded from pass/fail.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <IssueChip
-              label="All issues"
-              count={enabledFlaggedCount}
-              active={filterCheck === 'all'}
-              onClick={() => setFilterCheck('all')}
-            />
-            {QC_CHECKS.map((check) => {
-              const count = checkCount(check.id, result)
-              const included = enabledChecks.has(check.id)
-              return (
-                <IssueChip
-                  key={check.id}
-                  label={check.title}
-                  count={count}
-                  active={filterCheck === check.id}
-                  muted={!included}
-                  onClick={() => setFilterCheck(filterCheck === check.id ? 'all' : check.id)}
-                />
-              )
-            })}
-            {(hasCustomRules || (result.custom_rules?.count ?? 0) > 0) && (
-              <IssueChip
-                label={CUSTOM_RULES_CHECK.title}
-                count={checkCount('custom_rules', result)}
-                active={filterCheck === 'custom_rules'}
-                muted={!enabledChecks.has('custom_rules')}
-                onClick={() =>
-                  setFilterCheck(filterCheck === 'custom_rules' ? 'all' : 'custom_rules')
-                }
-              />
-            )}
-          </div>
-        </section>
-
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-5 py-3">
             <h3 className="text-sm font-semibold text-slate-800">QC checks</h3>
             <p className="mt-0.5 text-xs text-slate-500">
-              Turn off checks you do not want to count toward QC Approved (e.g. gibberish on name fields).
+              Toggle checks on or off, then click a row to jump to matching flags below.
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -821,6 +745,82 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
             </table>
           </div>
         </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-800">Filter by issue type</h3>
+            <p className="text-xs text-slate-500">
+              Narrow flagged records below. Disabled checks are excluded from pass/fail.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <IssueChip
+              label="All issues"
+              count={enabledFlaggedCount}
+              active={filterCheck === 'all'}
+              onClick={() => setFilterCheck('all')}
+            />
+            {QC_CHECKS.map((check) => {
+              const count = checkCount(check.id, result)
+              const included = enabledChecks.has(check.id)
+              return (
+                <IssueChip
+                  key={check.id}
+                  label={check.title}
+                  count={count}
+                  active={filterCheck === check.id}
+                  muted={!included}
+                  onClick={() => setFilterCheck(filterCheck === check.id ? 'all' : check.id)}
+                />
+              )
+            })}
+            {(hasCustomRules || (result.custom_rules?.count ?? 0) > 0) && (
+              <IssueChip
+                label={CUSTOM_RULES_CHECK.title}
+                count={checkCount('custom_rules', result)}
+                active={filterCheck === 'custom_rules'}
+                muted={!enabledChecks.has('custom_rules')}
+                onClick={() =>
+                  setFilterCheck(filterCheck === 'custom_rules' ? 'all' : 'custom_rules')
+                }
+              />
+            )}
+          </div>
+        </section>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <SummaryTile label="Sample size" value={metrics.total} />
+          <SummaryTile label="Passed QC" value={metrics.clean} tone="pass" />
+          <SummaryTile label="Failed QC" value={metrics.flagged} tone="fail" />
+          <SummaryTile
+            label="QC Approved sample"
+            value={qcApprovedCount ?? '—'}
+            tone="pass"
+          />
+          <SummaryTile label="Pass rate" value={`${metrics.passRate.toFixed(1)}%`} />
+        </div>
+
+        {(review.kept.size > 0 || review.excluded.size > 0) && (
+          <p className="text-xs text-slate-500">
+            Manual review: {review.kept.size} flagged kept · {review.excluded.size} excluded
+            {reviewSaving && ' · saving…'}
+            {!reviewSaving && (
+              <button type="button" onClick={resetReview} className="ml-2 text-[var(--et-teal-dark)] hover:underline">
+                Reset to auto
+              </button>
+            )}
+          </p>
+        )}
+
+        <QcSettingsPanel
+          variables={variables}
+          config={qcConfig}
+          onChange={setQcConfig}
+          onSave={() => saveQcSettings(qcConfig)}
+          saving={settingsSaving}
+          speederStats={result?.speeders}
+          straightLineStats={result?.straight_liners}
+        />
 
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">

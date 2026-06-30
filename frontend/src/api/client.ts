@@ -800,8 +800,20 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 const API_TIMEOUT_MS = 12_000
+/** Schema, QC summary, and warmup on large surveys. */
+const SURVEY_LOAD_TIMEOUT_MS = 120_000
 /** Per-request ceiling for analysis calls (crosstabs run in chunks for large builds). */
 const ANALYSIS_TIMEOUT_MS = 600_000
+
+function timeoutErrorMessage(timeoutMs: number): string {
+  if (timeoutMs >= ANALYSIS_TIMEOUT_MS) {
+    return 'Request timed out. Large crosstab builds run in batches — try fewer tables per build or wait for data to finish loading.'
+  }
+  if (timeoutMs >= SURVEY_LOAD_TIMEOUT_MS) {
+    return 'Request timed out while loading survey data. Large surveys can take a minute — wait and try again, or refresh the page.'
+  }
+  return 'Request timed out. Check your connection or try again in a moment.'
+}
 
 function formatApiError(body: unknown, status: number): string {
   if (body && typeof body === 'object') {
@@ -856,9 +868,7 @@ async function fetchJson<T>(
         throw new Error('Request cancelled')
       }
       if (timedOut) {
-        throw new Error(
-          'Request timed out. Large crosstab builds run in batches — try fewer tables per build or wait for data to finish loading.',
-        )
+        throw new Error(timeoutErrorMessage(timeoutMs))
       }
       throw new Error('Request was cancelled.')
     }
@@ -985,7 +995,7 @@ export const api = {
     const data = await fetchJson<SurveySchema>(
       `/api/projects/${id}/schema?completion_status=${completionStatus}&light=${light}`,
       { signal },
-      light ? API_TIMEOUT_MS : ANALYSIS_TIMEOUT_MS,
+      light ? SURVEY_LOAD_TIMEOUT_MS : ANALYSIS_TIMEOUT_MS,
     )
     schemaCache.set(key, { at: Date.now(), data })
     return data
@@ -1060,6 +1070,7 @@ export const api = {
     fetchJson<{ ok: boolean }>(
       `/api/projects/${id}/warmup?completion_status=${encodeURIComponent(completionStatus)}`,
       { method: 'POST' },
+      SURVEY_LOAD_TIMEOUT_MS,
     ),
   getFilterOptions: (surveyId: number, variableId: string, completionStatus = 'complete') =>
     fetchJson<{ options: { code: string; label: string; count?: number }[]; error?: string }>(
@@ -1081,7 +1092,7 @@ export const api = {
       kept_flagged_count: number
       manual_excluded_count: number
       has_review: boolean
-    }>(`/api/projects/${id}/qc/summary`),
+    }>(`/api/projects/${id}/qc/summary`, undefined, SURVEY_LOAD_TIMEOUT_MS),
   setQcConfig: (id: number, body: QcConfig) =>
     fetchJson<QcConfig>(`/api/projects/${id}/qc/config`, {
       method: 'PUT',
