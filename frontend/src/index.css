@@ -54,9 +54,9 @@ body {
   background-size: 48px 48px;
 }
 
-/* Scout mark uses native PNG colors: yellow arrow, gold tree rings */
+/* Scout mark — yellow/teal arrow on transparent PNG */
 .et-scout-mark-light {
-  filter: brightness(1.08) contrast(1.05);
+  filter: none;
 }
 
 .et-canvas-dots {
