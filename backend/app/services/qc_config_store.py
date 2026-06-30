@@ -51,6 +51,13 @@ def _normalize_thresholds(raw: dict | None) -> QcThresholds:
             500.0,
             max(1.0, float(raw.get("interviewer_gps_proximity_meters", 10) or 10)),
         ),
+        interviewer_gps_proximity_min_cluster=min(
+            20,
+            max(2, int(raw.get("interviewer_gps_proximity_min_cluster", 2) or 2)),
+        ),
+        interviewer_gps_proximity_flag_all_in_cluster=bool(
+            raw.get("interviewer_gps_proximity_flag_all_in_cluster", False),
+        ),
         interviewer_min_gap_seconds=min(
             86400.0,
             max(60.0, float(raw.get("interviewer_min_gap_seconds", 300) or 300)),

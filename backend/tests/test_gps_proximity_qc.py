@@ -30,7 +30,18 @@ def _schema_with_gps():
     return schema
 
 
-def test_gps_proximity_flags_same_interviewer_close_interviews():
+def _alice_three_close_df():
+    return pd.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "INT": ["Alice", "Alice", "Alice"],
+            "12345X78X901GPSLat": [9.0100, 9.01001, 9.01002],
+            "12345X78X901GPSLng": [38.7500, 38.75001, 38.75002],
+        }
+    )
+
+
+def test_gps_proximity_flags_pair_by_default():
     schema = _schema_with_gps()
     df = pd.DataFrame(
         {
@@ -50,9 +61,62 @@ def test_gps_proximity_flags_same_interviewer_close_interviews():
     )
 
     assert result["available"] is True
-    assert result["sessions_with_gps"] == 3
+    assert result["min_cluster"] == 2
     assert result["count"] == 1
     assert result["flags"][0]["interviewer"] == "Alice"
+
+
+def test_gps_proximity_three_interviews_later_only_flags_two():
+    result = _detect_interviewer_gps_proximity(
+        _alice_three_close_df(),
+        _schema_with_gps(),
+        interviewer_variable_id="q_int",
+        proximity_meters=10.0,
+        min_cluster=2,
+        flag_all_in_cluster=False,
+        gps_variable_id="q_gps",
+    )
+
+    assert result["count"] == 2
+    flagged_ids = {str(f["response_id"]) for f in result["flags"]}
+    assert flagged_ids == {"2", "3"}
+
+
+def test_gps_proximity_min_cluster_three_requires_three_before_flagging():
+    df = pd.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "INT": ["Alice", "Alice", "Bob"],
+            "12345X78X901GPSLat": [9.0100, 9.01001, 8.5],
+            "12345X78X901GPSLng": [38.7500, 38.75001, 38.1],
+        }
+    )
+
+    result = _detect_interviewer_gps_proximity(
+        df,
+        _schema_with_gps(),
+        interviewer_variable_id="q_int",
+        proximity_meters=10.0,
+        min_cluster=3,
+        gps_variable_id="q_gps",
+    )
+
+    assert result["count"] == 0
+
+
+def test_gps_proximity_min_cluster_three_flags_all_when_enabled():
+    result = _detect_interviewer_gps_proximity(
+        _alice_three_close_df(),
+        _schema_with_gps(),
+        interviewer_variable_id="q_int",
+        proximity_meters=10.0,
+        min_cluster=3,
+        flag_all_in_cluster=True,
+        gps_variable_id="q_gps",
+    )
+
+    assert result["count"] == 3
+    assert result["flag_all_in_cluster"] is True
 
 
 def test_gps_proximity_without_location_enrichment_still_resolves_columns():

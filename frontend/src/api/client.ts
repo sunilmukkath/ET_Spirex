@@ -448,6 +448,8 @@ export interface QcThresholds {
   min_text_length_gibberish: number
   interviewer_duplicate_similarity_pct?: number
   interviewer_gps_proximity_meters?: number
+  interviewer_gps_proximity_min_cluster?: number
+  interviewer_gps_proximity_flag_all_in_cluster?: boolean
   interviewer_min_gap_seconds?: number
 }
 
@@ -672,6 +674,8 @@ export interface DataQualityResult {
     message?: string
     count: number
     proximity_meters?: number
+    min_cluster?: number
+    flag_all_in_cluster?: boolean
     gps_variable_id?: string | null
     sessions_total?: number
     sessions_with_gps?: number
@@ -685,6 +689,7 @@ export interface DataQualityResult {
       interviewer: string
       match_response_id: string | number
       distance_meters?: number
+      cluster_size?: number
       reason?: string
     }[]
   }

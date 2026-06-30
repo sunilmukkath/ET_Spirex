@@ -178,6 +178,8 @@ def run_data_quality(
         schema,
         interviewer_variable_id=interviewer_id,
         proximity_meters=thresholds.interviewer_gps_proximity_meters,
+        min_cluster=thresholds.interviewer_gps_proximity_min_cluster,
+        flag_all_in_cluster=thresholds.interviewer_gps_proximity_flag_all_in_cluster,
         gps_variable_id=qc_cfg.gps_variable_id,
     )
     interviewer_short_gap = _detect_interviewer_short_gap(
@@ -1185,14 +1187,67 @@ def _session_sort_key(session: dict[str, Any]) -> tuple[Any, ...]:
     return (1, str(session.get("response_id", "")))
 
 
+def _gps_proximity_clusters(
+    sessions: list[dict[str, Any]],
+    proximity_meters: float,
+) -> list[list[dict[str, Any]]]:
+    """Group sessions into clusters where every pair is within proximity_meters (union-find)."""
+    n = len(sessions)
+    if n == 0:
+        return []
+    parent = list(range(n))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(a: int, b: int) -> None:
+        root_a, root_b = find(a), find(b)
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    for i in range(n):
+        gps_a = sessions[i].get("gps")
+        if not gps_a:
+            continue
+        for j in range(i + 1, n):
+            gps_b = sessions[j].get("gps")
+            if not gps_b:
+                continue
+            if _haversine_meters(gps_a[0], gps_a[1], gps_b[0], gps_b[1]) <= proximity_meters:
+                union(i, j)
+
+    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for i, session in enumerate(sessions):
+        if not session.get("gps"):
+            continue
+        grouped[find(i)].append(session)
+    return [cluster for cluster in grouped.values() if len(cluster) >= 2]
+
+
 def _detect_interviewer_gps_proximity(
     df: pd.DataFrame,
     schema: dict[str, Any],
     *,
     interviewer_variable_id: str | None,
     proximity_meters: float = 10.0,
+    min_cluster: int = 2,
+    flag_all_in_cluster: bool = False,
     gps_variable_id: str | None = None,
 ) -> dict[str, Any]:
+    min_cluster = max(2, int(min_cluster or 2))
+
+    def _limits_meta(**extra: Any) -> dict[str, Any]:
+        return {
+            "proximity_meters": proximity_meters,
+            "min_cluster": min_cluster,
+            "flag_all_in_cluster": flag_all_in_cluster,
+            "gps_variable_id": gps_variable_id,
+            **extra,
+        }
+
     prep = _prepare_interviewer_sessions(
         df,
         schema,
@@ -1206,8 +1261,7 @@ def _detect_interviewer_gps_proximity(
             "count": 0,
             "flags": [],
             "by_interviewer": [],
-            "proximity_meters": proximity_meters,
-            "gps_variable_id": gps_variable_id,
+            **_limits_meta(),
         }
     if not prep.get("has_gps"):
         return {
@@ -1216,8 +1270,7 @@ def _detect_interviewer_gps_proximity(
             "count": 0,
             "flags": [],
             "by_interviewer": [],
-            "proximity_meters": proximity_meters,
-            "gps_variable_id": gps_variable_id,
+            **_limits_meta(),
         }
 
     flags: list[dict[str, Any]] = []
@@ -1229,57 +1282,87 @@ def _detect_interviewer_gps_proximity(
         1 for sessions in groups.values() for session in sessions if session.get("gps")
     )
 
-    if sessions_with_gps < 2:
+    if sessions_with_gps < min_cluster:
         return {
             "available": False,
             "message": (
                 f"Only {sessions_with_gps} interview(s) have valid GPS coordinates "
-                f"(need at least 2 for proximity checks)."
+                f"(need at least {min_cluster} for proximity checks)."
             ),
             "count": 0,
             "flags": [],
             "by_interviewer": [],
-            "proximity_meters": proximity_meters,
-            "gps_variable_id": gps_variable_id,
-            "sessions_total": sessions_total,
-            "sessions_with_gps": sessions_with_gps,
+            **_limits_meta(sessions_total=sessions_total, sessions_with_gps=sessions_with_gps),
         }
 
     for interviewer, sessions in groups.items():
         located = [s for s in sessions if s.get("gps")]
-        if len(located) < 2:
+        if len(located) < min_cluster:
             continue
-        sorted_sessions = sorted(located, key=_session_sort_key)
+
+        clusters = _gps_proximity_clusters(located, proximity_meters)
         interviewer_flags = 0
 
-        for i in range(len(sorted_sessions)):
-            sess_a = sorted_sessions[i]
-            gps_a = sess_a["gps"]
-            for j in range(i + 1, len(sorted_sessions)):
-                sess_b = sorted_sessions[j]
-                gps_b = sess_b["gps"]
-                distance = _haversine_meters(gps_a[0], gps_a[1], gps_b[0], gps_b[1])
-                if distance > proximity_meters:
-                    continue
-                later = sess_b
-                match = sess_a
-                if _session_sort_key(sess_a) > _session_sort_key(sess_b):
-                    later, match = sess_b, sess_a
-                rid = str(later["response_id"])
-                if rid in flagged_ids:
-                    continue
-                flagged_ids.add(rid)
-                interviewer_flags += 1
-                flags.append({
-                    "response_id": rid,
-                    "interviewer": interviewer,
-                    "match_response_id": match["response_id"],
-                    "distance_meters": round(distance, 1),
-                    "reason": (
-                        f"Within {round(distance, 1)}m of record {match['response_id']} "
-                        f"(≤ {proximity_meters:g}m, interviewer: {interviewer})"
-                    ),
-                })
+        for cluster in clusters:
+            if len(cluster) < min_cluster:
+                continue
+            sorted_cluster = sorted(cluster, key=_session_sort_key)
+
+            if flag_all_in_cluster:
+                anchor = sorted_cluster[0]
+                for session in sorted_cluster:
+                    rid = str(session["response_id"])
+                    if rid in flagged_ids:
+                        continue
+                    gps = session["gps"]
+                    anchor_gps = anchor["gps"]
+                    distance = _haversine_meters(gps[0], gps[1], anchor_gps[0], anchor_gps[1])
+                    flagged_ids.add(rid)
+                    interviewer_flags += 1
+                    flags.append({
+                        "response_id": rid,
+                        "interviewer": interviewer,
+                        "match_response_id": anchor["response_id"],
+                        "distance_meters": round(distance, 1),
+                        "cluster_size": len(sorted_cluster),
+                        "reason": (
+                            f"{len(sorted_cluster)} interviews within {proximity_meters:g}m "
+                            f"(cluster includes record {anchor['response_id']}, "
+                            f"interviewer: {interviewer})"
+                        ),
+                    })
+                continue
+
+            for i in range(len(sorted_cluster)):
+                sess_a = sorted_cluster[i]
+                gps_a = sess_a["gps"]
+                for j in range(i + 1, len(sorted_cluster)):
+                    sess_b = sorted_cluster[j]
+                    gps_b = sess_b["gps"]
+                    distance = _haversine_meters(gps_a[0], gps_a[1], gps_b[0], gps_b[1])
+                    if distance > proximity_meters:
+                        continue
+                    later = sess_b
+                    match = sess_a
+                    if _session_sort_key(sess_a) > _session_sort_key(sess_b):
+                        later, match = sess_b, sess_a
+                    rid = str(later["response_id"])
+                    if rid in flagged_ids:
+                        continue
+                    flagged_ids.add(rid)
+                    interviewer_flags += 1
+                    flags.append({
+                        "response_id": rid,
+                        "interviewer": interviewer,
+                        "match_response_id": match["response_id"],
+                        "distance_meters": round(distance, 1),
+                        "cluster_size": len(sorted_cluster),
+                        "reason": (
+                            f"Within {round(distance, 1)}m of record {match['response_id']} "
+                            f"({len(sorted_cluster)} within {proximity_meters:g}m, "
+                            f"interviewer: {interviewer})"
+                        ),
+                    })
 
         if interviewer_flags > 0:
             by_interviewer_summary.append({
@@ -1295,10 +1378,7 @@ def _detect_interviewer_gps_proximity(
         "count": len(flags),
         "flags": flags[:_MAX_FLAGS],
         "by_interviewer": by_interviewer_summary,
-        "proximity_meters": proximity_meters,
-        "gps_variable_id": gps_variable_id,
-        "sessions_total": sessions_total,
-        "sessions_with_gps": sessions_with_gps,
+        **_limits_meta(sessions_total=sessions_total, sessions_with_gps=sessions_with_gps),
     }
 
 

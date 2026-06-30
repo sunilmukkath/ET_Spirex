@@ -202,7 +202,11 @@ export function InterviewerQcTab({
         {gpsProximityStats?.available && (gpsProximityStats.by_interviewer?.length ?? 0) > 0 && (
           <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50/80 p-3">
             <p className="text-xs font-semibold text-rose-900">
-              Same GPS spot (within {gpsProximityStats.proximity_meters ?? 10}m)
+              Same GPS spot (within {gpsProximityStats.proximity_meters ?? 10}m
+              {(gpsProximityStats.min_cluster ?? 2) > 2
+                ? `, min ${gpsProximityStats.min_cluster} interviews`
+                : ''}
+              )
             </p>
             <ul className="mt-2 space-y-1 text-xs text-rose-900/90">
               {gpsProximityStats.by_interviewer?.map((row) => (

@@ -12,6 +12,8 @@ class QcThresholds(BaseModel):
     min_text_length_gibberish: int = 3
     interviewer_duplicate_similarity_pct: float = 85.0
     interviewer_gps_proximity_meters: float = 10.0
+    interviewer_gps_proximity_min_cluster: int = 2
+    interviewer_gps_proximity_flag_all_in_cluster: bool = False
     interviewer_min_gap_seconds: float = 300.0
 
 

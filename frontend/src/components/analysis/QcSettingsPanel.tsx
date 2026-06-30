@@ -13,6 +13,8 @@ const DEFAULT_THRESHOLDS: QcConfig['thresholds'] = {
   min_text_length_gibberish: 3,
   interviewer_duplicate_similarity_pct: 85,
   interviewer_gps_proximity_meters: 10,
+  interviewer_gps_proximity_min_cluster: 2,
+  interviewer_gps_proximity_flag_all_in_cluster: false,
   interviewer_min_gap_seconds: 300,
 }
 
@@ -561,10 +563,54 @@ export function QcSettingsPanel({
                     className="et-input w-full"
                   />
                   <span className="mt-1 block text-[10px] text-slate-400">
-                    Flag when two interviews by the same interviewer are within this distance
+                    Max distance between interviews at the same spot
                   </span>
                 </label>
                 <label className="text-xs">
+                  <span className="mb-1 block font-medium text-slate-600">Min interviews at same spot</span>
+                  <input
+                    type="number"
+                    min={2}
+                    max={20}
+                    step={1}
+                    value={thresholds.interviewer_gps_proximity_min_cluster ?? 2}
+                    onChange={(e) =>
+                      updateThresholds({
+                        interviewer_gps_proximity_min_cluster: Math.min(
+                          20,
+                          Math.max(2, Number(e.target.value) || 2),
+                        ),
+                      })
+                    }
+                    className="et-input w-full"
+                  />
+                  <span className="mt-1 block text-[10px] text-slate-400">
+                    Only flag when this many interviews by the same interviewer fall within the
+                    distance above (e.g. 3 = three completes at one GPS location)
+                  </span>
+                </label>
+              </div>
+              <label className="mt-3 inline-flex cursor-pointer items-start gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(thresholds.interviewer_gps_proximity_flag_all_in_cluster)}
+                  onChange={(e) =>
+                    updateThresholds({
+                      interviewer_gps_proximity_flag_all_in_cluster: e.target.checked,
+                    })
+                  }
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[var(--et-teal)] focus:ring-[var(--et-teal)]"
+                />
+                <span>
+                  <span className="font-medium text-slate-800">Flag every interview in the cluster</span>
+                  <span className="mt-0.5 block text-[10px] text-slate-400">
+                    When off, only later interviews are flagged (first at each spot is kept). When on,
+                    all interviews in a qualifying cluster are flagged.
+                  </span>
+                </span>
+              </label>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="text-xs sm:col-span-2">
                   <span className="mb-1 block font-medium text-slate-600">Minimum gap (minutes)</span>
                   <input
                     type="number"
