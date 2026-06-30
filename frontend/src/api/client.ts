@@ -983,7 +983,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ survey_ids: ids }),
     }),
-  getProject: (id: number) => fetchJson<ProjectDetail>(`/api/projects/${id}`),
+  getProject: (id: number) =>
+    fetchJson<ProjectDetail>(`/api/projects/${id}`, undefined, SURVEY_LOAD_TIMEOUT_MS),
   getQuestions: (id: number) =>
     fetchJson<{ questions: Question[] }>(`/api/projects/${id}/questions`),
   getSchema: async (id: number, completionStatus = 'complete', light = false, signal?: AbortSignal) => {
@@ -1116,7 +1117,8 @@ export const api = {
       error?: string
     }>(`/api/projects/${id}/qc/interviewer-labels${qs}`)
   },
-  getSurveyOverview: (id: number) => fetchJson<SurveyOverview>(`/api/projects/${id}/overview`),
+  getSurveyOverview: (id: number) =>
+    fetchJson<SurveyOverview>(`/api/projects/${id}/overview`, undefined, SURVEY_LOAD_TIMEOUT_MS),
   getFieldingStats: (id: number, completionStatus?: string, interviewerVariableId?: string) => {
     const params = new URLSearchParams()
     if (completionStatus) params.set('completion_status', completionStatus)

@@ -12,15 +12,32 @@ from app.services.quota_check import check_quotas
 
 def survey_overview(survey_id: int) -> dict[str, Any]:
     schema, df_complete = load_analysis_context(survey_id, completion_status="complete")
-    _, df_all = load_analysis_context(survey_id, completion_status="all")
+    total_complete = len(df_complete)
+
+    total_all = total_complete
+    incomplete = 0
+    try:
+        from app.lime_client import execute_lime
+
+        summary = execute_lime(lambda client: client.get_summary(survey_id) or {})
+        incomplete = int(summary.get("incomplete_responses") or 0)
+        total_all = int(summary.get("count_total") or 0) or (
+            int(summary.get("completed_responses") or total_complete) + incomplete
+        )
+        if not incomplete and total_all > total_complete:
+            incomplete = max(0, total_all - total_complete)
+    except Exception:
+        try:
+            _, df_all = load_analysis_context(survey_id, completion_status="all")
+            total_all = len(df_all)
+            incomplete = max(0, total_all - total_complete)
+        except Exception:
+            total_all = total_complete
+            incomplete = 0
 
     qc_cfg = get_qc_config(survey_id)
     quota_cfg = get_quota_config(survey_id)
     excluded = get_qc_excluded_response_ids(survey_id)
-
-    total_complete = len(df_complete)
-    total_all = len(df_all)
-    incomplete = max(0, total_all - total_complete)
     qc_approved = max(0, total_complete - len(excluded))
 
     quota_summary = None

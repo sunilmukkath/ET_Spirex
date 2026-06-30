@@ -147,6 +147,10 @@ function parseFieldView(rawMode: string | null, rawView: string | null): FieldVi
   return 'fielding'
 }
 
+function modeNeedsSchema(mode: Mode): boolean {
+  return mode !== 'home' && mode !== 'workflow'
+}
+
 export function SurveyWorkspace() {
   const { user } = useAuth()
   const { isPinned, toggle: togglePinned } = usePinnedSurveys()
@@ -160,7 +164,7 @@ export function SurveyWorkspace() {
   const [schema, setSchema] = useState<SurveySchema | null>(null)
   const [schemaLoading, setSchemaLoading] = useState(true)
   const [enriching, setEnriching] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [schemaError, setSchemaError] = useState<string | null>(null)
 
   const rawModeParam = searchParams.get('mode')
   const mode = parseMode(rawModeParam)
@@ -554,7 +558,7 @@ export function SurveyWorkspace() {
     initialized.current = false
     setSchemaLoading(true)
     setEnriching(false)
-    setError(null)
+    setSchemaError(null)
     setSchema(null)
     setProfileResult(null)
     setBannerResult(null)
@@ -603,19 +607,27 @@ export function SurveyWorkspace() {
     }
 
     // Phase 1: fast question list — sidebar usable immediately
-    api.getSchema(surveyId, completionStatus, true)
-      .then((data) => {
+    async function loadLightSchema(attempt = 0) {
+      try {
+        const data = await api.getSchema(surveyId, completionStatus, true)
         if (cancelled) return
         setSchema(data)
         pickDefaults(data)
         setSchemaLoading(false)
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load survey')
-          setSchemaLoading(false)
+        setSchemaError(null)
+      } catch (err) {
+        if (cancelled) return
+        if (attempt < 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 2000))
+          if (!cancelled) return loadLightSchema(attempt + 1)
+          return
         }
-      })
+        setSchemaError(err instanceof Error ? err.message : 'Failed to load survey')
+        setSchemaLoading(false)
+      }
+    }
+
+    void loadLightSchema()
 
     return () => { cancelled = true }
   }, [surveyId, completionStatus, schemaVersion, user?.username])
@@ -1118,9 +1130,15 @@ export function SurveyWorkspace() {
           )}
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {error && !schema && (
+          {schemaError && !schema && modeNeedsSchema(mode) && (
             <div className="p-6">
-              <ErrorState message={error} />
+              <ErrorState message={schemaError} />
+            </div>
+          )}
+
+          {schemaError && !schema && !modeNeedsSchema(mode) && (
+            <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+              Question list is still loading in the background. Home and workflow work; analysis tabs may be limited until load finishes.
             </div>
           )}
 

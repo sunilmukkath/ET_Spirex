@@ -147,7 +147,34 @@ def _response_count(survey_id: int) -> int:
         return 0
 
 
-def _response_count_for_status(survey_id: int, completion_status: str) -> int:
+def _response_count_from_summary(survey_id: int, completion_status: str) -> int:
+    """Fast counts from Lime summary — no full response export (used for light schema)."""
+    from app.services.qc_filter import QC_APPROVED_STATUS
+
+    def load_summary(client) -> dict[str, Any]:
+        return client.get_summary(survey_id) or {}
+
+    try:
+        summary = execute_lime(load_summary)
+        completed = int(summary.get("completed_responses") or 0)
+        incomplete = int(summary.get("incomplete_responses") or 0)
+        total = int(summary.get("count_total") or 0) or (completed + incomplete)
+        if completion_status == "complete":
+            return completed
+        if completion_status == "incomplete":
+            return incomplete
+        if completion_status == "all":
+            return total
+        if completion_status == QC_APPROVED_STATUS:
+            return completed
+        return completed
+    except Exception:
+        return _response_count(survey_id)
+
+
+def _response_count_for_status(survey_id: int, completion_status: str, *, light: bool = False) -> int:
+    if light:
+        return _response_count_from_summary(survey_id, completion_status)
     try:
         from app.services.qc_filter import QC_APPROVED_STATUS, qc_approved_response_count
         from app.services.response_store import get_responses
@@ -215,7 +242,7 @@ def build_survey_schema(
     def build_from_lime(client) -> dict[str, Any]:
         groups = client.list_groups(survey_id)
         groups_sorted = sorted(groups, key=lambda g: int(g.get("group_order") or 0))
-        response_count = _response_count_for_status(survey_id, completion_status)
+        response_count = _response_count_for_status(survey_id, completion_status, light=light)
 
         variables: list[SurveyVariable] = []
         group_summaries: list[dict[str, Any]] = []
