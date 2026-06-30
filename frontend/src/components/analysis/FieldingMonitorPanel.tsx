@@ -6,6 +6,7 @@ import { api, type FieldingStats } from '../../api/client'
 interface Props {
   surveyId: number
   completionStatus: string
+  embedded?: boolean
 }
 
 function formatDuration(seconds: number | null | undefined): string {
@@ -15,7 +16,7 @@ function formatDuration(seconds: number | null | undefined): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-export function FieldingMonitorPanel({ surveyId, completionStatus }: Props) {
+export function FieldingMonitorPanel({ surveyId, completionStatus, embedded }: Props) {
   const [stats, setStats] = useState<FieldingStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -45,8 +46,9 @@ export function FieldingMonitorPanel({ surveyId, completionStatus }: Props) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll">
+    <div className={`${embedded ? 'h-full' : 'flex-1'} overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll`}>
       <div className="mx-auto max-w-5xl space-y-6">
+        {!embedded && (
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -67,6 +69,21 @@ export function FieldingMonitorPanel({ surveyId, completionStatus }: Props) {
             Refresh
           </button>
         </header>
+        )}
+
+        {embedded && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              Refresh
+            </button>
+          </div>
+        )}
 
         {error && <p className="text-sm text-rose-700">{error}</p>}
 

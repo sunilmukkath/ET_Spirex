@@ -14,8 +14,6 @@ import {
   Sigma,
   SlidersHorizontal,
   Table2,
-  TrendingUp,
-  Users,
 } from 'lucide-react'
 import {
   api,
@@ -39,11 +37,9 @@ import { QuestionNavigator } from '../components/analysis/QuestionNavigator'
 import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
 import { StatusBadge } from '../components/StatusBadge'
 import { ErrorState } from '../components/States'
-import { FieldManagementPanel } from '../components/analysis/FieldManagementPanel'
+import { FieldOperationsPanel, type FieldView } from '../components/analysis/FieldOperationsPanel'
 import { SurveyHomePanel } from '../components/analysis/SurveyHomePanel'
-import { FieldingMonitorPanel } from '../components/analysis/FieldingMonitorPanel'
 import { ReportBuilderPanel } from '../components/analysis/ReportBuilderPanel'
-import { FieldTeamPanel } from '../components/analysis/FieldTeamPanel'
 import { filterPayload, treeToFlatFilters } from '../lib/filterTree'
 import type { ChartTypeId } from '../lib/chartTypes'
 
@@ -79,9 +75,7 @@ type Mode =
   | 'home'
   | 'explore'
   | 'charts'
-  | 'fielding'
   | 'reports'
-  | 'fieldteam'
   | 'quality'
   | 'variables'
   | 'fields'
@@ -92,9 +86,8 @@ type AnalyzeView = 'profile' | 'compare'
 function parseMode(raw: string | null): Mode {
   if (raw === 'crosstabs' || raw === 'compare') return 'explore'
   if (raw === 'home' || raw === 'overview') return 'home'
-  if (raw === 'fielding' || raw === 'monitor') return 'fielding'
+  if (raw === 'fielding' || raw === 'monitor' || raw === 'fieldteam' || raw === 'field-team') return 'fields'
   if (raw === 'reports' || raw === 'report-builder') return 'reports'
-  if (raw === 'fieldteam' || raw === 'field-team') return 'fieldteam'
   if (raw === 'charts') return 'charts'
   if (raw === 'quality') return 'quality'
   if (raw === 'variables') return 'variables'
@@ -108,6 +101,13 @@ function parseMode(raw: string | null): Mode {
 function parseAnalyzeView(rawMode: string | null, rawView: string | null): AnalyzeView {
   if (rawMode === 'crosstabs' || rawMode === 'compare' || rawView === 'compare') return 'compare'
   return 'profile'
+}
+
+function parseFieldView(rawMode: string | null, rawView: string | null): FieldView {
+  if (rawMode === 'fielding' || rawMode === 'monitor') return 'monitor'
+  if (rawMode === 'fieldteam' || rawMode === 'field-team') return 'team'
+  if (rawView === 'monitor' || rawView === 'team' || rawView === 'quotas') return rawView
+  return 'quotas'
 }
 
 export function SurveyWorkspace() {
@@ -127,6 +127,7 @@ export function SurveyWorkspace() {
   const rawModeParam = searchParams.get('mode')
   const mode = parseMode(rawModeParam)
   const analyzeView = parseAnalyzeView(rawModeParam, searchParams.get('view'))
+  const fieldView = parseFieldView(rawModeParam, searchParams.get('view'))
   const completionStatus = searchParams.get('responses') || 'complete'
   const initialChartType = (searchParams.get('chart') as ChartTypeId | null) || null
 
@@ -184,7 +185,7 @@ export function SurveyWorkspace() {
 
   useEffect(() => {
     setMobileNavOpen(false)
-  }, [mode, analyzeView])
+  }, [mode, analyzeView, fieldView])
 
   useEffect(() => {
     const raw = searchParams.get('mode')
@@ -192,6 +193,22 @@ export function SurveyWorkspace() {
       setSearchParams((prev) => {
         prev.set('mode', 'explore')
         prev.set('view', 'compare')
+        return prev
+      }, { replace: true })
+      return
+    }
+    if (raw === 'fielding' || raw === 'monitor') {
+      setSearchParams((prev) => {
+        prev.set('mode', 'fields')
+        prev.set('view', 'monitor')
+        return prev
+      }, { replace: true })
+      return
+    }
+    if (raw === 'fieldteam' || raw === 'field-team') {
+      setSearchParams((prev) => {
+        prev.set('mode', 'fields')
+        prev.set('view', 'team')
         return prev
       }, { replace: true })
     }
@@ -261,13 +278,30 @@ export function SurveyWorkspace() {
     [setSearchParams],
   )
 
+  const setFieldView = useCallback(
+    (view: FieldView) => {
+      setSearchParams((prev) => {
+        prev.set('mode', 'fields')
+        prev.set('view', view)
+        return prev
+      }, { replace: true })
+    },
+    [setSearchParams],
+  )
+
   const navigateWorkspace = useCallback(
     (targetMode: string, view?: string) => {
       setSearchParams((prev) => {
         prev.set('mode', targetMode)
-        if (view === 'compare') prev.set('view', 'compare')
-        else if (view === 'profile') prev.delete('view')
-        else if (targetMode !== 'explore') prev.delete('view')
+        if (targetMode === 'fields' && (view === 'monitor' || view === 'team' || view === 'quotas')) {
+          prev.set('view', view)
+        } else if (view === 'compare') {
+          prev.set('view', 'compare')
+        } else if (view === 'profile') {
+          prev.delete('view')
+        } else if (targetMode !== 'explore' && targetMode !== 'fields') {
+          prev.delete('view')
+        }
         return prev
       }, { replace: true })
     },
@@ -659,12 +693,10 @@ export function SurveyWorkspace() {
     mode !== 'quality' &&
     mode !== 'variables' &&
     mode !== 'fields' &&
+    mode !== 'reports' &&
     mode !== 'data' &&
     mode !== 'charts' &&
-    mode !== 'multivariate' &&
-    mode !== 'fielding' &&
-    mode !== 'reports' &&
-    mode !== 'fieldteam'
+    mode !== 'multivariate'
 
   return (
     <div className="flex h-screen flex-col bg-[var(--canvas)]">
@@ -752,9 +784,6 @@ export function SurveyWorkspace() {
             <ModeButton active={mode === 'charts'} onClick={() => setMode('charts')} icon={<BarChart3 size={15} />}>
               Charts
             </ModeButton>
-            <ModeButton active={mode === 'fielding'} onClick={() => setMode('fielding')} icon={<TrendingUp size={15} />}>
-              Fielding
-            </ModeButton>
             <ModeButton active={mode === 'reports'} onClick={() => setMode('reports')} icon={<FileText size={15} />}>
               Reports
             </ModeButton>
@@ -767,14 +796,11 @@ export function SurveyWorkspace() {
           </span>
           <span className="hidden shrink-0 et-kicker lg:inline">Manage</span>
           <div className="et-segment">
-            <ModeButton active={mode === 'fieldteam'} onClick={() => setMode('fieldteam')} icon={<Users size={15} />}>
+            <ModeButton active={mode === 'fields'} onClick={() => setMode('fields')} icon={<ClipboardList size={15} />}>
               Field team
             </ModeButton>
             <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
               Setup
-            </ModeButton>
-            <ModeButton active={mode === 'fields'} onClick={() => setMode('fields')} icon={<ClipboardList size={15} />}>
-              Fields
             </ModeButton>
             <ModeButton active={mode === 'quality'} onClick={() => setMode('quality')} icon={<ShieldCheck size={15} />}>
               Quality
@@ -870,8 +896,14 @@ export function SurveyWorkspace() {
             <SurveyHomePanel surveyId={surveyId} onNavigate={navigateWorkspace} />
           )}
 
-          {mode === 'fielding' && (
-            <FieldingMonitorPanel surveyId={surveyId} completionStatus={completionStatus} />
+          {mode === 'fields' && (
+            <FieldOperationsPanel
+              surveyId={surveyId}
+              completionStatus={completionStatus}
+              variables={activeSchema?.variables ?? []}
+              view={fieldView}
+              onViewChange={setFieldView}
+            />
           )}
 
           {mode === 'reports' && (
@@ -882,10 +914,6 @@ export function SurveyWorkspace() {
               filters={filters}
               filterTree={filterTree}
             />
-          )}
-
-          {mode === 'fieldteam' && (
-            <FieldTeamPanel surveyId={surveyId} variables={activeSchema?.variables ?? []} />
           )}
 
           {mode === 'charts' && (
@@ -1000,13 +1028,6 @@ export function SurveyWorkspace() {
               onChanged={reloadCustomVariables}
               />
             </div>
-          )}
-
-          {mode === 'fields' && (
-            <FieldManagementPanel
-              surveyId={surveyId}
-              variables={activeSchema?.variables ?? []}
-            />
           )}
 
           {mode === 'data' && (

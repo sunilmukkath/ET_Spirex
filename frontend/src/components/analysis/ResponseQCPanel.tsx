@@ -109,8 +109,9 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [qcTab, setQcTab] = useState<'overview' | 'interviewer'>('overview')
   const [interviewerLabels, setInterviewerLabels] = useState<Record<string, string>>({})
+  const [interviewerVariableId, setInterviewerVariableId] = useState<string | null>(null)
 
-  const showInterviewerColumn = Boolean(qcConfig.interviewer_variable_id)
+  const showInterviewerColumn = Boolean(interviewerVariableId)
 
   const enabledChecks = useMemo(
     () => enabledChecksFromDisabled(qcConfig.disabled_checks ?? []),
@@ -168,23 +169,30 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
   }, [surveyId])
 
   useEffect(() => {
-    if (!surveyReady || !qcConfig.interviewer_variable_id) {
+    if (!surveyReady) {
       setInterviewerLabels({})
+      setInterviewerVariableId(null)
       return
     }
     let cancelled = false
     api
-      .getInterviewerLabels(surveyId, qcConfig.interviewer_variable_id)
+      .getInterviewerLabels(surveyId, qcConfig.interviewer_variable_id ?? undefined)
       .then((res) => {
-        if (!cancelled) setInterviewerLabels(res.labels ?? {})
+        if (!cancelled) {
+          setInterviewerVariableId(res.interviewer_variable_id ?? null)
+          setInterviewerLabels(res.labels ?? {})
+        }
       })
       .catch(() => {
-        if (!cancelled) setInterviewerLabels({})
+        if (!cancelled) {
+          setInterviewerLabels({})
+          setInterviewerVariableId(null)
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [surveyId, surveyReady, qcConfig.interviewer_variable_id])
+  }, [surveyId, surveyReady, qcConfig.interviewer_variable_id, lastRunAt])
 
   useEffect(() => {
     let cancelled = false

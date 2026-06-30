@@ -6,7 +6,6 @@ import {
   Loader2,
   ShieldCheck,
   Table2,
-  TrendingUp,
 } from 'lucide-react'
 import { api, type SurveyOverview } from '../../api/client'
 
@@ -153,22 +152,16 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
             onClick={() => onNavigate('charts')}
           />
           <QuickLink
-            icon={<TrendingUp size={18} />}
-            title="Fielding monitor"
-            desc="Daily completes and interviewer throughput"
-            onClick={() => onNavigate('fielding')}
+            icon={<ClipboardList size={18} />}
+            title="Field team"
+            desc="Fielding pace, team performance, and quota targets"
+            onClick={() => onNavigate('fields', 'monitor')}
           />
           <QuickLink
             icon={<ShieldCheck size={18} />}
             title="Response QC"
             desc={`${overview.custom_rule_count} custom rules configured`}
             onClick={() => onNavigate('quality')}
-          />
-          <QuickLink
-            icon={<ClipboardList size={18} />}
-            title="Field quotas"
-            desc="Targets and completion checks"
-            onClick={() => onNavigate('fields')}
           />
         </div>
       </div>

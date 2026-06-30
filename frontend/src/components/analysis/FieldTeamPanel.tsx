@@ -23,9 +23,10 @@ function defaultQcConfig(): QcConfig {
 interface Props {
   surveyId: number
   variables: SurveyVariable[]
+  embedded?: boolean
 }
 
-export function FieldTeamPanel({ surveyId, variables }: Props) {
+export function FieldTeamPanel({ surveyId, variables, embedded }: Props) {
   const [qcConfig, setQcConfig] = useState<QcConfig>(defaultQcConfig())
   const [stats, setStats] = useState<InterviewerQcResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -73,8 +74,9 @@ export function FieldTeamPanel({ surveyId, variables }: Props) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+      <div className={`shrink-0 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 ${embedded ? 'py-2.5' : ''}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
+          {!embedded && (
           <div className="flex items-center gap-2">
             <Users size={20} className="text-[var(--et-teal)]" />
             <div>
@@ -84,6 +86,7 @@ export function FieldTeamPanel({ surveyId, variables }: Props) {
               </p>
             </div>
           </div>
+          )}
           <button
             type="button"
             disabled={exporting || !stats?.interviewer_variable_id}
@@ -97,7 +100,7 @@ export function FieldTeamPanel({ surveyId, variables }: Props) {
                 setExporting(false)
               }
             }}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className={`inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 ${embedded ? 'ml-auto' : ''}`}
           >
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             Export CSV
