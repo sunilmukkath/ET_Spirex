@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Loader2, Plus, Save, Settings2, Trash2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Loader2, Plus, Save, Search, Settings2, Trash2 } from 'lucide-react'
 import type { DataQualityResult, QcConfig, QcCustomRule, SurveyVariable } from '../../api/client'
 
 const DEFAULT_THRESHOLDS: QcConfig['thresholds'] = {
@@ -9,6 +9,7 @@ const DEFAULT_THRESHOLDS: QcConfig['thresholds'] = {
   speeder_median_fraction: 0.25,
   min_array_items_straight_line: 4,
   min_text_length_gibberish: 3,
+  interviewer_duplicate_similarity_pct: 85,
 }
 
 function formatDuration(seconds: number | undefined | null): string {
@@ -31,10 +32,33 @@ interface Props {
   onSave: () => Promise<void>
   saving?: boolean
   speederStats?: DataQualityResult['speeders'] | null
+  straightLineStats?: DataQualityResult['straight_liners'] | null
 }
 
-export function QcSettingsPanel({ variables, config, onChange, onSave, saving, speederStats }: Props) {
+function itemCountForVariable(v: SurveyVariable): number {
+  return Math.max(v.columns?.length ?? 0, v.subquestions?.length ?? 0)
+}
+
+function eligibleStraightLineVariables(
+  variables: SurveyVariable[],
+  minItems: number,
+): SurveyVariable[] {
+  return variables.filter(
+    (v) => !v.custom && v.kind === 'array' && itemCountForVariable(v) >= minItems,
+  )
+}
+
+export function QcSettingsPanel({
+  variables,
+  config,
+  onChange,
+  onSave,
+  saving,
+  speederStats,
+  straightLineStats,
+}: Props) {
   const [expanded, setExpanded] = useState(true)
+  const [straightSearch, setStraightSearch] = useState('')
   const thresholds = { ...DEFAULT_THRESHOLDS, ...config.thresholds }
   const rules = config.custom_rules ?? []
   const timeBasis = thresholds.speeder_time_basis ?? 'average'
@@ -58,6 +82,59 @@ export function QcSettingsPanel({ variables, config, onChange, onSave, saving, s
       v.kind === 'numeric' ||
       v.kind === 'text',
   )
+
+  const minStraightItems = thresholds.min_array_items_straight_line
+  const eligibleStraightLine = useMemo(
+    () => eligibleStraightLineVariables(variables, minStraightItems),
+    [variables, minStraightItems],
+  )
+  const rawStraightIds = config.straight_line_variable_ids
+  const straightLineAutoMode = rawStraightIds == null
+  const selectedStraightIds = straightLineAutoMode
+    ? eligibleStraightLine.map((v) => v.id)
+    : rawStraightIds
+  const selectedStraightSet = useMemo(() => new Set(selectedStraightIds), [selectedStraightIds])
+
+  const filteredStraightLine = useMemo(() => {
+    const q = straightSearch.trim().toLowerCase()
+    if (!q) return eligibleStraightLine
+    return eligibleStraightLine.filter(
+      (v) =>
+        v.code.toLowerCase().includes(q) ||
+        (v.text || '').toLowerCase().includes(q),
+    )
+  }, [eligibleStraightLine, straightSearch])
+
+  function setStraightLineSelection(nextIds: string[]) {
+    const cleaned = nextIds.filter((id) => eligibleStraightLine.some((v) => v.id === id))
+    onChange({
+      ...config,
+      straight_line_variable_ids:
+        cleaned.length === eligibleStraightLine.length ? null : cleaned,
+    })
+  }
+
+  function toggleStraightLineVariable(variableId: string) {
+    const base = straightLineAutoMode ? eligibleStraightLine.map((v) => v.id) : [...selectedStraightIds]
+    const next = base.includes(variableId)
+      ? base.filter((id) => id !== variableId)
+      : [...base, variableId]
+    setStraightLineSelection(next)
+  }
+
+  function selectAllStraightLine() {
+    onChange({ ...config, straight_line_variable_ids: null })
+  }
+
+  function clearAllStraightLine() {
+    onChange({ ...config, straight_line_variable_ids: [] })
+  }
+
+  function addStraightLineVariable(variableId: string) {
+    if (!variableId || selectedStraightSet.has(variableId)) return
+    const base = straightLineAutoMode ? eligibleStraightLine.map((v) => v.id) : [...selectedStraightIds]
+    setStraightLineSelection([...base, variableId])
+  }
 
   function updateThresholds(patch: Partial<QcConfig['thresholds']>) {
     onChange({
@@ -246,10 +323,10 @@ export function QcSettingsPanel({ variables, config, onChange, onSave, saving, s
           </div>
 
           <div>
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Other thresholds</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-xs">
-                <span className="mb-1 block font-medium text-slate-600">Straight-line min items</span>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Straight-lining</p>
+            <div className="space-y-4 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+              <label className="block max-w-xs text-xs">
+                <span className="mb-1 block font-medium text-slate-600">Minimum grid items</span>
                 <input
                   type="number"
                   min={2}
@@ -262,7 +339,174 @@ export function QcSettingsPanel({ variables, config, onChange, onSave, saving, s
                   }
                   className="et-input w-full"
                 />
+                <span className="mt-1 block text-[10px] text-slate-400">
+                  Flag when the same answer is given on at least this many grid rows
+                </span>
               </label>
+
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-slate-700">
+                    Grid questions checked
+                    <span className="ml-1 font-normal text-slate-500">
+                      ({selectedStraightIds.length} of {eligibleStraightLine.length})
+                    </span>
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllStraightLine}
+                      className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+                    >
+                      Select all
+                    </button>
+                    {!straightLineAutoMode && (
+                      <button
+                        type="button"
+                        onClick={clearAllStraightLine}
+                        className="text-xs font-medium text-slate-500 hover:underline"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {straightLineAutoMode
+                    ? 'All eligible grid/array questions are checked. Uncheck a question to customize.'
+                    : 'Custom selection — only checked questions are scanned for straight-lining.'}
+                </p>
+
+                {straightLineStats?.checked_variables?.length ? (
+                  <p className="mt-2 text-[10px] text-slate-500">
+                    Last scan: {straightLineStats.checked_variables.length} question
+                    {straightLineStats.checked_variables.length === 1 ? '' : 's'} checked
+                  </p>
+                ) : null}
+
+                {eligibleStraightLine.length === 0 ? (
+                  <p className="mt-3 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-4 text-xs text-slate-500">
+                    No grid questions with at least {minStraightItems} items found in this survey.
+                  </p>
+                ) : (
+                  <>
+                    <div className="relative mt-3">
+                      <Search
+                        size={14}
+                        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                      />
+                      <input
+                        type="search"
+                        value={straightSearch}
+                        onChange={(e) => setStraightSearch(e.target.value)}
+                        placeholder="Search grid questions…"
+                        className="w-full rounded-lg border border-slate-200 py-2 pl-8 pr-3 text-xs outline-none focus:ring-2 focus:ring-[var(--et-teal)]"
+                      />
+                    </div>
+
+                    <ul className="mt-2 max-h-52 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+                      {filteredStraightLine.map((v) => {
+                        const checked = selectedStraightSet.has(v.id)
+                        const items = itemCountForVariable(v)
+                        return (
+                          <li key={v.id}>
+                            <label className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleStraightLineVariable(v.id)}
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[var(--et-teal)] focus:ring-[var(--et-teal)]"
+                              />
+                              <span className="min-w-0 flex-1 text-xs">
+                                <span className="font-medium text-slate-800">
+                                  {v.code} · {(v.text || v.code).slice(0, 72)}
+                                </span>
+                                <span className="mt-0.5 block text-[10px] text-slate-500">
+                                  {items} grid items · {v.type_label}
+                                </span>
+                              </span>
+                            </label>
+                          </li>
+                        )
+                      })}
+                    </ul>
+
+                    {eligibleStraightLine.some((v) => !selectedStraightSet.has(v.id)) && (
+                      <label className="mt-3 block text-xs">
+                        <span className="mb-1 block font-medium text-slate-600">Add another grid question</span>
+                        <select
+                          defaultValue=""
+                          onChange={(e) => {
+                            addStraightLineVariable(e.target.value)
+                            e.target.value = ''
+                          }}
+                          className="et-select w-full"
+                        >
+                          <option value="">Choose question to add…</option>
+                          {eligibleStraightLine
+                            .filter((v) => !selectedStraightSet.has(v.id))
+                            .map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.code} — {(v.text || v.code).slice(0, 48)} ({itemCountForVariable(v)} items)
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Interviewer duplicate answers
+            </p>
+            <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+              <p className="text-xs text-slate-600">
+                For each interviewer, compare completed records and flag later duplicates when
+                closed-ended answers match above the threshold. Requires an interviewer question in QC
+                or Field team settings.
+              </p>
+              <label className="block max-w-xs text-xs">
+                <span className="mb-1 block font-medium text-slate-600">
+                  Similarity threshold (%)
+                </span>
+                <input
+                  type="number"
+                  min={80}
+                  max={100}
+                  step={1}
+                  value={thresholds.interviewer_duplicate_similarity_pct ?? 85}
+                  onChange={(e) =>
+                    updateThresholds({
+                      interviewer_duplicate_similarity_pct: Math.min(
+                        100,
+                        Math.max(80, Number(e.target.value) || 85),
+                      ),
+                    })
+                  }
+                  className="et-input w-full"
+                />
+                <span className="mt-1 block text-[10px] text-slate-400">
+                  Flag when {thresholds.interviewer_duplicate_similarity_pct ?? 85}% or more of
+                  comparable answers are identical to an earlier record by the same interviewer
+                  (typical range 80–90%)
+                </span>
+              </label>
+              {!config.interviewer_variable_id && (
+                <p className="text-xs text-amber-800">
+                  Set the interviewer variable on the <strong>By interviewer</strong> tab or in Field
+                  team quotas so this check can run.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Other thresholds</p>
+            <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-xs">
                 <span className="mb-1 block font-medium text-slate-600">Gibberish min length</span>
                 <input

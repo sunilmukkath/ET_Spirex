@@ -7,6 +7,7 @@ interface Props {
   surveyId: number
   completionStatus: string
   embedded?: boolean
+  nested?: boolean
 }
 
 function formatDuration(seconds: number | null | undefined): string {
@@ -16,7 +17,7 @@ function formatDuration(seconds: number | null | undefined): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-export function FieldingMonitorPanel({ surveyId, completionStatus, embedded }: Props) {
+export function FieldingMonitorPanel({ surveyId, completionStatus, embedded, nested }: Props) {
   const [stats, setStats] = useState<FieldingStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -45,9 +46,8 @@ export function FieldingMonitorPanel({ surveyId, completionStatus, embedded }: P
     )
   }
 
-  return (
-    <div className={`${embedded ? 'h-full' : 'flex-1'} overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll`}>
-      <div className="mx-auto max-w-5xl space-y-6">
+  const content = (
+    <div className={`mx-auto max-w-5xl space-y-6 ${nested ? '' : ''}`}>
         {!embedded && (
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -159,6 +159,15 @@ export function FieldingMonitorPanel({ surveyId, completionStatus, embedded }: P
           </>
         )}
       </div>
+  )
+
+  if (nested) {
+    return content
+  }
+
+  return (
+    <div className={`${embedded ? 'h-full' : 'flex-1'} overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll`}>
+      {content}
     </div>
   )
 }

@@ -17,6 +17,7 @@ CHECK_COLUMNS = [
     "Duplicate phones",
     "Straight-lining",
     "Gibberish",
+    "Duplicate answers",
     "Custom rules",
     "Manual exclusion",
 ]
@@ -52,7 +53,15 @@ def interviewer_qc_stats(survey_id: int, interviewer_variable_id: str | None = N
 
     quality = run_data_quality(survey_id, completion_status="complete")
     disabled = frozenset(
-        {"speeders", "test_responses", "duplicate_phones", "straight_liners", "gibberish", "custom_rules"}
+        {
+            "speeders",
+            "test_responses",
+            "duplicate_phones",
+            "straight_liners",
+            "gibberish",
+            "interviewer_duplicates",
+            "custom_rules",
+        }
     ) - enabled_check_ids(survey_id)
     flagged_by_rid = _flagged_checks_by_response(quality, disabled)
 

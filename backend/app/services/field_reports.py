@@ -52,6 +52,7 @@ def _flagged_checks_by_response(quality: dict[str, Any], disabled: frozenset[str
         "duplicate_phones": "Duplicate phones",
         "straight_liners": "Straight-lining",
         "gibberish": "Gibberish",
+        "interviewer_duplicates": "Duplicate answers",
         "custom_rules": "Custom rules",
     }
     for key, title in mapping.items():
@@ -128,7 +129,14 @@ def quota_completion_csv(survey_id: int, *, completion_status: str | None = None
 def qc_checks_csv(survey_id: int) -> str:
     quality = run_data_quality(survey_id, completion_status="complete")
     summary = get_qc_summary(survey_id)
-    disabled = frozenset({"speeders", "test_responses", "duplicate_phones", "straight_liners", "gibberish"}) - enabled_check_ids(
+    disabled = frozenset({
+        "speeders",
+        "test_responses",
+        "duplicate_phones",
+        "straight_liners",
+        "gibberish",
+        "interviewer_duplicates",
+    }) - enabled_check_ids(
         survey_id
     )
     flagged_by_rid = _flagged_checks_by_response(quality, disabled)

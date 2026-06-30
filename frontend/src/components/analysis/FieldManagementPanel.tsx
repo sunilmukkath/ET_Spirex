@@ -26,6 +26,8 @@ import {
 interface Props {
   surveyId: number
   variables: SurveyVariable[]
+  embedded?: boolean
+  nested?: boolean
 }
 
 function emptyConfig(): QuotaConfig {
@@ -135,7 +137,7 @@ function layerCellLabel(codes: Record<string, string>, varMap: Map<string, Surve
     .join(' · ')
 }
 
-export function FieldManagementPanel({ surveyId, variables }: Props) {
+export function FieldManagementPanel({ surveyId, variables, embedded, nested }: Props) {
   const [config, setConfig] = useState<QuotaConfig>(emptyConfig())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -358,19 +360,25 @@ export function FieldManagementPanel({ surveyId, variables }: Props) {
     )
   }
 
-  return (
-    <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll">
-      <div className="mx-auto max-w-4xl space-y-5">
-        <header className="et-panel p-5">
+  const panelBody = (
+    <div className={`space-y-5 ${nested ? '' : 'mx-auto max-w-4xl'}`}>
+        <header className={`et-panel p-5 ${embedded && nested ? 'mt-0' : ''}`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
                 <ClipboardList size={20} className="text-[var(--et-teal)]" />
                 <h2 className="et-section-title">Field quotas</h2>
               </div>
+              {!embedded && (
               <p className="mt-1 text-sm text-slate-500">
                 Set interview targets per answer option, then check progress against completed or QC-approved responses.
               </p>
+              )}
+              {embedded && nested && (
+              <p className="mt-1 text-sm text-slate-500">
+                Set targets per answer option and check progress against your sample.
+              </p>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex items-center gap-2 text-sm">
@@ -565,7 +573,16 @@ export function FieldManagementPanel({ surveyId, variables }: Props) {
             </button>
           </div>
         </section>
-      </div>
+    </div>
+  )
+
+  if (nested) {
+    return panelBody
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll">
+      {panelBody}
     </div>
   )
 }

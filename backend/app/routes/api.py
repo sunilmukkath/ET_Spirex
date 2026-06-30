@@ -42,6 +42,13 @@ from app.services.analysis_bookmark_store import (
     list_analysis_bookmarks,
 )
 from app.services.weight_config_store import get_weight_config, set_weight_config
+from app.models.variable_setup import VariableSetupUpdate
+from app.services.variable_setup import default_value_weights
+from app.services.variable_setup_store import (
+    clear_variable_setup_entry,
+    get_variable_setup_config,
+    set_variable_setup_entry,
+)
 from app.models.qc_config import QcConfig
 from app.services.qc_config_store import get_qc_config, set_qc_config
 from app.models.quota_config import QuotaConfig
@@ -472,6 +479,53 @@ def put_survey_weight_config(
     username = _optional_username(authorization)
     config = set_weight_config(survey_id, body, username=username)
     return {**config.model_dump(), "saved": True}
+
+
+@router.get("/projects/{survey_id}/variable-setup")
+def get_survey_variable_setup(
+    survey_id: int,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    config = get_variable_setup_config(survey_id)
+    return config.model_dump()
+
+
+@router.put("/projects/{survey_id}/variables/{variable_id}/setup")
+def put_variable_setup(
+    survey_id: int,
+    variable_id: str,
+    body: VariableSetupUpdate,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    entry = set_variable_setup_entry(survey_id, variable_id, body)
+    return {**entry.model_dump(), "saved": True, "variable_id": variable_id}
+
+
+@router.delete("/projects/{survey_id}/variables/{variable_id}/setup")
+def delete_variable_setup(
+    survey_id: int,
+    variable_id: str,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    clear_variable_setup_entry(survey_id, variable_id)
+    return {"ok": True, "variable_id": variable_id}
+
+
+@router.get("/projects/{survey_id}/variables/{variable_id}/setup/defaults")
+def get_variable_setup_defaults(
+    survey_id: int,
+    variable_id: str,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    schema = build_survey_schema(survey_id, light=False)
+    var = next((v for v in schema.get("variables") or [] if v.get("id") == variable_id), None)
+    if not var:
+        raise HTTPException(status_code=404, detail="Variable not found")
+    return {"value_weights": default_value_weights(var)}
 
 
 @router.post("/projects/{survey_id}/analysis/report")

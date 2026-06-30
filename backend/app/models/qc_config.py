@@ -10,6 +10,7 @@ class QcThresholds(BaseModel):
     speeder_median_fraction: float = 0.25  # fraction of reference completion time
     min_array_items_straight_line: int = 4
     min_text_length_gibberish: int = 3
+    interviewer_duplicate_similarity_pct: float = 85.0
 
 
 class QcCustomRule(BaseModel):
@@ -26,3 +27,4 @@ class QcConfig(BaseModel):
     thresholds: QcThresholds = Field(default_factory=QcThresholds)
     custom_rules: list[QcCustomRule] = Field(default_factory=list)
     interviewer_variable_id: str | None = None
+    straight_line_variable_ids: list[str] | None = None

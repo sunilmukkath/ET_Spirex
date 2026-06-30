@@ -6,6 +6,7 @@ export type QcCheckId =
   | 'duplicate_phones'
   | 'straight_liners'
   | 'gibberish'
+  | 'interviewer_duplicates'
   | 'custom_rules'
 
 export const QC_CHECKS: {
@@ -44,6 +45,12 @@ export const QC_CHECKS: {
     description: 'Keyboard mash or meaningless open-ended answers',
     severity: 'low',
   },
+  {
+    id: 'interviewer_duplicates',
+    title: 'Interviewer duplicate answers',
+    description: 'Same answers on most questions vs another record by the same interviewer',
+    severity: 'high',
+  },
 ]
 
 export const CUSTOM_RULES_CHECK = {
@@ -70,6 +77,7 @@ const SEVERITY_RANK: Record<'high' | 'medium' | 'low', number> = {
 export function isCheckAvailable(id: QcCheckId, result: DataQualityResult): boolean {
   if (id === 'speeders') return result.speeders?.available !== false
   if (id === 'duplicate_phones') return result.duplicate_phones?.available !== false
+  if (id === 'interviewer_duplicates') return result.interviewer_duplicates?.available !== false
   if (id === 'custom_rules') return (result.custom_rules?.count ?? 0) > 0 || result.custom_rules?.available === true
   return true
 }
@@ -79,8 +87,10 @@ export function checkCount(id: QcCheckId, result: DataQualityResult): number {
   if (id === 'test_responses') return result.test_responses?.count ?? 0
   if (id === 'duplicate_phones') return result.duplicate_phones?.count ?? 0
   if (id === 'straight_liners') return result.straight_liners?.count ?? 0
+  if (id === 'gibberish') return result.gibberish?.count ?? 0
+  if (id === 'interviewer_duplicates') return result.interviewer_duplicates?.count ?? 0
   if (id === 'custom_rules') return result.custom_rules?.count ?? 0
-  return result.gibberish?.count ?? 0
+  return 0
 }
 
 export function aggregateFlaggedRows(
@@ -136,6 +146,15 @@ export function aggregateFlaggedRows(
   for (const f of result.gibberish?.flags ?? []) {
     add(f.response_id, 'gibberish', 'low', `${f.question}: "${f.text}"`)
   }
+  for (const f of result.interviewer_duplicates?.flags ?? []) {
+    add(
+      f.response_id,
+      'interviewer_duplicates',
+      'high',
+      f.reason ??
+        `${f.similarity_pct ?? '?'}% match with ${f.match_response_id ?? 'another record'} (${f.interviewer ?? 'interviewer'})`,
+    )
+  }
   for (const f of result.custom_rules?.flags ?? []) {
     add(f.response_id, 'custom_rules', 'medium', f.reason ?? f.rule_name ?? 'Custom rule')
   }
@@ -163,6 +182,11 @@ export function normalizeQcResult(result: DataQualityResult): DataQualityResult 
     },
     straight_liners: result.straight_liners ?? emptyFlags,
     gibberish: result.gibberish ?? emptyFlags,
+    interviewer_duplicates: result.interviewer_duplicates ?? {
+      ...emptyFlags,
+      available: false,
+      by_interviewer: [],
+    },
     custom_rules: result.custom_rules ?? emptyFlags,
   }
 }

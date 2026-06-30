@@ -104,10 +104,8 @@ function parseAnalyzeView(rawMode: string | null, rawView: string | null): Analy
 }
 
 function parseFieldView(rawMode: string | null, rawView: string | null): FieldView {
-  if (rawMode === 'fielding' || rawMode === 'monitor') return 'monitor'
-  if (rawMode === 'fieldteam' || rawMode === 'field-team') return 'team'
-  if (rawView === 'monitor' || rawView === 'team' || rawView === 'quotas') return rawView
-  return 'quotas'
+  if (rawMode === 'fieldteam' || rawMode === 'field-team' || rawView === 'team') return 'team'
+  return 'fielding'
 }
 
 export function SurveyWorkspace() {
@@ -197,10 +195,10 @@ export function SurveyWorkspace() {
       }, { replace: true })
       return
     }
-    if (raw === 'fielding' || raw === 'monitor') {
+    if (raw === 'fielding' || raw === 'monitor' || raw === 'quotas') {
       setSearchParams((prev) => {
         prev.set('mode', 'fields')
-        prev.set('view', 'monitor')
+        prev.set('view', 'fielding')
         return prev
       }, { replace: true })
       return
@@ -209,6 +207,15 @@ export function SurveyWorkspace() {
       setSearchParams((prev) => {
         prev.set('mode', 'fields')
         prev.set('view', 'team')
+        return prev
+      }, { replace: true })
+      return
+    }
+    const rawView = searchParams.get('view')
+    if (rawView === 'monitor' || rawView === 'quotas') {
+      setSearchParams((prev) => {
+        prev.set('mode', 'fields')
+        prev.set('view', 'fielding')
         return prev
       }, { replace: true })
     }
@@ -293,8 +300,8 @@ export function SurveyWorkspace() {
     (targetMode: string, view?: string) => {
       setSearchParams((prev) => {
         prev.set('mode', targetMode)
-        if (targetMode === 'fields' && (view === 'monitor' || view === 'team' || view === 'quotas')) {
-          prev.set('view', view)
+        if (targetMode === 'fields' && (view === 'fielding' || view === 'team' || view === 'monitor' || view === 'quotas')) {
+          prev.set('view', view === 'team' ? 'team' : 'fielding')
         } else if (view === 'compare') {
           prev.set('view', 'compare')
         } else if (view === 'profile') {

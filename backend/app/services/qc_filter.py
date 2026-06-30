@@ -40,6 +40,7 @@ def collect_flagged_ids(
         "duplicate_phones",
         "straight_liners",
         "gibberish",
+        "interviewer_duplicates",
         "custom_rules",
     )
     for key in check_keys:

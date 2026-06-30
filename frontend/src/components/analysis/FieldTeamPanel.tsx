@@ -15,8 +15,10 @@ function defaultQcConfig(): QcConfig {
       speeder_median_fraction: 0.25,
       min_array_items_straight_line: 4,
       min_text_length_gibberish: 3,
+      interviewer_duplicate_similarity_pct: 85,
     },
     custom_rules: [],
+    straight_line_variable_ids: null,
   }
 }
 
@@ -73,10 +75,10 @@ export function FieldTeamPanel({ surveyId, variables, embedded }: Props) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className={`shrink-0 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 ${embedded ? 'py-2.5' : ''}`}>
+    <div className={embedded ? 'pb-6' : 'flex min-h-0 flex-1 flex-col overflow-hidden'}>
+      {!embedded && (
+      <div className={`shrink-0 border-b border-slate-200 bg-white px-4 py-3 sm:px-6`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          {!embedded && (
           <div className="flex items-center gap-2">
             <Users size={20} className="text-[var(--et-teal)]" />
             <div>
@@ -86,7 +88,6 @@ export function FieldTeamPanel({ surveyId, variables, embedded }: Props) {
               </p>
             </div>
           </div>
-          )}
           <button
             type="button"
             disabled={exporting || !stats?.interviewer_variable_id}
@@ -100,7 +101,7 @@ export function FieldTeamPanel({ surveyId, variables, embedded }: Props) {
                 setExporting(false)
               }
             }}
-            className={`inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 ${embedded ? 'ml-auto' : ''}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             Export CSV
@@ -124,8 +125,34 @@ export function FieldTeamPanel({ surveyId, variables, embedded }: Props) {
           </div>
         )}
       </div>
+      )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto et-scroll">
+      {embedded && (
+      <div className="border-b border-slate-200 bg-white px-4 py-2.5 sm:px-6">
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <button
+            type="button"
+            disabled={exporting || !stats?.interviewer_variable_id}
+            onClick={async () => {
+              setExporting(true)
+              try {
+                await api.exportFieldReport(surveyId, 'interviewer-rejections', {
+                  interviewerVariableId: stats?.interviewer_variable_id ?? undefined,
+                })
+              } finally {
+                setExporting(false)
+              }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            Export CSV
+          </button>
+        </div>
+      </div>
+      )}
+
+      <div className={embedded ? 'px-4 py-4 sm:px-6' : 'min-h-0 flex-1 overflow-y-auto et-scroll'}>
         <InterviewerQcTab
           surveyId={surveyId}
           variables={variables}

@@ -63,6 +63,23 @@ export interface SurveyVariable {
   lng_column?: string
   custom?: boolean
   source_variable_id?: string
+  default_kind?: string
+  kind_override?: string | null
+  value_weights?: Record<string, number>
+}
+
+export interface VariableSetupEntry {
+  kind_override?: string | null
+  value_weights?: Record<string, number>
+}
+
+export interface VariableSetupConfig {
+  variables: Record<string, VariableSetupEntry>
+}
+
+export interface VariableSetupUpdate {
+  kind_override?: string | null
+  value_weights?: Record<string, number>
 }
 
 export interface CategoryMapping {
@@ -429,6 +446,7 @@ export interface QcThresholds {
   speeder_median_fraction: number
   min_array_items_straight_line: number
   min_text_length_gibberish: number
+  interviewer_duplicate_similarity_pct?: number
 }
 
 export interface QcCustomRule {
@@ -445,6 +463,7 @@ export interface QcConfig {
   thresholds: QcThresholds
   custom_rules: QcCustomRule[]
   interviewer_variable_id?: string | null
+  straight_line_variable_ids?: string[] | null
 }
 
 export interface InterviewerQcRow {
@@ -526,6 +545,11 @@ export interface DataQualityResult {
   }
   straight_liners: {
     count: number
+    checked_variables?: {
+      variable_id: string
+      question: string
+      item_count: number
+    }[]
     flags: {
       response_id: string | number
       variable_id: string
@@ -542,6 +566,28 @@ export interface DataQualityResult {
       variable_id: string
       question: string
       text: string
+      reason?: string
+    }[]
+  }
+  interviewer_duplicates?: {
+    available?: boolean
+    message?: string
+    count: number
+    threshold_pct?: number
+    comparable_fields?: number
+    by_interviewer?: {
+      interviewer: string
+      flagged_count: number
+      max_similarity_pct: number
+      completed: number
+    }[]
+    flags: {
+      response_id: string | number
+      interviewer: string
+      match_response_id: string | number
+      similarity_pct: number
+      matched_fields: number
+      comparable_fields: number
       reason?: string
     }[]
   }
@@ -1022,6 +1068,26 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config),
     }),
+  getVariableSetup: (id: number) =>
+    fetchJson<VariableSetupConfig>(`/api/projects/${id}/variable-setup`),
+  setVariableSetup: (id: number, variableId: string, body: VariableSetupUpdate) =>
+    fetchJson<VariableSetupEntry & { saved: boolean; variable_id: string }>(
+      `/api/projects/${id}/variables/${encodeURIComponent(variableId)}/setup`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+  clearVariableSetup: (id: number, variableId: string) =>
+    fetchJson<{ ok: boolean; variable_id: string }>(
+      `/api/projects/${id}/variables/${encodeURIComponent(variableId)}/setup`,
+      { method: 'DELETE' },
+    ),
+  getVariableSetupDefaults: (id: number, variableId: string) =>
+    fetchJson<{ value_weights: Record<string, number> }>(
+      `/api/projects/${id}/variables/${encodeURIComponent(variableId)}/setup/defaults`,
+    ),
   exportReport: async (
     id: number,
     body: {

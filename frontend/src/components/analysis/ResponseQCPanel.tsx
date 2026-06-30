@@ -53,8 +53,10 @@ function defaultQcConfig(): QcConfig {
       speeder_median_fraction: 0.25,
       min_array_items_straight_line: 4,
       min_text_length_gibberish: 3,
+      interviewer_duplicate_similarity_pct: 85,
     },
     custom_rules: [],
+    straight_line_variable_ids: null,
   }
 }
 
@@ -533,6 +535,7 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
             onSaveConfig={saveQcConfigOnly}
             savingConfig={settingsSaving}
             hasScan={Boolean(result)}
+            duplicateStats={result?.interviewer_duplicates}
           />
         ) : (
           <>
@@ -563,6 +566,7 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
           onSave={() => saveQcSettings(qcConfig)}
           saving={settingsSaving}
           speederStats={result?.speeders}
+          straightLineStats={result?.straight_liners}
         />
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

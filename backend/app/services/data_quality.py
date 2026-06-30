@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 import time
+from collections import defaultdict
 from typing import Any
 
 import numpy as np
@@ -132,6 +133,8 @@ def run_data_quality(
 
     from app.services.qc_config_store import get_qc_config
 
+    from app.services.interviewer_qc import resolve_interviewer_variable_id
+
     qc_cfg = get_qc_config(survey_id)
     thresholds = qc_cfg.thresholds
     custom_rule_payload = [r.model_dump() for r in qc_cfg.custom_rules]
@@ -150,6 +153,7 @@ def run_data_quality(
         schema,
         col_index,
         min_array_items=thresholds.min_array_items_straight_line,
+        variable_ids=qc_cfg.straight_line_variable_ids,
     )
     gibberish = _detect_gibberish(
         df,
@@ -157,10 +161,17 @@ def run_data_quality(
         col_index,
         min_text_len=thresholds.min_text_length_gibberish,
     )
+    interviewer_duplicates = _detect_interviewer_duplicate_answers(
+        df,
+        schema,
+        col_index,
+        interviewer_variable_id=resolve_interviewer_variable_id(survey_id),
+        similarity_threshold=thresholds.interviewer_duplicate_similarity_pct / 100.0,
+    )
     custom_rules = _detect_custom_rules(df, schema, custom_rule_payload)
 
     flagged_ids: set[str] = set()
-    for section in (speeders, test_responses, duplicate_phones, straight_liners, gibberish, custom_rules):
+    for section in (speeders, test_responses, duplicate_phones, straight_liners, gibberish, interviewer_duplicates, custom_rules):
         for item in section.get("flags", []):
             rid = item.get("response_id")
             if rid is not None:
@@ -176,6 +187,13 @@ def run_data_quality(
         {"id": "straight_liners", "title": "Straight-lining", "count": straight_liners.get("count", 0), "severity": "medium"},
         {"id": "gibberish", "title": "Gibberish text", "count": gibberish.get("count", 0), "severity": "low"},
     ]
+    if interviewer_duplicates.get("available", True):
+        checks.append({
+            "id": "interviewer_duplicates",
+            "title": "Interviewer duplicate answers",
+            "count": interviewer_duplicates.get("count", 0),
+            "severity": "high",
+        })
 
     if custom_rules.get("count", 0) > 0:
         checks.append({
@@ -197,6 +215,7 @@ def run_data_quality(
         "duplicate_phones": duplicate_phones,
         "straight_liners": straight_liners,
         "gibberish": gibberish,
+        "interviewer_duplicates": interviewer_duplicates,
         "custom_rules": custom_rules,
     })
     _QUALITY_CACHE[survey_id] = (now, result)
@@ -249,6 +268,13 @@ def _empty_result() -> dict[str, Any]:
         "duplicate_phones": {"available": False, "message": "No responses", "count": 0, "exclude_count": 0, "flags": [], "groups": []},
         "straight_liners": empty_flags,
         "gibberish": empty_flags,
+        "interviewer_duplicates": {
+            "available": False,
+            "message": "No responses",
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+        },
     }
 
 
@@ -602,16 +628,28 @@ def _detect_straight_liners(
     col_index: dict[str, str],
     *,
     min_array_items: int = _MIN_ARRAY_ITEMS,
+    variable_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     id_col = response_id_column(df)
     flags: list[dict[str, Any]] = []
+    checked_variables: list[dict[str, Any]] = []
+    allowed = None if variable_ids is None else {str(v).strip() for v in variable_ids if str(v).strip()}
 
     for var in schema.get("variables", []):
         if var.get("kind") != "array":
             continue
+        variable_id = str(var.get("id") or "")
+        if allowed is not None and variable_id not in allowed:
+            continue
         cols = [col_index[c] for c in var.get("columns") or [] if c in col_index]
         if len(cols) < min_array_items:
             continue
+
+        checked_variables.append({
+            "variable_id": variable_id,
+            "question": _question_label(var),
+            "item_count": len(cols),
+        })
 
         subset = df[cols].copy()
         for col in cols:
@@ -627,14 +665,18 @@ def _detect_straight_liners(
                 continue
             flags.append({
                 "response_id": safe_response_id(df.at[idx, id_col] if id_col else None, idx),
-                "variable_id": str(var.get("id") or ""),
+                "variable_id": variable_id,
                 "question": _question_label(var),
                 "value": str(values[0]),
                 "items": len(values),
                 "reason": "Same answer on all grid items",
             })
 
-    return {"count": len(flags), "flags": flags[:_MAX_FLAGS]}
+    return {
+        "count": len(flags),
+        "flags": flags[:_MAX_FLAGS],
+        "checked_variables": checked_variables,
+    }
 
 
 def _detect_gibberish(
@@ -722,6 +764,170 @@ def _detect_custom_rules(
         "count": len(flags),
         "rules": [str(r.get("name") or r.get("variable_id")) for r in rules],
         "flags": flags[:_MAX_FLAGS],
+    }
+
+
+_MIN_COMPARABLE_FIELDS = 8
+
+
+def _comparable_fingerprint_columns(
+    schema: dict[str, Any],
+    col_index: dict[str, str],
+    *,
+    exclude_columns: set[str] | None = None,
+) -> list[str]:
+    skip = {c.lower() for c in (exclude_columns or set())}
+    cols: list[str] = []
+    for var in schema.get("variables", []):
+        kind = str(var.get("kind") or "")
+        if kind in ("text", "display", "date", "location", "unknown"):
+            continue
+        for candidate in var.get("columns") or []:
+            col = col_index.get(str(candidate))
+            if not col or col.lower() in skip:
+                continue
+            cols.append(col)
+    return sorted(set(cols))
+
+
+def _detect_interviewer_duplicate_answers(
+    df: pd.DataFrame,
+    schema: dict[str, Any],
+    col_index: dict[str, str],
+    *,
+    interviewer_variable_id: str | None,
+    similarity_threshold: float = 0.85,
+) -> dict[str, Any]:
+    if not interviewer_variable_id:
+        return {
+            "available": False,
+            "message": "Select an interviewer question in QC or Field team settings.",
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+            "threshold_pct": round(similarity_threshold * 100, 1),
+        }
+
+    from app.services.field_reports import _interviewer_labels
+    from app.services.question_schema import get_variable
+    from app.services.variable_columns import find_variable_column
+
+    var = get_variable(schema, interviewer_variable_id)
+    if not var:
+        return {
+            "available": False,
+            "message": "Interviewer question not found in this survey.",
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+            "threshold_pct": round(similarity_threshold * 100, 1),
+        }
+
+    interviewer_col = find_variable_column(var, df)
+    exclude = {interviewer_col} if interviewer_col else set()
+    compare_cols = _comparable_fingerprint_columns(schema, col_index, exclude_columns=exclude)
+    if len(compare_cols) < _MIN_COMPARABLE_FIELDS:
+        return {
+            "available": False,
+            "message": f"Need at least {_MIN_COMPARABLE_FIELDS} comparable closed-ended fields.",
+            "count": 0,
+            "flags": [],
+            "by_interviewer": [],
+            "threshold_pct": round(similarity_threshold * 100, 1),
+        }
+
+    id_col = response_id_column(df)
+    interviewers = _interviewer_labels(schema, var, df)
+
+    fingerprints: dict[Any, dict[str, str]] = {}
+    for idx in df.index:
+        fp: dict[str, str] = {}
+        for col in compare_cols:
+            if col not in df.columns:
+                continue
+            norm = _normalize_cell(df.at[idx, col])
+            if norm is not None:
+                fp[col] = norm
+        fingerprints[idx] = fp
+
+    by_interviewer: dict[str, list[Any]] = defaultdict(list)
+    for idx in df.index:
+        name = str(interviewers.at[idx]).strip() or "Unknown"
+        if name == "Unknown":
+            continue
+        by_interviewer[name].append(idx)
+
+    flags: list[dict[str, Any]] = []
+    flagged_ids: set[str] = set()
+    by_interviewer_summary: list[dict[str, Any]] = []
+
+    for interviewer, indices in by_interviewer.items():
+        if len(indices) < 2:
+            continue
+
+        def sort_key(row_idx: Any) -> tuple[str, Any]:
+            rid = safe_response_id(df.at[row_idx, id_col] if id_col else None, row_idx)
+            return (str(rid), row_idx)
+
+        sorted_indices = sorted(indices, key=sort_key)
+        interviewer_flags = 0
+        max_similarity = 0.0
+
+        for i in range(len(sorted_indices)):
+            idx_a = sorted_indices[i]
+            fp_a = fingerprints.get(idx_a, {})
+            if not fp_a:
+                continue
+            rid_a = str(safe_response_id(df.at[idx_a, id_col] if id_col else None, idx_a))
+            for j in range(i + 1, len(sorted_indices)):
+                idx_b = sorted_indices[j]
+                fp_b = fingerprints.get(idx_b, {})
+                if not fp_b:
+                    continue
+                common = set(fp_a.keys()) & set(fp_b.keys())
+                if len(common) < _MIN_COMPARABLE_FIELDS:
+                    continue
+                matches = sum(1 for key in common if fp_a[key] == fp_b[key])
+                similarity = matches / len(common)
+                if similarity < similarity_threshold:
+                    continue
+                max_similarity = max(max_similarity, similarity)
+                rid_b = str(safe_response_id(df.at[idx_b, id_col] if id_col else None, idx_b))
+                if rid_b in flagged_ids:
+                    continue
+                flagged_ids.add(rid_b)
+                interviewer_flags += 1
+                pct = round(similarity * 100, 1)
+                flags.append({
+                    "response_id": rid_b,
+                    "interviewer": interviewer,
+                    "match_response_id": rid_a,
+                    "similarity_pct": pct,
+                    "matched_fields": matches,
+                    "comparable_fields": len(common),
+                    "reason": (
+                        f"{pct}% same answers as record {rid_a} "
+                        f"({matches}/{len(common)} fields, interviewer: {interviewer})"
+                    ),
+                })
+
+        if interviewer_flags > 0:
+            by_interviewer_summary.append({
+                "interviewer": interviewer,
+                "flagged_count": interviewer_flags,
+                "max_similarity_pct": round(max_similarity * 100, 1),
+                "completed": len(indices),
+            })
+
+    by_interviewer_summary.sort(key=lambda row: (-row["flagged_count"], row["interviewer"]))
+
+    return {
+        "available": True,
+        "count": len(flags),
+        "flags": flags[:_MAX_FLAGS],
+        "by_interviewer": by_interviewer_summary,
+        "threshold_pct": round(similarity_threshold * 100, 1),
+        "comparable_fields": len(compare_cols),
     }
 
 

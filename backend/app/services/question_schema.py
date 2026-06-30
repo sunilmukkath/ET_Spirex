@@ -316,7 +316,17 @@ def _finalize_schema(
     completion_status: str,
     light: bool,
 ) -> dict[str, Any]:
-    return result
+    from app.services.variable_setup import apply_setup_to_variable_dict
+    from app.services.variable_setup_store import get_variable_setup_config
+
+    setup = get_variable_setup_config(survey_id)
+    out = dict(result)
+    variables = []
+    for var in out.get("variables") or []:
+        entry = setup.variables.get(str(var.get("id") or ""))
+        variables.append(apply_setup_to_variable_dict(var, entry))
+    out["variables"] = variables
+    return out
 
 
 def _enrich_variables_parallel(

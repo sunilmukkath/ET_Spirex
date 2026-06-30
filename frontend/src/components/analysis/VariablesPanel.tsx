@@ -472,6 +472,7 @@ export function VariablesPanel({
 
         {pageTab === 'questions' && (
           <QuestionSetupPanel
+            surveyId={surveyId}
             variables={schema?.variables ?? []}
             groups={schema?.groups ?? []}
             customVariables={variables}
@@ -479,6 +480,7 @@ export function VariablesPanel({
             onFocusQuestionConsumed={onFocusQuestionConsumed}
             onCreateVariable={openCreateFromQuestion}
             onEditVariable={openEdit}
+            onChanged={onChanged}
           />
         )}
 

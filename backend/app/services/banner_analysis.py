@@ -45,6 +45,7 @@ def _compute_scale_metrics(var: dict[str, Any], df: pd.DataFrame) -> dict[str, A
 
     weights = weight_series(df)
     kind = var.get("kind")
+    value_weights = var.get("value_weights") or {}
     metrics: dict[str, Any] = {}
 
     if kind in ("single", "rank"):
@@ -54,6 +55,27 @@ def _compute_scale_metrics(var: dict[str, Any], df: pd.DataFrame) -> dict[str, A
         if not valid.any():
             return None
         total = weighted_sum(valid, weights)
+
+        if value_weights:
+            mapped = canonical[valid].map(lambda c: value_weights.get(str(c)))
+            numeric = pd.to_numeric(mapped, errors="coerce")
+            num_valid = numeric.notna()
+            if num_valid.any():
+                numeric_series = pd.Series(index=df.index, dtype=float)
+                numeric_series.loc[numeric.index[num_valid]] = numeric[num_valid]
+                metrics["mean"] = weighted_mean(numeric_series, weights)
+                sorted_codes = sorted(value_weights.keys(), key=lambda c: value_weights[c])
+                if len(sorted_codes) >= 2:
+                    bottom_codes = set(str(c) for c in sorted_codes[:2])
+                    top_codes = set(str(c) for c in sorted_codes[-2:])
+                    top_count = weighted_sum(valid & canonical.isin(top_codes), weights)
+                    bottom_count = weighted_sum(valid & canonical.isin(bottom_codes), weights)
+                    metrics["top2box_pct"] = weighted_pct(top_count, total)
+                    metrics["bottom2box_pct"] = weighted_pct(bottom_count, total)
+                    metrics["net_pct"] = round(metrics["top2box_pct"] - metrics["bottom2box_pct"], 1)
+                metrics["base"] = round(total, 1)
+                return metrics
+
         top_codes, bottom_codes, codes = _scale_code_sets(var, series[valid])
         if not codes:
             return None
@@ -72,6 +94,11 @@ def _compute_scale_metrics(var: dict[str, Any], df: pd.DataFrame) -> dict[str, A
                 weights,
             )
             metrics["nps"] = round(weighted_pct(promoters, total) - weighted_pct(detractors, total), 1)
+        elif numeric_codes:
+            metrics["mean"] = weighted_mean(
+                pd.to_numeric(canonical[valid].map(lambda c: value_weights.get(str(c), c)), errors="coerce"),
+                weights,
+            )
         return metrics
 
     numeric = pd.to_numeric(df[col], errors="coerce")
@@ -1248,7 +1275,14 @@ def _profile_numeric(var: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
         return {"analysis_type": "numeric_multi", "variable": _var_summary(var), "sections": sections}
 
     col = var["columns"][0] if var["columns"] else var["code"]
+    value_weights = var.get("value_weights") or {}
     numeric = pd.to_numeric(df[col], errors="coerce")
+    if value_weights and numeric.notna().sum() == 0:
+        raw = df[col].dropna().astype(str).str.strip()
+        canonical = raw.map(lambda v: canonical_answer_code(var, v))
+        mapped = canonical.map(lambda c: value_weights.get(str(c)))
+        numeric = pd.Series(index=df.index, dtype=float)
+        numeric.loc[raw.index] = pd.to_numeric(mapped, errors="coerce")
     weights = weight_series(df)
     valid = numeric.notna()
     count = round(float(weights[valid].sum()), 1)

@@ -155,7 +155,7 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
             icon={<ClipboardList size={18} />}
             title="Field team"
             desc="Fielding pace, team performance, and quota targets"
-            onClick={() => onNavigate('fields', 'monitor')}
+            onClick={() => onNavigate('fields', 'fielding')}
           />
           <QuickLink
             icon={<ShieldCheck size={18} />}

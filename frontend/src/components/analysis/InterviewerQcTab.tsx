@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, Loader2, RefreshCw, Save, Users } from 'lucide-react'
-import { api, type InterviewerQcResult, type QcConfig, type SurveyVariable } from '../../api/client'
+import { api, type DataQualityResult, type InterviewerQcResult, type QcConfig, type SurveyVariable } from '../../api/client'
 
 function isInterviewerCandidate(v: SurveyVariable): boolean {
   if (v.custom) return false
@@ -17,6 +17,7 @@ interface Props {
   onSaveConfig: () => Promise<void>
   savingConfig: boolean
   hasScan: boolean
+  duplicateStats?: DataQualityResult['interviewer_duplicates'] | null
 }
 
 export function InterviewerQcTab({
@@ -27,6 +28,7 @@ export function InterviewerQcTab({
   onSaveConfig,
   savingConfig,
   hasScan,
+  duplicateStats,
 }: Props) {
   const [stats, setStats] = useState<InterviewerQcResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -162,6 +164,26 @@ export function InterviewerQcTab({
           </p>
         )}
         {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+        {duplicateStats?.available === false && duplicateStats.message && (
+          <p className="mt-3 text-sm text-amber-800">{duplicateStats.message}</p>
+        )}
+        {duplicateStats?.available && (duplicateStats.by_interviewer?.length ?? 0) > 0 && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+            <p className="text-xs font-semibold text-amber-900">
+              Duplicate answer patterns (≥{duplicateStats.threshold_pct ?? 85}% match)
+            </p>
+            <ul className="mt-2 space-y-1 text-xs text-amber-900/90">
+              {duplicateStats.by_interviewer?.map((row) => (
+                <li key={row.interviewer}>
+                  <span className="font-medium">{row.interviewer}</span>
+                  {' — '}
+                  {row.flagged_count} flagged record{row.flagged_count === 1 ? '' : 's'}
+                  {row.max_similarity_pct ? ` (up to ${row.max_similarity_pct}% match)` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {stats && stats.rows.length > 0 && (
