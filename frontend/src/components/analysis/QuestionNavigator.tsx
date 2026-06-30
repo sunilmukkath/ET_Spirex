@@ -37,6 +37,7 @@ interface Props {
   sideRowIds?: string[]
   onSideRowToggle?: (id: string) => void
   onAfterSelect?: () => void
+  onClose?: () => void
   className?: string
 }
 
@@ -53,6 +54,7 @@ export const QuestionNavigator = memo(function QuestionNavigator({
   sideRowIds = [],
   onSideRowToggle,
   onAfterSelect,
+  onClose,
   className = '',
 }: Props) {
   const [search, setSearch] = useState('')
@@ -100,9 +102,21 @@ export const QuestionNavigator = memo(function QuestionNavigator({
   return (
     <aside className={`et-sidebar ${className}`.trim()}>
       <div className="et-sidebar-header">
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          {compareMode ? 'Side / Banners' : 'Questions'}
-        </p>
+        <div className="mb-2 flex items-start justify-between gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            {compareMode ? 'Side / Banners' : 'Questions'}
+          </p>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close question list"
+              className="rounded-md p-1 text-slate-400 hover:bg-white/10 hover:text-white md:hidden"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
         {compareMode && (
           <p className="mb-2.5 text-[10px] leading-snug text-slate-500">
             Click = primary side row · <span className="text-indigo-300">S</span> = side row ·{' '}

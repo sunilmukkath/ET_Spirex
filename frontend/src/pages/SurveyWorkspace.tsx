@@ -946,14 +946,7 @@ export function SurveyWorkspace() {
     }
   }
 
-  const showsQuestionNav =
-    mode !== 'home' &&
-    mode !== 'variables' &&
-    mode !== 'fields' &&
-    mode !== 'reports' &&
-    mode !== 'data' &&
-    mode !== 'charts' &&
-    mode !== 'multivariate'
+  const showsQuestionNav = mode === 'explore'
 
   return (
     <div className="flex h-screen flex-col bg-[var(--canvas)]">
@@ -1034,16 +1027,6 @@ export function SurveyWorkspace() {
         </div>
 
         <div className="et-toolbar-scroll flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-slate-100 bg-slate-50/90 px-3 py-2 sm:gap-3 sm:px-4">
-          {showsQuestionNav && (
-            <button
-              type="button"
-              onClick={() => setMobileNavOpen(true)}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 md:hidden"
-            >
-              <PanelLeft size={15} />
-              {analyzeView === 'compare' ? 'Rows & banners' : 'Questions'}
-            </button>
-          )}
           <span className="hidden shrink-0 et-kicker lg:inline">Overview</span>
           <div className="et-segment">
             <ModeButton active={mode === 'home'} onClick={() => setMode('home')} icon={<Home size={15} />}>
@@ -1124,6 +1107,7 @@ export function SurveyWorkspace() {
                 sideRowIds={sideRowIds}
                 onSideRowToggle={toggleSideRow}
                 onAfterSelect={() => setMobileNavOpen(false)}
+                onClose={() => setMobileNavOpen(false)}
                 className="h-full min-h-0 max-h-full"
               />
             </div>
@@ -1143,7 +1127,15 @@ export function SurveyWorkspace() {
           )}
 
           {mode === 'explore' && (
-            <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 sm:px-4">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 sm:px-4">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/40 px-2.5 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)]/70 md:hidden"
+              >
+                <PanelLeft size={15} />
+                {analyzeView === 'compare' ? 'Rows & banners' : 'Questions'}
+              </button>
               <div className="et-segment">
                 <AnalyzeViewButton
                   active={analyzeView === 'profile'}
@@ -1160,7 +1152,14 @@ export function SurveyWorkspace() {
                   Crosstabs
                 </AnalyzeViewButton>
               </div>
-              <p className="hidden text-xs text-slate-500 sm:block">
+              {selectedVar && (
+                <p className="min-w-0 flex-1 truncate text-xs text-slate-600 md:hidden">
+                  <span className="font-semibold text-slate-800">{selectedVar.code}</span>
+                  {' · '}
+                  {selectedVar.text}
+                </p>
+              )}
+              <p className="hidden min-w-0 flex-1 text-xs text-slate-500 sm:block">
                 {analyzeView === 'profile'
                   ? 'Single-question distribution and summary'
                   : 'Crosstab rows against banner columns'}
