@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Loader2, Plus, Save, Search, Settings2, Trash2 } from 'lucide-react'
 import type { DataQualityResult, QcConfig, QcCustomRule, SurveyVariable } from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
+import { saveUserFieldDefaults } from '../../lib/surveyFieldDefaults'
 
 const DEFAULT_THRESHOLDS: QcConfig['thresholds'] = {
   speeder_time_basis: 'average',
@@ -41,6 +43,13 @@ function itemCountForVariable(v: SurveyVariable): number {
   return Math.max(v.columns?.length ?? 0, v.subquestions?.length ?? 0)
 }
 
+function isGpsCandidate(v: SurveyVariable): boolean {
+  if (v.custom) return false
+  if (v.kind === 'location') return true
+  const hay = `${v.code} ${v.text}`.toLowerCase()
+  return /\b(gps|location|geolocation|coordinates|latitude|longitude|loctrac)\b/.test(hay)
+}
+
 function eligibleStraightLineVariables(
   variables: SurveyVariable[],
   minItems: number,
@@ -59,6 +68,7 @@ export function QcSettingsPanel({
   speederStats,
   straightLineStats,
 }: Props) {
+  const { user } = useAuth()
   const [expanded, setExpanded] = useState(true)
   const [straightSearch, setStraightSearch] = useState('')
   const thresholds = { ...DEFAULT_THRESHOLDS, ...config.thresholds }
@@ -106,6 +116,12 @@ export function QcSettingsPanel({
         (v.text || '').toLowerCase().includes(q),
     )
   }, [eligibleStraightLine, straightSearch])
+
+  const gpsCandidates = useMemo(() => {
+    const hinted = variables.filter(isGpsCandidate)
+    if (hinted.length > 0) return hinted
+    return variables.filter((v) => !v.custom && v.kind === 'location')
+  }, [variables])
 
   function setStraightLineSelection(nextIds: string[]) {
     const cleaned = nextIds.filter((id) => eligibleStraightLine.some((v) => v.id === id))
@@ -471,6 +487,35 @@ export function QcSettingsPanel({
                 answers, interviews at the same GPS spot, and back-to-back completes with too little
                 time between them.
               </p>
+              <label className="block max-w-xl text-xs">
+                <span className="mb-1 block font-medium text-slate-600">GPS / location question</span>
+                <select
+                  value={config.gps_variable_id ?? ''}
+                  onChange={(e) => {
+                    const gpsId = e.target.value || null
+                    onChange({
+                      ...config,
+                      gps_variable_id: gpsId,
+                    })
+                    if (user?.username) {
+                      const v = gpsId ? variables.find((item) => item.id === gpsId) : null
+                      saveUserFieldDefaults(user.username, { gpsCode: v?.code ?? null })
+                    }
+                  }}
+                  className="et-select w-full"
+                >
+                  <option value="">Auto-detect from survey export</option>
+                  {gpsCandidates.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.code} — {(v.text || v.code).slice(0, 56)}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[10px] text-slate-400">
+                  Used for proximity checks — flag when the same interviewer completes interviews
+                  within the distance below
+                </span>
+              </label>
               <label className="block max-w-xs text-xs">
                 <span className="mb-1 block font-medium text-slate-600">
                   Duplicate answer similarity (%)
@@ -544,8 +589,13 @@ export function QcSettingsPanel({
               </div>
               {!config.interviewer_variable_id && (
                 <p className="text-xs text-amber-800">
-                  Set the interviewer variable on the <strong>Team & quality</strong> tab or in Field
-                  manage quotas so these checks can run.
+                  Set the interviewer variable on the <strong>Team</strong> tab or in Field manage
+                  quotas so these checks can run.
+                </p>
+              )}
+              {config.gps_variable_id && gpsCandidates.length === 0 && (
+                <p className="text-xs text-amber-800">
+                  No GPS-style questions were detected in this survey. Re-import data or pick auto-detect.
                 </p>
               )}
             </div>

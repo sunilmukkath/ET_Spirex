@@ -283,8 +283,8 @@ function MultiCrosstabList({
   controls?: MultiCrosstabControls
 }) {
   const tables = result.tables ?? []
-  const [allExpanded, setAllExpanded] = useState(true)
-  const [expanded, setExpanded] = useState<Set<number>>(() => new Set(tables.map((_, i) => i)))
+  const [allExpanded, setAllExpanded] = useState(false)
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set(tables.length > 0 ? [0] : []))
 
   useEffect(() => {
     setExpanded(allExpanded ? new Set(tables.map((_, i) => i)) : new Set())

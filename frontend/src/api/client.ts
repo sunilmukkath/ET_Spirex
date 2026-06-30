@@ -465,6 +465,7 @@ export interface QcConfig {
   thresholds: QcThresholds
   custom_rules: QcCustomRule[]
   interviewer_variable_id?: string | null
+  gps_variable_id?: string | null
   straight_line_variable_ids?: string[] | null
 }
 
@@ -671,6 +672,7 @@ export interface DataQualityResult {
     message?: string
     count: number
     proximity_meters?: number
+    gps_variable_id?: string | null
     by_interviewer?: {
       interviewer: string
       flagged_count: number
@@ -865,7 +867,30 @@ async function fetchJson<T>(
 }
 
 const schemaCache = new Map<string, { at: number; data: SurveySchema }>()
-const SCHEMA_CACHE_MS = 90_000
+const SCHEMA_CACHE_MS = 300_000
+
+const profileCache = new Map<string, { at: number; data: ProfileResult }>()
+const PROFILE_CACHE_MS = 120_000
+
+function profileCacheKey(
+  id: number,
+  variableId: string,
+  completionStatus: string,
+  filters: FilterSpec[],
+  filterTree?: FilterGroup | null,
+) {
+  return `${id}:${variableId}:${completionStatus}:${JSON.stringify({ filters, filterTree: filterTree ?? null })}`
+}
+
+export function invalidateProfileCache(surveyId?: number) {
+  if (surveyId == null) {
+    profileCache.clear()
+    return
+  }
+  for (const key of profileCache.keys()) {
+    if (key.startsWith(`${surveyId}:`)) profileCache.delete(key)
+  }
+}
 
 function schemaCacheKey(id: number, completionStatus: string, light: boolean) {
   return `${id}:${completionStatus}:${light}`
@@ -958,15 +983,20 @@ export const api = {
     schemaCache.set(key, { at: Date.now(), data })
     return data
   },
-  runProfile: (
+  runProfile: async (
     id: number,
     variableId: string,
     completionStatus = 'complete',
     filters: FilterSpec[] = [],
     signal?: AbortSignal,
     filterTree?: FilterGroup | null,
-  ) =>
-    fetchJson<ProfileResult>(
+  ) => {
+    const key = profileCacheKey(id, variableId, completionStatus, filters, filterTree)
+    const hit = profileCache.get(key)
+    if (hit && Date.now() - hit.at < PROFILE_CACHE_MS) {
+      return hit.data
+    }
+    const data = await fetchJson<ProfileResult>(
       `/api/projects/${id}/analysis/profile`,
       {
         method: 'POST',
@@ -980,7 +1010,10 @@ export const api = {
         signal,
       },
       ANALYSIS_TIMEOUT_MS,
-    ),
+    )
+    profileCache.set(key, { at: Date.now(), data })
+    return data
+  },
   runChart: (
     id: number,
     query: {

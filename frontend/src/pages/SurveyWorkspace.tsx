@@ -18,13 +18,18 @@ import {
   Table2,
 } from 'lucide-react'
 import {
+  BANNER_CHUNK_CONCURRENCY,
   bannerChunkRequest,
   bannerTablesFromResult,
   chunkBannerRowIds,
+  markSurveyWarmed,
   mergeBannerChunkResults,
+  runBannerChunksParallel,
+  shouldWarmupSurvey,
 } from '../lib/bannerRun'
 import {
   api,
+  invalidateProfileCache,
   invalidateSchemaCache,
   type AnalysisBookmark,
   type BannerResult,
@@ -52,6 +57,13 @@ import { ProjectWorkflowPanel } from '../components/analysis/ProjectWorkflowPane
 import { ReportBuilderPanel } from '../components/analysis/ReportBuilderPanel'
 import { filterPayload, treeToFlatFilters } from '../lib/filterTree'
 import type { ChartTypeId } from '../lib/chartTypes'
+import {
+  captureCrosstabDefaults,
+  loadUserFieldDefaults,
+  resolveIdsFromCodes,
+  resolveLayersFromCodes,
+  saveUserFieldDefaults,
+} from '../lib/surveyFieldDefaults'
 import {
   loadSurveySession,
   loadUserAppSession,
@@ -122,10 +134,14 @@ function parseAnalyzeView(rawMode: string | null, rawView: string | null): Analy
 function parseFieldView(rawMode: string | null, rawView: string | null): FieldView {
   if (
     rawMode === 'quality' ||
+    rawView === 'quality'
+  ) {
+    return 'quality'
+  }
+  if (
     rawMode === 'fieldteam' ||
     rawMode === 'field-team' ||
-    rawView === 'team' ||
-    rawView === 'quality'
+    rawView === 'team'
   ) {
     return 'team'
   }
@@ -215,6 +231,7 @@ export function SurveyWorkspace() {
   const handleQcReviewChanged = useCallback(() => {
     reloadQcSummary()
     invalidateSchemaCache(surveyId)
+    invalidateProfileCache(surveyId)
     setSchemaVersion((v) => v + 1)
     setProfileResult(null)
     setBannerResult(null)
@@ -231,6 +248,7 @@ export function SurveyWorkspace() {
 
     setSearchParams((prev) => mergeSessionIntoSearch(prev, saved), { replace: true })
     if (saved.selectedQuestionId) setSelectedId(saved.selectedQuestionId)
+    if (saved.metric) setMetric(saved.metric)
   }, [user?.username, surveyId, setSearchParams])
 
   useEffect(() => {
@@ -240,6 +258,9 @@ export function SurveyWorkspace() {
       view: searchParams.get('view') || undefined,
       responses: completionStatus,
       selectedQuestionId: selectedId,
+      sideRowIds,
+      bannerLayers,
+      metric,
     })
     const qs = searchParams.toString()
     saveUserAppSession(user.username, {
@@ -254,6 +275,9 @@ export function SurveyWorkspace() {
     searchParams,
     completionStatus,
     selectedId,
+    sideRowIds,
+    bannerLayers,
+    metric,
     project?.title,
     navTitle,
   ])
@@ -285,10 +309,18 @@ export function SurveyWorkspace() {
       }, { replace: true })
       return
     }
-    if (raw === 'fieldteam' || raw === 'field-team' || raw === 'quality') {
+    if (raw === 'fieldteam' || raw === 'field-team') {
       setSearchParams((prev) => {
         prev.set('mode', 'fields')
         prev.set('view', 'team')
+        return prev
+      }, { replace: true })
+      return
+    }
+    if (raw === 'quality') {
+      setSearchParams((prev) => {
+        prev.set('mode', 'fields')
+        prev.set('view', 'quality')
         return prev
       }, { replace: true })
       return
@@ -383,10 +415,10 @@ export function SurveyWorkspace() {
       setSearchParams((prev) => {
         prev.set('mode', targetMode)
         if (targetMode === 'fields' && (view === 'fielding' || view === 'team' || view === 'quality' || view === 'monitor' || view === 'quotas')) {
-          prev.set('view', view === 'fielding' || view === 'monitor' || view === 'quotas' ? 'fielding' : 'team')
+          prev.set('view', view === 'fielding' || view === 'monitor' || view === 'quotas' ? 'fielding' : view)
         } else if (targetMode === 'quality') {
           prev.set('mode', 'fields')
-          prev.set('view', 'team')
+          prev.set('view', 'quality')
         } else if (view === 'compare' || view === 'crosstabs') {
           prev.set('view', 'crosstabs')
         } else if (view === 'profile') {
@@ -489,8 +521,12 @@ export function SurveyWorkspace() {
     const layers = sourceLayers.filter((layer) => layer.length > 0)
     const flatBannerIds = layers.flat()
     const row_filters: Record<string, FilterSpec[]> = {}
+    const defaultFiltersKey = JSON.stringify(filters)
     for (const id of rowIds) {
-      row_filters[id] = tableFilters[id] ?? filters
+      const custom = tableFilters[id]
+      if (custom && JSON.stringify(custom) !== defaultFiltersKey) {
+        row_filters[id] = custom
+      }
     }
     return {
       row_variable_id: rowIds[0],
@@ -505,7 +541,7 @@ export function SurveyWorkspace() {
       confidence_level: confidenceLevel,
       metric,
       ...filterPayload(filters, filterTree),
-      row_filters,
+      ...(Object.keys(row_filters).length > 0 ? { row_filters } : {}),
     }
   }
 
@@ -534,14 +570,46 @@ export function SurveyWorkspace() {
     setBannerResult(null)
 
     function pickDefaults(data: SurveySchema) {
-      const first = data.variables.find((v) => v.can_banner) || data.variables[0]
-      if (first && !initialized.current) {
-        initialized.current = true
-        setSelectedId(first.id)
-        setSideRowIds([first.id])
+      if (initialized.current) return
+
+      const saved = user?.username ? loadSurveySession(user.username, surveyId) : null
+      const userDefaults = user?.username ? loadUserFieldDefaults(user.username) : null
+
+      initialized.current = true
+
+      let sideIds =
+        saved?.sideRowIds?.filter((id) => data.variables.some((v) => v.id === id)) ?? []
+      let layers =
+        saved?.bannerLayers
+          ?.map((layer) => layer.filter((id) => data.variables.some((v) => v.id === id)))
+          .filter((layer) => layer.length > 0) ?? []
+
+      if (!sideIds.length && userDefaults?.sideRowCodes?.length) {
+        sideIds = resolveIdsFromCodes(data.variables, userDefaults.sideRowCodes)
       }
-      const banner = data.variables.find((v) => v.kind === 'single' && v.id !== first?.id)
-      if (banner) setBannerLayers([[banner.id]])
+      if (!layers.length && userDefaults?.bannerLayerCodes?.length) {
+        layers = resolveLayersFromCodes(data.variables, userDefaults.bannerLayerCodes)
+      }
+
+      if (!sideIds.length) {
+        const first = data.variables.find((v) => v.can_banner) || data.variables[0]
+        if (first) sideIds = [first.id]
+      }
+      if (!layers.length) {
+        const banner = data.variables.find((v) => v.kind === 'single' && !sideIds.includes(v.id))
+        if (banner) layers = [[banner.id]]
+      }
+
+      if (sideIds.length) {
+        setSideRowIds(sideIds)
+        const selected =
+          saved?.selectedQuestionId && sideIds.includes(saved.selectedQuestionId)
+            ? saved.selectedQuestionId
+            : sideIds[0]
+        setSelectedId(selected)
+      }
+      if (layers.length) setBannerLayers(layers)
+      if (saved?.metric) setMetric(saved.metric)
     }
 
     // Phase 1: fast question list (~1s) — sidebar usable immediately
@@ -551,7 +619,9 @@ export function SurveyWorkspace() {
         setSchema(data)
         pickDefaults(data)
         setSchemaLoading(false)
-        api.warmupSurvey(surveyId, completionStatus).catch(() => {})
+        api.warmupSurvey(surveyId, completionStatus)
+          .then(() => markSurveyWarmed(surveyId, completionStatus))
+          .catch(() => {})
       })
       .catch((err) => {
         if (!cancelled) {
@@ -573,7 +643,7 @@ export function SurveyWorkspace() {
       })
 
     return () => { cancelled = true }
-  }, [surveyId, completionStatus, schemaVersion])
+  }, [surveyId, completionStatus, schemaVersion, user?.username])
 
   useEffect(() => {
     if (!surveyId) return
@@ -581,6 +651,17 @@ export function SurveyWorkspace() {
   }, [surveyId, reloadCustomVariables])
 
   const activeSchema = mergedSchema ?? schema
+
+  useEffect(() => {
+    if (!user?.username || !activeSchema?.variables.length) return
+    const timer = window.setTimeout(() => {
+      saveUserFieldDefaults(
+        user.username,
+        captureCrosstabDefaults(activeSchema.variables, sideRowIds, bannerLayers),
+      )
+    }, 800)
+    return () => window.clearTimeout(timer)
+  }, [user?.username, activeSchema, sideRowIds, bannerLayers])
 
   const selectedVar = useMemo(
     () => activeSchema?.variables.find((v) => v.id === selectedId) ?? null,
@@ -641,7 +722,7 @@ export function SurveyWorkspace() {
 
   useEffect(() => {
     if (mode !== 'explore' || analyzeView !== 'profile' || !selectedId || schemaLoading) return
-    const t = setTimeout(() => runProfile(selectedId), 300)
+    const t = setTimeout(() => runProfile(selectedId), 600)
     return () => clearTimeout(t)
   }, [mode, analyzeView, selectedId, schemaLoading, filters, filterTree, runProfile])
 
@@ -661,31 +742,40 @@ export function SurveyWorkspace() {
     const chunks = chunkBannerRowIds(rowIds)
 
     try {
-      await api.warmupSurvey(surveyId, completionStatus).catch(() => {})
-
-      const allTables: BannerResult[] = []
-      if (chunks.length > 1) {
-        setBannerProgress({ done: 0, total: rowIds.length })
+      if (shouldWarmupSurvey(surveyId, completionStatus)) {
+        await api.warmupSurvey(surveyId, completionStatus).catch(() => {})
+        markSurveyWarmed(surveyId, completionStatus)
       }
 
-      for (const chunkIds of chunks) {
-        if (ctrl.signal.aborted) return
-        const chunkResult = await api.runBanner(
-          surveyId,
-          chunks.length > 1 ? bannerChunkRequest(request, chunkIds) : request,
-          ctrl.signal,
-        )
-        if (ctrl.signal.aborted) return
-
-        allTables.push(...bannerTablesFromResult(chunkResult))
-
-        if (chunks.length > 1) {
-          setBannerProgress({ done: allTables.length, total: rowIds.length })
-          setBannerResult(mergeBannerChunkResults(allTables, request))
-        } else {
-          setBannerResult(chunkResult)
-        }
+      if (chunks.length === 1) {
+        const chunkResult = await api.runBanner(surveyId, request, ctrl.signal)
+        if (!ctrl.signal.aborted) setBannerResult(chunkResult)
+        return
       }
+
+      setBannerProgress({ done: 0, total: rowIds.length })
+      const chunkResults = await runBannerChunksParallel({
+        chunks,
+        concurrency: BANNER_CHUNK_CONCURRENCY,
+        signal: ctrl.signal,
+        runChunk: async (chunkIds) => {
+          const chunkResult = await api.runBanner(
+            surveyId,
+            bannerChunkRequest(request, chunkIds),
+            ctrl.signal,
+          )
+          return chunkResult
+        },
+        onChunkComplete: (_index, _chunkResult, completedRows, totalRows) => {
+          if (ctrl.signal.aborted) return
+          setBannerProgress({ done: completedRows, total: totalRows })
+        },
+      })
+
+      if (ctrl.signal.aborted) return
+
+      const allTables = chunkResults.flatMap((result) => bannerTablesFromResult(result))
+      setBannerResult(mergeBannerChunkResults(allTables, request))
     } catch (err) {
       if (!ctrl.signal.aborted) {
         setBannerResult({ error: err instanceof Error ? err.message : 'Crosstab failed' })
@@ -947,7 +1037,7 @@ export function SurveyWorkspace() {
             {(completionStatus === 'qc_approved' || qcSummary?.has_review) && (
               <button
                 type="button"
-                onClick={() => setFieldView('team')}
+                onClick={() => setFieldView('quality')}
                 className="inline-flex items-center gap-1 rounded-lg border border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/50 px-2.5 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] transition hover:bg-[var(--et-teal-light)]"
                 title="Review flagged responses and exclusions"
               >
@@ -958,7 +1048,7 @@ export function SurveyWorkspace() {
           </div>
         </div>
 
-        <div className="et-toolbar-scroll flex items-center gap-2 border-t border-slate-100 bg-slate-50/90 px-3 py-2 sm:gap-3 sm:px-4">
+        <div className="et-toolbar-scroll flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-slate-100 bg-slate-50/90 px-3 py-2 sm:gap-3 sm:px-4">
           {showsQuestionNav && (
             <button
               type="button"
@@ -969,13 +1059,22 @@ export function SurveyWorkspace() {
               {analyzeView === 'compare' ? 'Rows & banners' : 'Questions'}
             </button>
           )}
-          <span className="hidden shrink-0 et-kicker lg:inline">Analyze</span>
+          <span className="hidden shrink-0 et-kicker lg:inline">Overview</span>
           <div className="et-segment">
             <ModeButton active={mode === 'home'} onClick={() => setMode('home')} icon={<Home size={15} />}>
               Home
             </ModeButton>
+            <ModeButton active={mode === 'workflow'} onClick={() => setMode('workflow')} icon={<Kanban size={15} />}>
+              Workflow
+            </ModeButton>
+          </div>
+          <span className="hidden shrink-0 text-slate-300 lg:inline" aria-hidden>
+            |
+          </span>
+          <span className="hidden shrink-0 et-kicker lg:inline">Analyze</span>
+          <div className="et-segment">
             <ModeButton active={mode === 'explore'} onClick={() => setMode('explore')} icon={<Layers size={15} />}>
-              Questions
+              Analyze
             </ModeButton>
             <ModeButton active={mode === 'charts'} onClick={() => setMode('charts')} icon={<BarChart3 size={15} />}>
               Charts
@@ -990,19 +1089,16 @@ export function SurveyWorkspace() {
           <span className="hidden shrink-0 text-slate-300 lg:inline" aria-hidden>
             |
           </span>
-          <span className="hidden shrink-0 et-kicker lg:inline">Manage</span>
+          <span className="hidden shrink-0 et-kicker lg:inline">Field & data</span>
           <div className="et-segment">
             <ModeButton active={mode === 'fields'} onClick={() => setMode('fields')} icon={<ClipboardList size={15} />}>
-              Field manage
-            </ModeButton>
-            <ModeButton active={mode === 'workflow'} onClick={() => setMode('workflow')} icon={<Kanban size={15} />}>
-              Workflow
+              Field
             </ModeButton>
             <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
-              Data Setup
+              Data setup
             </ModeButton>
             <ModeButton active={mode === 'data'} onClick={() => setMode('data')} icon={<Database size={15} />}>
-              Raw Data
+              Raw data
             </ModeButton>
           </div>
         </div>

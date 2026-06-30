@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, Component, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, Component, type ReactNode, useRef } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -29,6 +29,13 @@ import {
   type QcFlaggedRow,
   type QcReviewState,
 } from '../../lib/qcHelpers'
+import { useAuth } from '../../auth/AuthContext'
+import {
+  applyQcDefaultsIfEmpty,
+  captureQcDefaults,
+  loadUserFieldDefaults,
+  saveUserFieldDefaults,
+} from '../../lib/surveyFieldDefaults'
 import { ErrorState } from '../States'
 import { InterviewerQcTab } from './InterviewerQcTab'
 import { QcSettingsPanel } from './QcSettingsPanel'
@@ -102,6 +109,8 @@ export function ResponseQCPanel({ surveyId, variables = [], onUseQcApproved, onR
 }
 
 function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onReviewChanged, qcApprovedCount, embedded }: Props) {
+  const { user } = useAuth()
+  const qcDefaultsSynced = useRef(false)
   const [result, setResult] = useState<DataQualityResult | null>(() => loadCached(surveyId)?.result ?? null)
   const [lastRunAt, setLastRunAt] = useState<number | null>(() => loadCached(surveyId)?.at ?? null)
   const [loading, setLoading] = useState(false)
@@ -201,6 +210,10 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
   }, [surveyId, surveyReady, qcConfig.interviewer_variable_id, lastRunAt])
 
   useEffect(() => {
+    qcDefaultsSynced.current = false
+  }, [surveyId])
+
+  useEffect(() => {
     let cancelled = false
     setConfigLoading(true)
     api
@@ -220,6 +233,24 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
       cancelled = true
     }
   }, [surveyId])
+
+  useEffect(() => {
+    if (!variables.length || configLoading || qcDefaultsSynced.current) return
+    const userDefaults = user?.username ? loadUserFieldDefaults(user.username) : null
+    const { config: patched, changed } = applyQcDefaultsIfEmpty(qcConfig, variables, userDefaults)
+    if (!changed) {
+      qcDefaultsSynced.current = true
+      return
+    }
+    qcDefaultsSynced.current = true
+    setQcConfig(patched)
+    void api.setQcConfig(surveyId, patched).catch(() => {})
+  }, [surveyId, variables, configLoading, qcConfig, user?.username])
+
+  function rememberQcDefaults(config: QcConfig) {
+    if (!user?.username || !variables.length) return
+    saveUserFieldDefaults(user.username, captureQcDefaults(config, variables))
+  }
 
   const runScan = useCallback(
     async (refresh = true) => {
@@ -261,6 +292,7 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
       try {
         const saved = await api.setQcConfig(surveyId, nextConfig)
         setQcConfig(saved)
+        rememberQcDefaults(saved)
         onReviewChanged?.()
         await runScan(true)
       } catch {
@@ -278,6 +310,7 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
     try {
       const saved = await api.setQcConfig(surveyId, qcConfig)
       setQcConfig(saved)
+      rememberQcDefaults(saved)
       onReviewChanged?.()
     } catch {
       const cfg = await api.getQcConfig(surveyId).catch(() => null)

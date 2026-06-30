@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, Loader2, RefreshCw, Save, Users } from 'lucide-react'
 import { api, type DataQualityResult, type InterviewerQcResult, type QcConfig, type SurveyVariable } from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
+import { saveUserFieldDefaults } from '../../lib/surveyFieldDefaults'
 
 function isInterviewerCandidate(v: SurveyVariable): boolean {
   if (v.custom) return false
@@ -34,6 +36,7 @@ export function InterviewerQcTab({
   gpsProximityStats,
   shortGapStats,
 }: Props) {
+  const { user } = useAuth()
   const [stats, setStats] = useState<InterviewerQcResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -145,12 +148,17 @@ export function InterviewerQcTab({
           <span className="mb-1 block font-medium text-slate-700">Interviewer name variable</span>
           <select
             value={selectedId}
-            onChange={(e) =>
+            onChange={(e) => {
+              const interviewerId = e.target.value || null
               onConfigChange({
                 ...qcConfig,
-                interviewer_variable_id: e.target.value || null,
+                interviewer_variable_id: interviewerId,
               })
-            }
+              if (user?.username) {
+                const v = interviewerId ? variables.find((item) => item.id === interviewerId) : null
+                saveUserFieldDefaults(user.username, { interviewerCode: v?.code ?? null })
+              }
+            }}
             className="et-select w-full"
           >
             <option value="">Select question…</option>

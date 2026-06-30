@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import itertools
 import math
+import os
 import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from scipy.stats import chi2_contingency
 
@@ -30,7 +32,17 @@ from app.services.weighting import weight_series, weighted_mean, weighted_pct, w
 Z_THRESHOLDS = {0.90: 1.645, 0.95: 1.96, 0.99: 2.576}
 _CHECKBOX_YES = frozenset({"Y", "1", "yes", "Yes", "y"})
 _BANNER_PARALLEL_MIN = 2
-_BANNER_PARALLEL_WORKERS = 4
+_BANNER_PARALLEL_WORKERS = min(8, (os.cpu_count() or 4))
+
+
+def _masks_as_bool_array(masks: list[pd.Series]) -> np.ndarray:
+    if not masks:
+        return np.empty((0, 0), dtype=bool)
+    return np.vstack([mask.to_numpy(dtype=bool, copy=False) for mask in masks])
+
+
+def _bool_counts(mask_arr: np.ndarray, row_mask: np.ndarray) -> np.ndarray:
+    return (mask_arr & row_mask).sum(axis=1)
 
 
 def _canonical_series(var: dict[str, Any], series: pd.Series) -> pd.Series:
@@ -59,16 +71,23 @@ def _canonical_series(var: dict[str, Any], series: pd.Series) -> pd.Series:
     return out.astype(str)
 
 
-def _mask_for_banner(df: pd.DataFrame, banner: dict[str, Any]) -> pd.Series:
+def _mask_for_banner(
+    df: pd.DataFrame,
+    banner: dict[str, Any],
+    col_cache: dict[str, pd.Series] | None = None,
+) -> pd.Series:
     mask = pd.Series(True, index=df.index)
     filters = banner.get("filters")
     specs = filters if filters else [banner]
+    cache = col_cache if col_cache is not None else {}
     for spec in specs:
         col = spec["filter_col"]
         if col not in df.columns:
             mask &= False
             continue
-        col_series = df[col].astype(str)
+        if col not in cache:
+            cache[col] = df[col].astype(str)
+        col_series = cache[col]
         if spec.get("is_checkbox"):
             mask &= col_series.isin(_CHECKBOX_YES)
         else:
@@ -77,7 +96,8 @@ def _mask_for_banner(df: pd.DataFrame, banner: dict[str, Any]) -> pd.Series:
 
 
 def _banner_masks(df: pd.DataFrame, banner_columns: list[dict[str, Any]]) -> list[pd.Series]:
-    return [_mask_for_banner(df, banner) for banner in banner_columns]
+    col_cache: dict[str, pd.Series] = {}
+    return [_mask_for_banner(df, banner, col_cache) for banner in banner_columns]
 
 
 def _banner_mask_bases(masks: list[pd.Series]) -> list[int]:
@@ -526,7 +546,7 @@ def _apply_filters(
 ) -> pd.DataFrame:
     if not filters:
         return df
-    result = df.copy()
+    mask = pd.Series(True, index=df.index)
     for f in filters:
         var = get_variable(schema, f.get("variable_id", ""))
         if not var:
@@ -539,7 +559,7 @@ def _apply_filters(
         kind = var.get("kind")
 
         if kind == "multi":
-            mask = pd.Series(False, index=result.index)
+            filter_mask = pd.Series(False, index=df.index)
             subquestions = var.get("subquestions") or []
             if not subquestions and var.get("answer_options"):
                 subquestions = [
@@ -554,22 +574,21 @@ def _apply_filters(
                 for sq in subquestions:
                     if str(sq.get("code")) != str(code):
                         continue
-                    col = _resolve_subquestion_column(var, sq, result)
-                    if col and col in result.columns:
-                        mask |= result[col].astype(str).str.strip().isin(
+                    col = _resolve_subquestion_column(var, sq, df)
+                    if col and col in df.columns:
+                        filter_mask |= df[col].astype(str).str.strip().isin(
                             ["Y", "1", "yes", "Yes", "y"]
                         )
-            result = result[mask]
+            mask &= filter_mask
             continue
 
-        col = _find_column(var, result)
-        if not col or col not in result.columns:
+        col = _find_column(var, df)
+        if not col or col not in df.columns:
             continue
 
-        series = result[col].astype(str).str.strip()
-        mask = series.isin(match_values)
-        # Also match when export uses labels but filter sends codes (or vice versa)
-        if not mask.any() and var.get("answer_options"):
+        series = df[col].astype(str).str.strip()
+        filter_mask = series.isin(match_values)
+        if not filter_mask.any() and var.get("answer_options"):
             label_to_code = {
                 str(o.get("label", "")).strip(): str(o["code"])
                 for o in var["answer_options"]
@@ -585,10 +604,10 @@ def _apply_filters(
                     expanded.add(code_to_label[v])
                 if v in label_to_code:
                     expanded.add(label_to_code[v])
-            mask = series.isin(expanded)
-        result = result[mask]
+            filter_mask = series.isin(expanded)
+        mask &= filter_mask
 
-    return result
+    return df.loc[mask]
 
 
 def _filter_match_values(var: dict[str, Any], values: list[str]) -> set[str]:
@@ -918,16 +937,18 @@ def _banner_single(
     categories = _ordered_categories(row_var, df[col])
     masks = column_masks or _banner_masks(df, banner_columns)
     all_masks = [pd.Series(True, index=df.index)] + masks
-    bases = _banner_mask_bases(all_masks)
+    mask_arr = _masks_as_bool_array(all_masks)
+    bases = mask_arr.sum(axis=1).astype(int).tolist()
 
     rows = []
+    canonical_arr = canonical.to_numpy(dtype=object)
     for cat in categories:
-        cat_mask = canonical == str(cat)
+        cat_mask = canonical_arr == str(cat)
+        counts = _bool_counts(mask_arr, cat_mask)
         cells = []
-        for mask, base in zip(all_masks, bases):
-            count = int((cat_mask & mask).sum())
+        for count, base in zip(counts.tolist(), bases):
             pct = round((count / base) * 100, 1) if base else 0.0
-            cells.append({"count": count, "base": base, "col_pct": pct})
+            cells.append({"count": int(count), "base": base, "col_pct": pct})
         rows.append({"code": cat, "label": _label_for_code(row_var, cat), "cells": cells})
 
     total_cells = [
@@ -987,19 +1008,20 @@ def _banner_multi(
 ) -> dict[str, Any]:
     masks = column_masks or _banner_masks(df, banner_columns)
     all_masks = [pd.Series(True, index=df.index)] + masks
-    bases = _banner_mask_bases(all_masks)
+    mask_arr = _masks_as_bool_array(all_masks)
+    bases = mask_arr.sum(axis=1).astype(int).tolist()
     rows = []
     for sq in row_var["subquestions"]:
         col = sq["column"]
         if col not in df.columns:
             continue
-        yes = df[col].astype(str).isin(_CHECKBOX_YES)
+        yes = df[col].astype(str).isin(_CHECKBOX_YES).to_numpy(dtype=bool)
+        counts = _bool_counts(mask_arr, yes)
         cells = []
-        for mask, base in zip(all_masks, bases):
-            count = int((yes & mask).sum())
+        for count, base in zip(counts.tolist(), bases):
             cells.append(
                 {
-                    "count": count,
+                    "count": int(count),
                     "base": base,
                     "col_pct": round((count / base) * 100, 1) if base else 0,
                 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -22,6 +22,13 @@ import {
   type QuotaLayerConfig,
   type SurveyVariable,
 } from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
+import {
+  applyQuotaDefaultsIfEmpty,
+  captureQuotaDefaults,
+  loadUserFieldDefaults,
+  saveUserFieldDefaults,
+} from '../../lib/surveyFieldDefaults'
 
 interface Props {
   surveyId: number
@@ -138,6 +145,8 @@ function layerCellLabel(codes: Record<string, string>, varMap: Map<string, Surve
 }
 
 export function FieldManagementPanel({ surveyId, variables, embedded, nested }: Props) {
+  const { user } = useAuth()
+  const quotaDefaultsSynced = useRef(false)
   const [config, setConfig] = useState<QuotaConfig>(emptyConfig())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -170,8 +179,32 @@ export function FieldManagementPanel({ surveyId, variables, embedded, nested }: 
   }, [surveyId])
 
   useEffect(() => {
+    quotaDefaultsSynced.current = false
+  }, [surveyId])
+
+  useEffect(() => {
     loadConfig()
   }, [loadConfig])
+
+  useEffect(() => {
+    if (!variables.length || loading || quotaDefaultsSynced.current) return
+    const userDefaults = user?.username ? loadUserFieldDefaults(user.username) : null
+    setConfig((prev) => {
+      const { config: patched, changed } = applyQuotaDefaultsIfEmpty(prev, variables, userDefaults)
+      if (!changed) {
+        quotaDefaultsSynced.current = true
+        return prev
+      }
+      quotaDefaultsSynced.current = true
+      void api.setQuotaConfig(surveyId, patched).catch(() => {})
+      return patched
+    })
+  }, [surveyId, variables, loading, user?.username])
+
+  function rememberQuotaDefaults(next: QuotaConfig) {
+    if (!user?.username || !variables.length) return
+    saveUserFieldDefaults(user.username, captureQuotaDefaults(next, variables))
+  }
 
   useEffect(() => {
     if (!variables.length) return
@@ -210,6 +243,7 @@ export function FieldManagementPanel({ surveyId, variables, embedded, nested }: 
     })
     const next = { ...saved, layers: saved.layers ?? [] }
     setConfig(next)
+    rememberQuotaDefaults(next)
     return next
   }
 
@@ -443,12 +477,17 @@ export function FieldManagementPanel({ surveyId, variables, embedded, nested }: 
             <span className="mb-1 block font-medium text-slate-700">Interviewer variable (field reports)</span>
             <select
               value={config.interviewer_variable_id ?? ''}
-              onChange={(e) =>
+              onChange={(e) => {
+                const interviewerId = e.target.value || null
                 setConfig((prev) => ({
                   ...prev,
-                  interviewer_variable_id: e.target.value || null,
+                  interviewer_variable_id: interviewerId,
                 }))
-              }
+                if (user?.username) {
+                  const code = interviewerId ? varMap.get(interviewerId)?.code ?? null : null
+                  saveUserFieldDefaults(user.username, { interviewerCode: code })
+                }
+              }}
               className="et-select w-full text-sm"
             >
               <option value="">None</option>

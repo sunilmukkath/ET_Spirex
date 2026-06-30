@@ -175,6 +175,7 @@ def run_data_quality(
         schema,
         interviewer_variable_id=interviewer_id,
         proximity_meters=thresholds.interviewer_gps_proximity_meters,
+        gps_variable_id=qc_cfg.gps_variable_id,
     )
     interviewer_short_gap = _detect_interviewer_short_gap(
         df,
@@ -994,7 +995,56 @@ def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     return 2 * radius * math.asin(min(1.0, math.sqrt(a)))
 
 
-def _resolve_survey_gps_source(df: pd.DataFrame, schema: dict[str, Any]) -> dict[str, str]:
+def _gps_source_for_variable(
+    df: pd.DataFrame,
+    schema: dict[str, Any],
+    variable_id: str,
+) -> dict[str, str] | None:
+    from app.services.location_detect import find_combined_gps_column, find_lat_lng_columns
+    from app.services.question_schema import get_variable
+
+    var = get_variable(schema, variable_id)
+    if not var:
+        return None
+
+    df_columns = [str(c) for c in df.columns]
+    lat = str(var.get("lat_column") or "")
+    lng = str(var.get("lng_column") or "")
+    if lat and lng and lat in df.columns and lng in df.columns:
+        return {"lat_col": lat, "lng_col": lng, "combined_col": ""}
+    if lat and lat in df.columns and not lng:
+        return {"lat_col": "", "lng_col": "", "combined_col": lat}
+
+    pair = find_lat_lng_columns(
+        str(var.get("code") or ""),
+        df_columns,
+        qid=var.get("qid"),
+    )
+    if pair:
+        return {"lat_col": pair[0], "lng_col": pair[1], "combined_col": ""}
+
+    combined = find_combined_gps_column(
+        str(var.get("code") or ""),
+        str(var.get("text") or ""),
+        df_columns,
+        qid=var.get("qid"),
+    )
+    if combined:
+        return {"lat_col": "", "lng_col": "", "combined_col": combined}
+    return None
+
+
+def _resolve_survey_gps_source(
+    df: pd.DataFrame,
+    schema: dict[str, Any],
+    *,
+    gps_variable_id: str | None = None,
+) -> dict[str, str]:
+    if gps_variable_id:
+        resolved = _gps_source_for_variable(df, schema, gps_variable_id)
+        if resolved:
+            return resolved
+
     from app.services.location_detect import (
         find_combined_gps_column,
         index_gps_column_pairs,
@@ -1052,6 +1102,7 @@ def _prepare_interviewer_sessions(
     schema: dict[str, Any],
     *,
     interviewer_variable_id: str | None,
+    gps_variable_id: str | None = None,
 ) -> dict[str, Any]:
     if not interviewer_variable_id:
         return {
@@ -1089,11 +1140,16 @@ def _prepare_interviewer_sessions(
     interviewers = _interviewer_labels(schema, var, df)
     id_col = response_id_column(df)
     _, end_col = _find_time_columns(df)
-    gps_source = _resolve_survey_gps_source(df, schema)
+    gps_source = _resolve_survey_gps_source(df, schema, gps_variable_id=gps_variable_id)
     has_gps = bool(
         (gps_source.get("lat_col") and gps_source.get("lng_col"))
         or gps_source.get("combined_col")
     )
+    if gps_variable_id and not has_gps:
+        gps_message = "Selected GPS question has no coordinate data in export."
+    else:
+        gps_message = None
+
     has_time = bool(end_col)
 
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1121,6 +1177,7 @@ def _prepare_interviewer_sessions(
         "groups": dict(groups),
         "has_gps": has_gps,
         "has_time": has_time,
+        "gps_message": gps_message,
     }
 
 
@@ -1137,11 +1194,13 @@ def _detect_interviewer_gps_proximity(
     *,
     interviewer_variable_id: str | None,
     proximity_meters: float = 10.0,
+    gps_variable_id: str | None = None,
 ) -> dict[str, Any]:
     prep = _prepare_interviewer_sessions(
         df,
         schema,
         interviewer_variable_id=interviewer_variable_id,
+        gps_variable_id=gps_variable_id,
     )
     if not prep.get("available"):
         return {
@@ -1151,15 +1210,17 @@ def _detect_interviewer_gps_proximity(
             "flags": [],
             "by_interviewer": [],
             "proximity_meters": proximity_meters,
+            "gps_variable_id": gps_variable_id,
         }
     if not prep.get("has_gps"):
         return {
             "available": False,
-            "message": "No GPS / location columns found in survey export.",
+            "message": prep.get("gps_message") or "No GPS / location columns found in survey export.",
             "count": 0,
             "flags": [],
             "by_interviewer": [],
             "proximity_meters": proximity_meters,
+            "gps_variable_id": gps_variable_id,
         }
 
     flags: list[dict[str, Any]] = []
@@ -1218,6 +1279,7 @@ def _detect_interviewer_gps_proximity(
         "flags": flags[:_MAX_FLAGS],
         "by_interviewer": by_interviewer_summary,
         "proximity_meters": proximity_meters,
+        "gps_variable_id": gps_variable_id,
     }
 
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Download, Loader2, Users } from 'lucide-react'
 import { api, type InterviewerQcResult, type QcConfig, type SurveyVariable } from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
+import { captureQcDefaults, saveUserFieldDefaults } from '../../lib/surveyFieldDefaults'
 import { InterviewerQcTab } from './InterviewerQcTab'
 
 function defaultQcConfig(): QcConfig {
@@ -31,6 +33,7 @@ interface Props {
 }
 
 export function FieldTeamPanel({ surveyId, variables, embedded }: Props) {
+  const { user } = useAuth()
   const [qcConfig, setQcConfig] = useState<QcConfig>(defaultQcConfig())
   const [stats, setStats] = useState<InterviewerQcResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -63,6 +66,9 @@ export function FieldTeamPanel({ surveyId, variables, embedded }: Props) {
     try {
       const saved = await api.setQcConfig(surveyId, qcConfig)
       setQcConfig(saved)
+      if (user?.username) {
+        saveUserFieldDefaults(user.username, captureQcDefaults(saved, variables))
+      }
     } finally {
       setSavingConfig(false)
     }

@@ -2,10 +2,16 @@ import { useEffect, useState } from 'react'
 import {
   BarChart3,
   ClipboardList,
+  Database,
+  FileText,
   Kanban,
   Layers,
   Loader2,
+  ShieldCheck,
+  Sigma,
+  SlidersHorizontal,
   Table2,
+  Users,
 } from 'lucide-react'
 import { api, type SurveyOverview } from '../../api/client'
 
@@ -52,6 +58,15 @@ function QuickLink({
   )
 }
 
+function LinkSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
+      <div className="grid gap-3 sm:grid-cols-2">{children}</div>
+    </section>
+  )
+}
+
 export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
   const [overview, setOverview] = useState<SurveyOverview | null>(null)
   const [loading, setLoading] = useState(true)
@@ -92,11 +107,11 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
 
   return (
     <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll">
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="mx-auto max-w-5xl space-y-8">
         <header>
           <h2 className="font-display text-xl font-semibold text-slate-900">Survey home</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Mission control for this study — sample size, quality, quotas, and quick links.
+            Mission control — sample health, quotas, and shortcuts to every part of this study.
           </p>
         </header>
 
@@ -132,10 +147,10 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <LinkSection title="Analyze">
           <QuickLink
             icon={<Layers size={18} />}
-            title="Questions — Profile"
+            title="Question profiles"
             desc="Single-question distributions and summary stats"
             onClick={() => onNavigate('explore', 'profile')}
           />
@@ -152,18 +167,60 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
             onClick={() => onNavigate('charts')}
           />
           <QuickLink
-            icon={<Kanban size={18} />}
-            title="Workflow & tasks"
-            desc="Team assignments, module access, and project task tracker"
-            onClick={() => onNavigate('workflow')}
+            icon={<Sigma size={18} />}
+            title="Statistics"
+            desc="Correlations, regression, and advanced analysis"
+            onClick={() => onNavigate('multivariate')}
           />
           <QuickLink
+            icon={<FileText size={18} />}
+            title="Reports"
+            desc="Assemble exportable report decks"
+            onClick={() => onNavigate('reports')}
+          />
+        </LinkSection>
+
+        <LinkSection title="Field & project">
+          <QuickLink
             icon={<ClipboardList size={18} />}
-            title="Field manage"
-            desc="Fielding, quotas, interviewer stats, and response QC"
+            title="Fielding & quotas"
+            desc="Monitor pace and configure quota targets"
+            onClick={() => onNavigate('fields', 'fielding')}
+          />
+          <QuickLink
+            icon={<ShieldCheck size={18} />}
+            title="Response quality"
+            desc="QC scan, flagged records, GPS proximity checks"
+            onClick={() => onNavigate('fields', 'quality')}
+          />
+          <QuickLink
+            icon={<Users size={18} />}
+            title="Interviewers"
+            desc="Throughput and rejection rates by field team member"
             onClick={() => onNavigate('fields', 'team')}
           />
-        </div>
+          <QuickLink
+            icon={<Kanban size={18} />}
+            title="Workflow & tasks"
+            desc="Team assignments, module access, and task tracker"
+            onClick={() => onNavigate('workflow')}
+          />
+        </LinkSection>
+
+        <LinkSection title="Data">
+          <QuickLink
+            icon={<SlidersHorizontal size={18} />}
+            title="Data setup"
+            desc="Question types, weights, recodes, and derived variables"
+            onClick={() => onNavigate('variables')}
+          />
+          <QuickLink
+            icon={<Database size={18} />}
+            title="Raw data"
+            desc="Browse and export response-level records"
+            onClick={() => onNavigate('data')}
+          />
+        </LinkSection>
       </div>
     </div>
   )

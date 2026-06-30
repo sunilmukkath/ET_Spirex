@@ -9,7 +9,7 @@ import pandas as pd
 from app.lime_client import export_responses_dataframe
 
 _CACHE: dict[tuple[int, str], tuple[float, pd.DataFrame]] = {}
-_TTL_SECONDS = 300
+_TTL_SECONDS = 600
 _META_LOCK = threading.Lock()
 _KEY_LOCKS: dict[tuple[int, str], threading.Lock] = {}
 

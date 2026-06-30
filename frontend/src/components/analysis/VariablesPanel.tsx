@@ -423,7 +423,7 @@ export function VariablesPanel({
           <div>
             <h2 className="et-section-title">Data Setup</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Create recodes, net scores, and combined nets per question.
+              Set analysis types per question, create recodes and nets, and configure weighting.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

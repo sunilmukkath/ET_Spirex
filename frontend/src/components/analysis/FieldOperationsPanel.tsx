@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Loader2, ShieldCheck, TrendingUp, Users } from 'lucide-react'
+import { ClipboardList, Loader2, ShieldCheck, TrendingUp, Users } from 'lucide-react'
 import type { SurveyVariable } from '../../api/client'
 import { FieldManagementPanel } from './FieldManagementPanel'
 import { FieldingMonitorPanel } from './FieldingMonitorPanel'
@@ -9,7 +9,7 @@ const ResponseQCPanel = lazy(() =>
   import('./ResponseQCPanel').then((m) => ({ default: m.ResponseQCPanel })),
 )
 
-export type FieldView = 'fielding' | 'team'
+export type FieldView = 'fielding' | 'quality' | 'team'
 
 interface Props {
   surveyId: number
@@ -57,7 +57,8 @@ function PanelLoader() {
 
 const VIEW_HINT: Record<FieldView, string> = {
   fielding: 'Fielding pace, daily completes, and quota targets',
-  team: 'Interviewer performance and response-level QC review',
+  quality: 'QC scan, flagged responses, thresholds, and interviewer proximity checks',
+  team: 'Interviewer throughput, completion rates, and rejection stats',
 }
 
 export function FieldOperationsPanel({
@@ -79,14 +80,21 @@ export function FieldOperationsPanel({
             onClick={() => onViewChange('fielding')}
             icon={<TrendingUp size={14} />}
           >
-            Fielding & quotas
+            Fielding
+          </FieldViewButton>
+          <FieldViewButton
+            active={view === 'quality'}
+            onClick={() => onViewChange('quality')}
+            icon={<ShieldCheck size={14} />}
+          >
+            Quality
           </FieldViewButton>
           <FieldViewButton
             active={view === 'team'}
             onClick={() => onViewChange('team')}
             icon={<Users size={14} />}
           >
-            Team & quality
+            Team
           </FieldViewButton>
         </div>
         <p className="hidden text-xs text-slate-500 sm:block">{VIEW_HINT[view]}</p>
@@ -95,6 +103,15 @@ export function FieldOperationsPanel({
       <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--canvas-subtle)] et-scroll">
         {view === 'fielding' && (
           <div className="mx-auto max-w-5xl space-y-8 p-4 sm:p-6 pb-10">
+            <header className="flex items-start gap-2">
+              <ClipboardList size={20} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Fielding & quotas</h2>
+                <p className="text-xs text-slate-500">
+                  Monitor completion pace and configure quota fields for field teams.
+                </p>
+              </div>
+            </header>
             <FieldingMonitorPanel
               surveyId={surveyId}
               completionStatus={completionStatus}
@@ -104,42 +121,43 @@ export function FieldOperationsPanel({
             <FieldManagementPanel surveyId={surveyId} variables={variables} embedded nested />
           </div>
         )}
-        {view === 'team' && (
-          <div className="mx-auto max-w-5xl space-y-10 p-4 sm:p-6 pb-10">
-            <section>
-              <header className="mb-4 flex items-start gap-2">
-                <Users size={20} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Interviewers</h2>
-                  <p className="text-xs text-slate-500">
-                    Throughput, completion rates, and rejection rates by interviewer.
-                  </p>
-                </div>
-              </header>
-              <FieldTeamPanel surveyId={surveyId} variables={variables} embedded />
-            </section>
 
-            <section className="border-t border-slate-200 pt-8">
-              <header className="mb-4 flex items-start gap-2">
-                <ShieldCheck size={20} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Response QC</h2>
-                  <p className="text-xs text-slate-500">
-                    Flagged records, manual review, and QC settings — check alongside interviewer stats.
-                  </p>
-                </div>
-              </header>
-              <Suspense fallback={<PanelLoader />}>
-                <ResponseQCPanel
-                  surveyId={surveyId}
-                  variables={variables}
-                  embedded
-                  qcApprovedCount={qcApprovedCount}
-                  onUseQcApproved={onUseQcApproved}
-                  onReviewChanged={onReviewChanged}
-                />
-              </Suspense>
-            </section>
+        {view === 'quality' && (
+          <div className="mx-auto max-w-5xl p-4 sm:p-6 pb-10">
+            <header className="mb-4 flex items-start gap-2">
+              <ShieldCheck size={20} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Response quality</h2>
+                <p className="text-xs text-slate-500">
+                  Run QC scans, review flagged records, and configure checks including GPS proximity.
+                </p>
+              </div>
+            </header>
+            <Suspense fallback={<PanelLoader />}>
+              <ResponseQCPanel
+                surveyId={surveyId}
+                variables={variables}
+                embedded
+                qcApprovedCount={qcApprovedCount}
+                onUseQcApproved={onUseQcApproved}
+                onReviewChanged={onReviewChanged}
+              />
+            </Suspense>
+          </div>
+        )}
+
+        {view === 'team' && (
+          <div className="mx-auto max-w-5xl p-4 sm:p-6 pb-10">
+            <header className="mb-4 flex items-start gap-2">
+              <Users size={20} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Interviewers</h2>
+                <p className="text-xs text-slate-500">
+                  Throughput, completion rates, and rejection rates by interviewer.
+                </p>
+              </div>
+            </header>
+            <FieldTeamPanel surveyId={surveyId} variables={variables} embedded />
           </div>
         )}
       </div>

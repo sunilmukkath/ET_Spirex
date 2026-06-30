@@ -108,6 +108,9 @@ def get_qc_config(survey_id: int) -> QcConfig:
             interviewer_variable_id=(str(data["interviewer_variable_id"]).strip() or None)
             if data.get("interviewer_variable_id")
             else None,
+            gps_variable_id=(str(data["gps_variable_id"]).strip() or None)
+            if data.get("gps_variable_id")
+            else None,
             straight_line_variable_ids=straight_line_variable_ids,
         )
     except (json.JSONDecodeError, OSError, ValueError):
@@ -125,6 +128,7 @@ def set_qc_config(survey_id: int, config: QcConfig) -> QcConfig:
         thresholds=_normalize_thresholds(config.thresholds.model_dump()),
         custom_rules=_normalize_custom_rules([r.model_dump() for r in config.custom_rules]),
         interviewer_variable_id=(config.interviewer_variable_id or None),
+        gps_variable_id=(config.gps_variable_id or None),
         straight_line_variable_ids=(
             None
             if config.straight_line_variable_ids is None

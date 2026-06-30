@@ -56,7 +56,7 @@ export const QC_CHECKS: {
   {
     id: 'interviewer_gps_proximity',
     title: 'Interviewer GPS proximity',
-    description: 'Two interviews by the same interviewer within 10 metres (requires GPS in export)',
+    description: 'Two interviews by the same interviewer within the configured distance (select GPS question in QC settings)',
     severity: 'high',
   },
   {

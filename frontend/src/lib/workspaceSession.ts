@@ -3,6 +3,9 @@ export interface SurveyWorkspaceSession {
   view?: string
   responses: string
   selectedQuestionId?: string | null
+  sideRowIds?: string[]
+  bannerLayers?: string[][]
+  metric?: string
   updatedAt: number
 }
 

@@ -1,7 +1,28 @@
 import type { BannerRequest, BannerResult } from '../api/client'
 
 /** Max side-row tables per API request (backend builds tables in parallel per chunk). */
-export const BANNER_TABLE_CHUNK_SIZE = 8
+export const BANNER_TABLE_CHUNK_SIZE = 12
+
+/** Concurrent chunk requests — balances speed vs server load. */
+export const BANNER_CHUNK_CONCURRENCY = 2
+
+/** Update crosstab UI every N chunks to cut React re-renders during large builds. */
+export const BANNER_UI_UPDATE_EVERY = 2
+
+const WARMUP_RECENT_MS = 120_000
+
+let lastWarmupAt = 0
+let lastWarmupKey = ''
+
+export function markSurveyWarmed(surveyId: number, completionStatus: string) {
+  lastWarmupAt = Date.now()
+  lastWarmupKey = `${surveyId}:${completionStatus}`
+}
+
+export function shouldWarmupSurvey(surveyId: number, completionStatus: string): boolean {
+  if (lastWarmupKey !== `${surveyId}:${completionStatus}`) return true
+  return Date.now() - lastWarmupAt > WARMUP_RECENT_MS
+}
 
 export function chunkBannerRowIds(rowIds: string[]): string[][] {
   if (rowIds.length <= BANNER_TABLE_CHUNK_SIZE) return [rowIds]
@@ -47,4 +68,44 @@ export function bannerChunkRequest(request: BannerRequest, chunkIds: string[]): 
     row_variable_ids: chunkIds,
     row_filters,
   }
+}
+
+export async function runBannerChunksParallel<T>({
+  chunks,
+  concurrency,
+  runChunk,
+  onChunkComplete,
+  signal,
+}: {
+  chunks: string[][]
+  concurrency: number
+  runChunk: (chunkIds: string[], chunkIndex: number) => Promise<T>
+  onChunkComplete?: (chunkIndex: number, result: T, completedRows: number, totalRows: number) => void
+  signal?: AbortSignal
+}): Promise<T[]> {
+  const totalRows = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+  const results: T[] = new Array(chunks.length)
+  let nextIndex = 0
+  let completedRows = 0
+
+  async function worker() {
+    while (true) {
+      const index = nextIndex
+      nextIndex += 1
+      if (index >= chunks.length) return
+      if (signal?.aborted) return
+
+      const chunkIds = chunks[index]
+      const result = await runChunk(chunkIds, index)
+      if (signal?.aborted) return
+
+      results[index] = result
+      completedRows += chunkIds.length
+      onChunkComplete?.(index, result, completedRows, totalRows)
+    }
+  }
+
+  const workerCount = Math.min(Math.max(1, concurrency), chunks.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return results
 }
