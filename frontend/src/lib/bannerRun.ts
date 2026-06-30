@@ -1,7 +1,7 @@
 import type { BannerRequest, BannerResult } from '../api/client'
 
-/** Max side-row tables per API request (keeps each call under the analysis timeout). */
-export const BANNER_TABLE_CHUNK_SIZE = 3
+/** Max side-row tables per API request (backend builds tables in parallel per chunk). */
+export const BANNER_TABLE_CHUNK_SIZE = 8
 
 export function chunkBannerRowIds(rowIds: string[]): string[][] {
   if (rowIds.length <= BANNER_TABLE_CHUNK_SIZE) return [rowIds]

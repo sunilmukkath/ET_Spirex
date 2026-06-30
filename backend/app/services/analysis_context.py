@@ -14,8 +14,8 @@ from app.services.response_store import get_responses
 
 _CONTEXT_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any], pd.DataFrame]] = {}
 _FILTER_CACHE: dict[tuple[int, str, str], tuple[float, pd.DataFrame]] = {}
-_CONTEXT_TTL = 120
-_FILTER_TTL = 60
+_CONTEXT_TTL = 300
+_FILTER_TTL = 120
 _META_LOCK = threading.Lock()
 _KEY_LOCKS: dict[tuple[int, str], threading.Lock] = {}
 

@@ -4,12 +4,14 @@ import itertools
 import math
 import re
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pandas as pd
 from scipy.stats import chi2_contingency
 
 from app.services.answer_labels import (
+    build_answer_maps,
     builtin_scale_options,
     canonical_answer_code,
     label_for_answer,
@@ -26,6 +28,60 @@ from app.services.variable_columns import find_variable_column as _find_column
 from app.services.weighting import weight_series, weighted_mean, weighted_pct, weighted_sum
 
 Z_THRESHOLDS = {0.90: 1.645, 0.95: 1.96, 0.99: 2.576}
+_CHECKBOX_YES = frozenset({"Y", "1", "yes", "Yes", "y"})
+_BANNER_PARALLEL_MIN = 2
+_BANNER_PARALLEL_WORKERS = 4
+
+
+def _canonical_series(var: dict[str, Any], series: pd.Series) -> pd.Series:
+    """Map raw export values to canonical answer codes once per column."""
+    _, lookup_to_code = build_answer_maps(var)
+    out = pd.Series("", index=series.index, dtype=object)
+    valid = series.notna()
+    if not valid.any():
+        return out.astype(str)
+    stripped = series[valid].astype(str).str.strip()
+    nonempty = stripped != ""
+    if not nonempty.any():
+        return out.astype(str)
+    idx = stripped.index[nonempty]
+    normed = stripped[nonempty].map(normalize_answer_code)
+
+    def _lookup(value: str) -> str:
+        if value in lookup_to_code:
+            return lookup_to_code[value]
+        lower = value.lower()
+        if lower in lookup_to_code:
+            return lookup_to_code[lower]
+        return value
+
+    out.loc[idx] = normed.map(_lookup).values
+    return out.astype(str)
+
+
+def _mask_for_banner(df: pd.DataFrame, banner: dict[str, Any]) -> pd.Series:
+    mask = pd.Series(True, index=df.index)
+    filters = banner.get("filters")
+    specs = filters if filters else [banner]
+    for spec in specs:
+        col = spec["filter_col"]
+        if col not in df.columns:
+            mask &= False
+            continue
+        col_series = df[col].astype(str)
+        if spec.get("is_checkbox"):
+            mask &= col_series.isin(_CHECKBOX_YES)
+        else:
+            mask &= col_series == str(spec["filter_value"])
+    return mask
+
+
+def _banner_masks(df: pd.DataFrame, banner_columns: list[dict[str, Any]]) -> list[pd.Series]:
+    return [_mask_for_banner(df, banner) for banner in banner_columns]
+
+
+def _banner_mask_bases(masks: list[pd.Series]) -> list[int]:
+    return [int(mask.sum()) for mask in masks]
 
 
 def _scale_code_sets(var: dict[str, Any], series: pd.Series | None = None) -> tuple[set[str], set[str], list[str]]:
@@ -264,26 +320,34 @@ def run_banner_table(
         schema, df_raw = load_analysis_context(survey_id, completion_status=completion_status)
     tables = []
     banner_setup_cache: dict[str, dict[str, Any]] = {}
-    for rid in row_ids:
+
+    def setup_key_for(rid: str) -> str:
         row_f = _row_filters(rid)
         if filter_tree:
-            df_for_banners = _apply_filters(df_raw, schema, row_f) if row_f else df_raw
-            setup_key = f"{_filter_tree_digest(filter_tree)}:{_filters_digest(row_f)}"
-        else:
-            df_for_banners = _apply_filters(df_raw, schema, row_f)
-            setup_key = _filters_digest(row_f)
+            return f"{_filter_tree_digest(filter_tree)}:{_filters_digest(row_f)}"
+        return _filters_digest(row_f)
 
-        banner_setup = banner_setup_cache.get(setup_key)
-        if banner_setup is None:
-            banner_setup = _resolve_banner_columns(
-                schema,
-                banner_variable_ids=banner_variable_ids,
-                banner_layers=banner_layers,
-                df=df_for_banners,
-            )
-            banner_setup_cache[setup_key] = banner_setup
+    for rid in row_ids:
+        key = setup_key_for(rid)
+        if key in banner_setup_cache:
+            continue
+        row_f = _row_filters(rid)
+        df_for_banners = (
+            _apply_filters(df_raw, schema, row_f)
+            if row_f or not filter_tree
+            else df_raw
+        )
+        banner_setup_cache[key] = _resolve_banner_columns(
+            schema,
+            banner_variable_ids=banner_variable_ids,
+            banner_layers=banner_layers,
+            df=df_for_banners,
+        )
 
-        table = _build_banner_table(
+    def build_row(rid: str) -> dict[str, Any]:
+        row_f = _row_filters(rid)
+        banner_setup = banner_setup_cache[setup_key_for(rid)]
+        return _build_banner_table(
             survey_id,
             row_variable_id=rid,
             banner_variable_ids=banner_variable_ids,
@@ -301,7 +365,13 @@ def run_banner_table(
             df_raw=df_raw,
             banner_setup=banner_setup,
         )
-        tables.append(table)
+
+    if len(row_ids) >= _BANNER_PARALLEL_MIN:
+        workers = min(_BANNER_PARALLEL_WORKERS, len(row_ids))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            tables = list(pool.map(build_row, row_ids))
+    else:
+        tables = [build_row(rid) for rid in row_ids]
 
     errors = [t.get("error") for t in tables if t.get("error")]
     if errors and all(t.get("error") for t in tables):
@@ -374,17 +444,19 @@ def _build_banner_table(
     if not banner_columns:
         return {"error": "Banner variables have no valid data columns"}
 
+    column_masks = _banner_masks(df, banner_columns)
+
     if row_var["kind"] in ("single",) or (
         row_var["kind"] == "array" and row_var["subquestions"]
     ):
         if row_var["kind"] == "single":
-            table = _banner_single(row_var, banner_columns, df, resolved_metric)
+            table = _banner_single(row_var, banner_columns, df, resolved_metric, column_masks=column_masks)
         else:
-            table = _banner_array(row_var, banner_columns, df, resolved_metric)
+            table = _banner_array(row_var, banner_columns, df, resolved_metric, column_masks=column_masks)
     elif row_var["kind"] == "multi":
-        table = _banner_multi(row_var, banner_columns, df)
+        table = _banner_multi(row_var, banner_columns, df, column_masks=column_masks)
     elif row_var["kind"] == "numeric":
-        table = _banner_numeric(row_var, banner_columns, df, resolved_metric)
+        table = _banner_numeric(row_var, banner_columns, df, resolved_metric, column_masks=column_masks)
     else:
         return {"error": f"Banner analysis not supported for {row_var['type_label']}"}
 
@@ -781,21 +853,7 @@ def _build_header_rows(
 
 
 def _filter_df_by_banner(df: pd.DataFrame, banner: dict[str, Any]) -> pd.DataFrame:
-    subset = df
-    filters = banner.get("filters")
-    if filters:
-        for f in filters:
-            col = f["filter_col"]
-            if f.get("is_checkbox"):
-                subset = subset[subset[col].astype(str).isin(["Y", "1", "yes", "Yes"])]
-            else:
-                subset = subset[subset[col].astype(str) == str(f["filter_value"])]
-        return subset
-
-    col = banner["filter_col"]
-    if banner.get("is_checkbox"):
-        return subset[subset[col].astype(str).isin(["Y", "1", "yes", "Yes"])]
-    return subset[subset[col].astype(str) == str(banner["filter_value"])]
+    return df[_mask_for_banner(df, banner)]
 
 
 def _build_banner_columns(
@@ -816,7 +874,7 @@ def _natural_sort_key(value: str) -> tuple[int, Any]:
 
 
 def _ordered_categories(var: dict[str, Any], series: pd.Series) -> list[str]:
-    canonical = series.dropna().astype(str).str.strip().map(lambda v: canonical_answer_code(var, v))
+    canonical = _canonical_series(var, series)
     canonical = canonical[canonical != ""]
     if var.get("answer_options"):
         codes = [normalize_answer_code(o["code"]) for o in var["answer_options"]]
@@ -848,24 +906,37 @@ def _banner_single(
     banner_columns: list[dict[str, Any]],
     df: pd.DataFrame,
     metric: str,
+    *,
+    column_masks: list[pd.Series] | None = None,
 ) -> dict[str, Any]:
     col = _find_column(row_var, df)
     if col is None:
         return {"error": f"Data column for '{row_var['text']}' not found in responses"}
 
     if metric == "mean":
-        return _banner_numeric_row(row_var, banner_columns, df, col)
+        masks = column_masks or _banner_masks(df, banner_columns)
+        return _banner_numeric_row(row_var, banner_columns, df, col, metric, column_masks=masks)
 
+    canonical = _canonical_series(row_var, df[col])
     categories = _ordered_categories(row_var, df[col])
+    masks = column_masks or _banner_masks(df, banner_columns)
+    all_masks = [pd.Series(True, index=df.index)] + masks
+    bases = _banner_mask_bases(all_masks)
+
     rows = []
     for cat in categories:
-        row_label = _label_for_code(row_var, cat)
-        cells = _distribution_cells(df, col, cat, banner_columns, row_var=row_var)
-        rows.append({"code": cat, "label": row_label, "cells": cells})
+        cat_mask = canonical == str(cat)
+        cells = []
+        for mask, base in zip(all_masks, bases):
+            count = int((cat_mask & mask).sum())
+            pct = round((count / base) * 100, 1) if base else 0.0
+            cells.append({"count": count, "base": base, "col_pct": pct})
+        rows.append({"code": cat, "label": _label_for_code(row_var, cat), "cells": cells})
 
-    total_cells = _distribution_cells(
-        df, col, None, banner_columns, is_total_row=True, row_var=row_var
-    )
+    total_cells = [
+        {"count": base, "base": base, "col_pct": 100.0 if base else 0.0}
+        for base in bases
+    ]
     rows.append({"code": "_total", "label": "Total", "cells": total_cells, "is_total": True})
 
     headers = [{"key": "total", "label": "Total", "banner_id": None}] + [
@@ -889,29 +960,24 @@ def _distribution_cells(
     *,
     is_total_row: bool = False,
     row_var: dict[str, Any] | None = None,
+    column_masks: list[pd.Series] | None = None,
 ) -> list[dict[str, Any]]:
-    cells: list[dict[str, Any]] = []
-
-    def _cell(subset: pd.DataFrame, match_value: str | None) -> dict[str, Any]:
-        n = len(subset)
-        if is_total_row:
-            count = n
-        else:
-            col_series = subset[col].dropna().astype(str).str.strip()
-            if row_var:
-                canonical = col_series.map(lambda v: canonical_answer_code(row_var, v))
-                count = int((canonical == str(match_value)).sum())
-            else:
-                count = int((col_series == str(match_value)).sum())
-        pct = round((count / n) * 100, 1) if n else 0.0
-        return {"count": count, "base": n, "col_pct": pct}
-
-    cells.append(_cell(df, category))
-
-    for banner in banner_columns:
-        subset = _filter_df_by_banner(df, banner)
-        cells.append(_cell(subset, category))
-
+    """Legacy helper — prefer vectorized path in _banner_single."""
+    canonical = _canonical_series(row_var, df[col]) if row_var else df[col].astype(str).str.strip()
+    masks = column_masks or _banner_masks(df, banner_columns)
+    all_masks = [pd.Series(True, index=df.index)] + masks
+    bases = _banner_mask_bases(all_masks)
+    if is_total_row:
+        return [
+            {"count": base, "base": base, "col_pct": 100.0 if base else 0.0}
+            for base in bases
+        ]
+    cat_mask = canonical == str(category)
+    cells = []
+    for mask, base in zip(all_masks, bases):
+        count = int((cat_mask & mask).sum())
+        pct = round((count / base) * 100, 1) if base else 0.0
+        cells.append({"count": count, "base": base, "col_pct": pct})
     return cells
 
 
@@ -919,31 +985,26 @@ def _banner_multi(
     row_var: dict[str, Any],
     banner_columns: list[dict[str, Any]],
     df: pd.DataFrame,
+    *,
+    column_masks: list[pd.Series] | None = None,
 ) -> dict[str, Any]:
+    masks = column_masks or _banner_masks(df, banner_columns)
+    all_masks = [pd.Series(True, index=df.index)] + masks
+    bases = _banner_mask_bases(all_masks)
     rows = []
     for sq in row_var["subquestions"]:
         col = sq["column"]
         if col not in df.columns:
             continue
+        yes = df[col].astype(str).isin(_CHECKBOX_YES)
         cells = []
-        total_n = len(df)
-        total_yes = int(df[col].astype(str).isin(["Y", "1", "yes", "Yes"]).sum())
-        cells.append(
-            {
-                "count": total_yes,
-                "base": total_n,
-                "col_pct": round((total_yes / total_n) * 100, 1) if total_n else 0,
-            }
-        )
-        for banner in banner_columns:
-            subset = _filter_df_by_banner(df, banner)
-            n = len(subset)
-            yes = int(subset[col].astype(str).isin(["Y", "1", "yes", "Yes"]).sum()) if n else 0
+        for mask, base in zip(all_masks, bases):
+            count = int((yes & mask).sum())
             cells.append(
                 {
-                    "count": yes,
-                    "base": n,
-                    "col_pct": round((yes / n) * 100, 1) if n else 0,
+                    "count": count,
+                    "base": base,
+                    "col_pct": round((count / base) * 100, 1) if base else 0,
                 }
             )
         rows.append({"code": sq["code"], "label": sq["label"], "cells": cells})
@@ -966,9 +1027,12 @@ def _banner_array(
     banner_columns: list[dict[str, Any]],
     df: pd.DataFrame,
     metric: str,
+    *,
+    column_masks: list[pd.Series] | None = None,
 ) -> dict[str, Any]:
+    masks = column_masks or _banner_masks(df, banner_columns)
     if metric in ("mean", "top2box", "bottom2box"):
-        return _banner_array_metrics(row_var, banner_columns, df, metric)
+        return _banner_array_metrics(row_var, banner_columns, df, metric, column_masks=masks)
 
     answer_options = row_var.get("answer_options") or []
     if not answer_options:
@@ -984,7 +1048,7 @@ def _banner_array(
         if col not in df.columns:
             continue
         temp_var = {**row_var, "columns": [col], "text": sq["label"]}
-        section = _banner_single(temp_var, banner_columns, df, "distribution")
+        section = _banner_single(temp_var, banner_columns, df, "distribution", column_masks=masks)
         section["subquestion"] = sq["label"]
         sections.append(section)
 
@@ -1000,13 +1064,16 @@ def _banner_array_metrics(
     banner_columns: list[dict[str, Any]],
     df: pd.DataFrame,
     metric: str,
+    *,
+    column_masks: list[pd.Series] | None = None,
 ) -> dict[str, Any]:
+    masks = column_masks or _banner_masks(df, banner_columns)
     rows = []
     for sq in row_var["subquestions"]:
         col = sq["column"]
         if col not in df.columns:
             continue
-        cells = _metric_cells(df, col, banner_columns, metric, row_var)
+        cells = _metric_cells(df, col, banner_columns, metric, row_var, column_masks=masks)
         rows.append({"code": sq["code"], "label": sq["label"], "cells": cells})
 
     headers = [{"key": "total", "label": "Total", "banner_id": None}] + [
@@ -1027,12 +1094,15 @@ def _banner_numeric(
     banner_columns: list[dict[str, Any]],
     df: pd.DataFrame,
     metric: str,
+    *,
+    column_masks: list[pd.Series] | None = None,
 ) -> dict[str, Any]:
+    masks = column_masks or _banner_masks(df, banner_columns)
     if row_var["ls_type"] == "K" and row_var["subquestions"]:
-        return _banner_array_metrics(row_var, banner_columns, df, metric)
+        return _banner_array_metrics(row_var, banner_columns, df, metric, column_masks=masks)
 
     col = row_var["columns"][0] if row_var["columns"] else row_var["code"]
-    return _banner_numeric_row(row_var, banner_columns, df, col, metric)
+    return _banner_numeric_row(row_var, banner_columns, df, col, metric, column_masks=masks)
 
 
 def _banner_numeric_row(
@@ -1041,8 +1111,11 @@ def _banner_numeric_row(
     df: pd.DataFrame,
     col: str,
     metric: str = "mean",
+    *,
+    column_masks: list[pd.Series] | None = None,
 ) -> dict[str, Any]:
-    cells = _metric_cells(df, col, banner_columns, metric, row_var)
+    masks = column_masks or _banner_masks(df, banner_columns)
+    cells = _metric_cells(df, col, banner_columns, metric, row_var, column_masks=masks)
     headers = [{"key": "total", "label": "Total", "banner_id": None}] + [
         {"key": f"{c['banner_id']}_{c['category_code']}", "label": c["header"], "banner_id": c["banner_id"]}
         for c in banner_columns
@@ -1061,25 +1134,27 @@ def _metric_cells(
     banner_columns: list[dict[str, Any]],
     metric: str,
     row_var: dict[str, Any],
+    *,
+    column_masks: list[pd.Series] | None = None,
 ) -> list[dict[str, Any]]:
-    cells = [_compute_metric(df, col, metric, row_var)]
-    for banner in banner_columns:
-        subset = _filter_df_by_banner(df, banner)
-        cells.append(_compute_metric(subset, col, metric, row_var))
-    return cells
+    masks = column_masks or _banner_masks(df, banner_columns)
+    all_masks = [pd.Series(True, index=df.index)] + masks
+    return [_compute_metric_masked(df, col, metric, row_var, mask) for mask in all_masks]
 
 
-def _compute_metric(
+def _compute_metric_masked(
     df: pd.DataFrame,
     col: str,
     metric: str,
     row_var: dict[str, Any],
+    mask: pd.Series,
 ) -> dict[str, Any]:
     if col not in df.columns:
         return {"value": None, "base": 0}
 
     numeric = pd.to_numeric(df[col], errors="coerce")
-    valid = numeric.dropna()
+    valid_mask = mask & numeric.notna()
+    valid = numeric[valid_mask]
     n = int(valid.count())
     if n == 0:
         return {"value": None, "base": 0}
@@ -1095,7 +1170,7 @@ def _compute_metric(
         top_codes = {str(int(valid.max())), str(int(valid.max()) - 1)} if valid.max() >= 2 else set()
         bottom_codes = {"1", "2"}
 
-    str_vals = df[col].astype(str)
+    str_vals = df.loc[mask, col].astype(str)
     if metric == "top2box":
         count = int(str_vals.isin(top_codes).sum())
         return {"value": round((count / n) * 100, 1), "base": n, "col_pct": round((count / n) * 100, 1), "count": count}
