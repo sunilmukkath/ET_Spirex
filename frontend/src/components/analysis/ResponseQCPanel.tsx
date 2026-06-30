@@ -39,6 +39,7 @@ interface Props {
   onUseQcApproved?: () => void
   onReviewChanged?: () => void
   qcApprovedCount?: number | null
+  embedded?: boolean
 }
 
 function defaultQcConfig(): QcConfig {
@@ -83,7 +84,7 @@ function saveCached(surveyId: number, result: DataQualityResult) {
   }
 }
 
-export function ResponseQCPanel({ surveyId, variables = [], onUseQcApproved, onReviewChanged, qcApprovedCount }: Props) {
+export function ResponseQCPanel({ surveyId, variables = [], onUseQcApproved, onReviewChanged, qcApprovedCount, embedded }: Props) {
   return (
     <QcErrorBoundary onReset={() => sessionStorage.removeItem(qcCacheKey(surveyId))}>
       <ResponseQCPanelInner
@@ -92,12 +93,13 @@ export function ResponseQCPanel({ surveyId, variables = [], onUseQcApproved, onR
         onUseQcApproved={onUseQcApproved}
         onReviewChanged={onReviewChanged}
         qcApprovedCount={qcApprovedCount}
+        embedded={embedded}
       />
     </QcErrorBoundary>
   )
 }
 
-function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onReviewChanged, qcApprovedCount }: Props) {
+function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onReviewChanged, qcApprovedCount, embedded }: Props) {
   const [result, setResult] = useState<DataQualityResult | null>(() => loadCached(surveyId)?.result ?? null)
   const [lastRunAt, setLastRunAt] = useState<number | null>(() => loadCached(surveyId)?.at ?? null)
   const [loading, setLoading] = useState(false)
@@ -456,9 +458,10 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
+    <div className={embedded ? '' : 'min-h-0 flex-1 overflow-y-auto p-6'}>
+      <div className={embedded ? 'space-y-5' : 'mx-auto max-w-5xl space-y-5'}>
         <div className="flex flex-wrap items-center justify-between gap-3">
+          {!embedded && (
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Response QC</h2>
             <p className="text-xs text-slate-500">
@@ -467,6 +470,14 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
                 : 'Completed interviews only'}
             </p>
           </div>
+          )}
+          {embedded && (
+          <p className="text-xs text-slate-500">
+            {lastRunAt
+              ? `Last scan ${new Date(lastRunAt).toLocaleString()} · completed interviews only`
+              : 'Completed interviews only'}
+          </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             {onUseQcApproved && result && (
               <button

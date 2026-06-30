@@ -223,7 +223,7 @@ export function DataPanel({
           <div>
             <div className="flex items-center gap-2">
               <Database size={18} className="text-[var(--et-teal)]" />
-              <h2 className="text-lg font-semibold text-slate-900">Raw data</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Raw Data</h2>
             </div>
             <p className="mt-1 text-sm text-slate-500">
               Survey responses with custom recoded variables appended as columns.
@@ -485,7 +485,7 @@ export function DataPanel({
           onClick={onOpenVariables}
           className="font-medium text-[var(--et-teal-dark)] hover:underline"
         >
-          Variables
+          Data Setup
         </button>{' '}
         tab, then return here to view recoded values. Saved variables reload automatically on your next sign-in.
       </div>

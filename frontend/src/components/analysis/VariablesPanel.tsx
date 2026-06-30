@@ -421,7 +421,7 @@ export function VariablesPanel({
         <div className="mx-auto max-w-5xl space-y-6 p-4 pb-16 sm:p-6 sm:pb-20">
         <div className="et-panel flex flex-wrap items-start justify-between gap-4 p-5">
           <div>
-            <h2 className="et-section-title">Question & variable setup</h2>
+            <h2 className="et-section-title">Data Setup</h2>
             <p className="mt-1 text-sm text-slate-500">
               Create recodes, net scores, and combined nets per question.
             </p>

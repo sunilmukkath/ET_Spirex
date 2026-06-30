@@ -4,7 +4,6 @@ import {
   ClipboardList,
   Layers,
   Loader2,
-  ShieldCheck,
   Table2,
 } from 'lucide-react'
 import { api, type SurveyOverview } from '../../api/client'
@@ -153,15 +152,9 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
           />
           <QuickLink
             icon={<ClipboardList size={18} />}
-            title="Field team"
-            desc="Fielding pace, team performance, and quota targets"
-            onClick={() => onNavigate('fields', 'fielding')}
-          />
-          <QuickLink
-            icon={<ShieldCheck size={18} />}
-            title="Response QC"
-            desc={`${overview.custom_rule_count} custom rules configured`}
-            onClick={() => onNavigate('quality')}
+            title="Field manage"
+            desc="Fielding, quotas, interviewer stats, and response QC"
+            onClick={() => onNavigate('fields', 'team')}
           />
         </div>
       </div>

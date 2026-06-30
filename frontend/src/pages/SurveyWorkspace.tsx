@@ -52,9 +52,6 @@ import type { ChartTypeId } from '../lib/chartTypes'
 const DataPanel = lazy(() =>
   import('../components/analysis/DataPanel').then((m) => ({ default: m.DataPanel })),
 )
-const ResponseQCPanel = lazy(() =>
-  import('../components/analysis/ResponseQCPanel').then((m) => ({ default: m.ResponseQCPanel })),
-)
 const ChartsPanel = lazy(() =>
   import('../components/analysis/ChartsPanel').then((m) => ({ default: m.ChartsPanel })),
 )
@@ -82,7 +79,6 @@ type Mode =
   | 'explore'
   | 'charts'
   | 'reports'
-  | 'quality'
   | 'variables'
   | 'fields'
   | 'data'
@@ -95,7 +91,7 @@ function parseMode(raw: string | null): Mode {
   if (raw === 'fielding' || raw === 'monitor' || raw === 'fieldteam' || raw === 'field-team') return 'fields'
   if (raw === 'reports' || raw === 'report-builder') return 'reports'
   if (raw === 'charts') return 'charts'
-  if (raw === 'quality') return 'quality'
+  if (raw === 'quality') return 'fields'
   if (raw === 'variables') return 'variables'
   if (raw === 'fields' || raw === 'quotas' || raw === 'field-management') return 'fields'
   if (raw === 'data') return 'data'
@@ -110,7 +106,15 @@ function parseAnalyzeView(rawMode: string | null, rawView: string | null): Analy
 }
 
 function parseFieldView(rawMode: string | null, rawView: string | null): FieldView {
-  if (rawMode === 'fieldteam' || rawMode === 'field-team' || rawView === 'team') return 'team'
+  if (
+    rawMode === 'quality' ||
+    rawMode === 'fieldteam' ||
+    rawMode === 'field-team' ||
+    rawView === 'team' ||
+    rawView === 'quality'
+  ) {
+    return 'team'
+  }
   return 'fielding'
 }
 
@@ -210,7 +214,7 @@ export function SurveyWorkspace() {
       }, { replace: true })
       return
     }
-    if (raw === 'fieldteam' || raw === 'field-team') {
+    if (raw === 'fieldteam' || raw === 'field-team' || raw === 'quality') {
       setSearchParams((prev) => {
         prev.set('mode', 'fields')
         prev.set('view', 'team')
@@ -307,8 +311,11 @@ export function SurveyWorkspace() {
     (targetMode: string, view?: string) => {
       setSearchParams((prev) => {
         prev.set('mode', targetMode)
-        if (targetMode === 'fields' && (view === 'fielding' || view === 'team' || view === 'monitor' || view === 'quotas')) {
-          prev.set('view', view === 'team' ? 'team' : 'fielding')
+        if (targetMode === 'fields' && (view === 'fielding' || view === 'team' || view === 'quality' || view === 'monitor' || view === 'quotas')) {
+          prev.set('view', view === 'fielding' || view === 'monitor' || view === 'quotas' ? 'fielding' : 'team')
+        } else if (targetMode === 'quality') {
+          prev.set('mode', 'fields')
+          prev.set('view', 'team')
         } else if (view === 'compare') {
           prev.set('view', 'compare')
         } else if (view === 'profile') {
@@ -744,7 +751,6 @@ export function SurveyWorkspace() {
 
   const showsQuestionNav =
     mode !== 'home' &&
-    mode !== 'quality' &&
     mode !== 'variables' &&
     mode !== 'fields' &&
     mode !== 'reports' &&
@@ -805,7 +811,7 @@ export function SurveyWorkspace() {
             {(completionStatus === 'qc_approved' || qcSummary?.has_review) && (
               <button
                 type="button"
-                onClick={() => setMode('quality')}
+                onClick={() => setFieldView('team')}
                 className="inline-flex items-center gap-1 rounded-lg border border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/50 px-2.5 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] transition hover:bg-[var(--et-teal-light)]"
                 title="Review flagged responses and exclusions"
               >
@@ -851,16 +857,13 @@ export function SurveyWorkspace() {
           <span className="hidden shrink-0 et-kicker lg:inline">Manage</span>
           <div className="et-segment">
             <ModeButton active={mode === 'fields'} onClick={() => setMode('fields')} icon={<ClipboardList size={15} />}>
-              Field team
+              Field manage
             </ModeButton>
             <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
-              Setup
-            </ModeButton>
-            <ModeButton active={mode === 'quality'} onClick={() => setMode('quality')} icon={<ShieldCheck size={15} />}>
-              Quality
+              Data Setup
             </ModeButton>
             <ModeButton active={mode === 'data'} onClick={() => setMode('data')} icon={<Database size={15} />}>
-              Data
+              Raw Data
             </ModeButton>
           </div>
         </div>
@@ -957,6 +960,9 @@ export function SurveyWorkspace() {
               variables={activeSchema?.variables ?? []}
               view={fieldView}
               onViewChange={setFieldView}
+              qcApprovedCount={qcSummary?.qc_approved_count ?? null}
+              onUseQcApproved={() => setCompletionStatus('qc_approved')}
+              onReviewChanged={handleQcReviewChanged}
             />
           )}
 
@@ -1040,21 +1046,6 @@ export function SurveyWorkspace() {
             />
           )}
 
-          {mode === 'quality' && (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <Suspense fallback={<PanelLoader />}>
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                  <ResponseQCPanel
-                    surveyId={surveyId}
-                    variables={activeSchema?.variables ?? []}
-                    qcApprovedCount={qcSummary?.qc_approved_count ?? null}
-                    onUseQcApproved={() => setCompletionStatus('qc_approved')}
-                    onReviewChanged={handleQcReviewChanged}
-                  />
-                </div>
-              </Suspense>
-            </div>
-          )}
 
           {mode === 'multivariate' && (
             <Suspense fallback={<PanelLoader />}>

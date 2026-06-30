@@ -563,7 +563,7 @@ function SurveyCard({
         <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
           <div className="flex gap-2 opacity-0 transition group-hover:opacity-100">
             <QuickAction to={`/projects/${project.id}?mode=charts`} icon={<BarChart3 size={12} />} label="Charts" />
-            <QuickAction to={`/projects/${project.id}?mode=quality`} icon={<ShieldCheck size={12} />} label="QC" />
+            <QuickAction to={`/projects/${project.id}?mode=fields&view=team`} icon={<ShieldCheck size={12} />} label="Field manage" />
           </div>
           <span className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-[var(--et-teal)] opacity-0 transition group-hover:opacity-100">
             Open
