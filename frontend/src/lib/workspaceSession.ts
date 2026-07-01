@@ -14,7 +14,7 @@ export interface UserAppSession {
   lastSurveyId?: number
   lastSurveyTitle?: string
   lastPath?: string
-  dashboardViewMode?: 'grid' | 'table'
+  dashboardViewMode?: 'strips' | 'table'
   dashboardSortKey?: string
   updatedAt: number
 }

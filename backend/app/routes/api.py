@@ -105,12 +105,22 @@ from app.services.project_workflow_store import (
     workflow_access_summary,
 )
 from app.models.team_preset import TeamPresetCreate
+from app.models.qual_asset import QualAssetCreate, QualAssetUpdate, QualSummaryRequest
 from app.services.team_preset_store import (
     apply_team_preset,
     create_team_preset,
     delete_team_preset,
     list_team_presets,
 )
+from app.services.qual_store import (
+    create_qual_asset,
+    delete_qual_asset,
+    get_qual_asset,
+    list_qual_assets,
+    search_qual_assets,
+    update_qual_asset,
+)
+from app.services.qual_analysis import generate_qual_summary
 from app.services.pinned_survey_store import get_pinned_survey_ids, set_pinned_survey_ids
 from app.services.team_registry_store import (
     get_global_role,
@@ -805,6 +815,95 @@ def apply_team_preset_route(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return preset.model_dump()
+
+
+def _require_qual_access(username: str | None, survey_id: int) -> str:
+    if not username:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if can_manage_project_team(username, survey_id):
+        return username
+    workflow = get_project_workflow(survey_id)
+    if any(m.username == username for m in workflow.members):
+        return username
+    if can_access_module(username, survey_id, "research"):
+        return username
+    raise HTTPException(status_code=403, detail="No access to qual library")
+
+
+@router.get("/projects/{survey_id}/qual/assets")
+def get_qual_assets(
+    survey_id: int,
+    authorization: str | None = Header(default=None),
+):
+    _require_qual_access(_optional_username(authorization), survey_id)
+    assets = list_qual_assets(survey_id)
+    return {"assets": [a.model_dump() for a in assets]}
+
+
+@router.post("/projects/{survey_id}/qual/assets")
+def post_qual_asset(
+    survey_id: int,
+    body: QualAssetCreate,
+    authorization: str | None = Header(default=None),
+):
+    username = _require_qual_access(_optional_username(authorization), survey_id)
+    try:
+        asset = create_qual_asset(survey_id, body, username=username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return asset.model_dump()
+
+
+@router.put("/projects/{survey_id}/qual/assets/{asset_id}")
+def put_qual_asset(
+    survey_id: int,
+    asset_id: str,
+    body: QualAssetUpdate,
+    authorization: str | None = Header(default=None),
+):
+    _require_qual_access(_optional_username(authorization), survey_id)
+    updated = update_qual_asset(survey_id, asset_id, body)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Qual asset not found")
+    return updated.model_dump()
+
+
+@router.delete("/projects/{survey_id}/qual/assets/{asset_id}")
+def remove_qual_asset(
+    survey_id: int,
+    asset_id: str,
+    authorization: str | None = Header(default=None),
+):
+    _require_qual_access(_optional_username(authorization), survey_id)
+    if not delete_qual_asset(survey_id, asset_id):
+        raise HTTPException(status_code=404, detail="Qual asset not found")
+    return {"ok": True}
+
+
+@router.get("/projects/{survey_id}/qual/search")
+def qual_search(
+    survey_id: int,
+    q: str = "",
+    authorization: str | None = Header(default=None),
+):
+    _require_qual_access(_optional_username(authorization), survey_id)
+    hits = search_qual_assets(survey_id, q)
+    return {"hits": [h.model_dump() for h in hits], "query": q}
+
+
+@router.post("/projects/{survey_id}/qual/summary")
+def qual_summary(
+    survey_id: int,
+    body: QualSummaryRequest,
+    authorization: str | None = Header(default=None),
+):
+    _require_qual_access(_optional_username(authorization), survey_id)
+    assets = list_qual_assets(survey_id)
+    if body.asset_ids:
+        allowed = {a.id for a in assets}
+        assets = [a for a in assets if a.id in body.asset_ids and a.id in allowed]
+    result = generate_qual_summary(assets, focus=body.focus)
+    return result
 
 
 @router.get("/projects/{survey_id}/weight-config")

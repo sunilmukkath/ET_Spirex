@@ -8,6 +8,7 @@ import {
   Home,
   Kanban,
   Layers,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Scale,
@@ -18,7 +19,7 @@ import {
   Users,
   Variable,
 } from 'lucide-react'
-import type { WorkflowAccess } from '../../api/client'
+import type { StudyType, WorkflowAccess } from '../../api/client'
 import {
   filterWorkspaceNav,
   resolveActiveNavId,
@@ -29,11 +30,12 @@ import {
 } from '../../lib/workspaceNav'
 import { NAV_GROUP_LABELS } from '../../lib/etCopy'
 
-const GROUP_ORDER: NavGroup[] = ['Overview', 'Analyze', 'Field', 'Data']
+const GROUP_ORDER: NavGroup[] = ['Overview', 'Qual', 'Analyze', 'Field', 'Data']
 
 const ICONS: Record<WorkspaceNavId, React.ReactNode> = {
   home: <Home size={16} />,
   workflow: <Kanban size={16} />,
+  'qual-library': <MessageSquare size={16} />,
   profile: <Layers size={16} />,
   crosstabs: <Table2 size={16} />,
   charts: <BarChart3 size={16} />,
@@ -50,6 +52,7 @@ const ICONS: Record<WorkspaceNavId, React.ReactNode> = {
 
 interface Props {
   access: WorkflowAccess | null
+  studyType?: StudyType
   activeId: WorkspaceNavId
   collapsed: boolean
   onToggleCollapsed: () => void
@@ -94,6 +97,7 @@ function NavButton({
 
 export function WorkspaceSidebar({
   access,
+  studyType = 'quant',
   activeId,
   collapsed,
   onToggleCollapsed,
@@ -101,7 +105,7 @@ export function WorkspaceSidebar({
   onCloseMobile,
   mobile = false,
 }: Props) {
-  const items = filterWorkspaceNav(access)
+  const items = filterWorkspaceNav(access, studyType)
   const byGroup = GROUP_ORDER.map((group) => ({
     group,
     label: NAV_GROUP_LABELS[group] ?? group,

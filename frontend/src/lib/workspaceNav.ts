@@ -1,9 +1,10 @@
-import type { ProjectModule, WorkflowAccess } from '../api/client'
+import type { ProjectModule, StudyType, WorkflowAccess } from '../api/client'
 import { canAccessMode, hasModuleAccess, type WorkspaceMode } from './workflowAccess'
 
 export type WorkspaceNavId =
   | 'home'
   | 'workflow'
+  | 'qual-library'
   | 'profile'
   | 'crosstabs'
   | 'charts'
@@ -19,7 +20,7 @@ export type WorkspaceNavId =
 
 export type SetupView = 'questions' | 'custom' | 'weighting'
 
-export type NavGroup = 'Overview' | 'Analyze' | 'Field' | 'Data' | 'App'
+export type NavGroup = 'Overview' | 'Qual' | 'Analyze' | 'Field' | 'Data' | 'App'
 
 export interface WorkspaceNavItem {
   id: WorkspaceNavId
@@ -49,6 +50,15 @@ export const WORKSPACE_NAV_ITEMS: WorkspaceNavItem[] = [
     group: 'Overview',
     mode: 'workflow',
     keywords: ['tasks', 'kanban', 'team', 'phase', 'pilot', 'translations', 'assign'],
+  },
+  {
+    id: 'qual-library',
+    label: 'Qual library',
+    description: 'Transcripts, session notes, full-text search, and AI thematic summaries',
+    group: 'Qual',
+    mode: 'qual',
+    modules: 'research',
+    keywords: ['qual', 'qualitative', 'transcript', 'fgd', 'idi', 'interview', 'themes', 'coding'],
   },
   {
     id: 'profile',
@@ -191,6 +201,27 @@ export const APP_COMMAND_ITEMS: Array<{
   },
 ]
 
+/** Quant-only workspace destinations — hidden when study_type is qual. */
+const QUANT_ONLY_NAV_IDS = new Set<WorkspaceNavId>([
+  'profile',
+  'crosstabs',
+  'charts',
+  'statistics',
+  'fielding',
+  'quality',
+  'team',
+  'questions',
+  'custom-vars',
+  'weighting',
+  'raw-data',
+])
+
+export function studyTypeAllowsNav(item: WorkspaceNavItem, studyType: StudyType): boolean {
+  if (studyType === 'qual' && QUANT_ONLY_NAV_IDS.has(item.id)) return false
+  if (studyType === 'quant' && item.id === 'qual-library') return false
+  return true
+}
+
 function itemHasModuleAccess(
   access: WorkflowAccess | null | undefined,
   modules?: ProjectModule | ProjectModule[],
@@ -213,8 +244,11 @@ export function isNavItemAccessible(
 
 export function filterWorkspaceNav(
   access: WorkflowAccess | null | undefined,
+  studyType: StudyType = 'quant',
 ): WorkspaceNavItem[] {
-  return WORKSPACE_NAV_ITEMS.filter((item) => isNavItemAccessible(item, access))
+  return WORKSPACE_NAV_ITEMS.filter(
+    (item) => isNavItemAccessible(item, access) && studyTypeAllowsNav(item, studyType),
+  )
 }
 
 export function resolveActiveNavId(
@@ -225,6 +259,7 @@ export function resolveActiveNavId(
 ): WorkspaceNavId {
   if (mode === 'home') return 'home'
   if (mode === 'workflow') return 'workflow'
+  if (mode === 'qual') return 'qual-library'
   if (mode === 'explore') return analyzeView === 'compare' ? 'crosstabs' : 'profile'
   if (mode === 'charts') return 'charts'
   if (mode === 'reports') return 'reports'
@@ -303,9 +338,10 @@ export function searchNavItems(
   query: string,
   access: WorkflowAccess | null | undefined,
   surveyId?: number,
+  studyType: StudyType = 'quant',
 ): Array<WorkspaceNavItem & { href: string }> {
   const q = query.trim().toLowerCase()
-  const workspace = filterWorkspaceNav(access).map((item) => ({
+  const workspace = filterWorkspaceNav(access, studyType).map((item) => ({
     ...item,
     href: surveyId ? buildWorkspaceHref(surveyId, item) : '#',
   }))

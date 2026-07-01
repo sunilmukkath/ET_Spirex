@@ -7,6 +7,7 @@ import {
   Kanban,
   Layers,
   Loader2,
+  MessageSquare,
   Scale,
   ShieldCheck,
   Sigma,
@@ -15,7 +16,7 @@ import {
   Users,
   Variable,
 } from 'lucide-react'
-import { api, type ProjectPhase, type SurveyOverview } from '../../api/client'
+import { api, type ProjectPhase, type StudyType, type SurveyOverview } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { PROJECT_PHASE_LABELS } from '../../lib/workflowPhases'
 import { ET_SURVEY_HOME_TAGLINE, ET_SURVEY_HOME_TITLE, NAV_GROUP_LABELS } from '../../lib/etCopy'
@@ -76,6 +77,7 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
   const { user } = useAuth()
   const [overview, setOverview] = useState<SurveyOverview | null>(null)
   const [phase, setPhase] = useState<ProjectPhase | null>(null)
+  const [studyType, setStudyType] = useState<StudyType>('quant')
   const [myOpenTasks, setMyOpenTasks] = useState(0)
   const [statsLoading, setStatsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -87,6 +89,7 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
     void api.getProjectWorkflow(surveyId).then((workflowData) => {
       if (cancelled) return
       setPhase(workflowData.workflow.phase ?? 'field')
+      setStudyType(workflowData.workflow.study_type ?? 'quant')
       const username = user?.username
       const open =
         username != null
@@ -115,6 +118,7 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
   }, [surveyId, user?.username])
 
   const qs = overview?.quota_summary
+  const showQuant = studyType !== 'qual'
 
   return (
     <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll">
@@ -158,7 +162,7 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
           </div>
         )}
 
-        {overview && (
+        {overview && showQuant && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Completed" value={overview.response_count.toLocaleString()} />
           <StatCard
@@ -171,7 +175,7 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
         </div>
         )}
 
-        {qs && overview && (
+        {qs && overview && showQuant && (
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="text-sm font-semibold text-slate-900">Quota snapshot</h3>
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -192,6 +196,24 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
           </div>
         )}
 
+        {(studyType === 'qual' || studyType === 'mixed') && (
+          <LinkSection title={NAV_GROUP_LABELS.Qual}>
+            <QuickLink
+              icon={<MessageSquare size={18} />}
+              title="Qual library"
+              desc="Upload transcripts, search sessions, and generate AI thematic summaries"
+              onClick={() => onNavigate('qual')}
+            />
+            <QuickLink
+              icon={<FileText size={18} />}
+              title="Report builder"
+              desc="Assemble qual and quant sections into client decks"
+              onClick={() => onNavigate('reports')}
+            />
+          </LinkSection>
+        )}
+
+        {showQuant && (
         <LinkSection title={NAV_GROUP_LABELS.Analyze}>
           <QuickLink
             icon={<Layers size={18} />}
@@ -224,7 +246,9 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
             onClick={() => onNavigate('reports')}
           />
         </LinkSection>
+        )}
 
+        {showQuant && (
         <LinkSection title={NAV_GROUP_LABELS.Field}>
           <QuickLink
             icon={<ClipboardList size={18} />}
@@ -244,18 +268,10 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
             desc="Interviewer throughput, approvals, and rejection rates"
             onClick={() => onNavigate('fields', 'team')}
           />
-          <QuickLink
-            icon={<Kanban size={18} />}
-            title="Project workflow"
-            desc={
-              myOpenTasks > 0
-                ? `Team assignments and task tracker · ${myOpenTasks} open for you`
-                : 'Team assignments, module access, and task tracker'
-            }
-            onClick={() => onNavigate('workflow')}
-          />
         </LinkSection>
+        )}
 
+        {showQuant && (
         <LinkSection title={NAV_GROUP_LABELS.Data}>
           <QuickLink
             icon={<SlidersHorizontal size={18} />}
@@ -280,6 +296,20 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
             title="Raw data"
             desc="Browse and export response-level records"
             onClick={() => onNavigate('data')}
+          />
+        </LinkSection>
+        )}
+
+        <LinkSection title="Project">
+          <QuickLink
+            icon={<Kanban size={18} />}
+            title="Project workflow"
+            desc={
+              myOpenTasks > 0
+                ? `Team roster, phase, and tasks · ${myOpenTasks} open for you`
+                : 'Team roster, study phase, tasks, and translations'
+            }
+            onClick={() => onNavigate('workflow')}
           />
         </LinkSection>
       </div>

@@ -2,7 +2,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import {
   ClipboardList,
   Database,
-  Layers,
+  MessageSquare,
   PieChart,
   ShieldCheck,
   SlidersHorizontal,
@@ -14,18 +14,24 @@ import { useAuth } from '../auth/AuthContext'
 import { BrandLockup } from '../components/BrandLockup'
 import { SignInForm } from '../components/SignInForm'
 import { LoadingState } from '../components/States'
-import { ET_ORG_NAME, ET_PRODUCT_NAME } from '../lib/etCopy'
+import {
+  ET_LANDING_BADGE,
+  ET_LANDING_SUBTITLE,
+  ET_LANDING_TITLE,
+  ET_ORG_NAME,
+  ET_PRODUCT_NAME,
+} from '../lib/etCopy'
 
 const FEATURES = [
   {
-    icon: Layers,
-    title: 'Study overview',
-    desc: 'Per-project sample health, quotas, and role-based shortcuts for the ET team.',
+    icon: MessageSquare,
+    title: 'Qual library',
+    desc: 'Upload FG/IDI transcripts, search across sessions, and run AI thematic summaries.',
   },
   {
     icon: Table2,
-    title: 'Crosstabs & profiles',
-    desc: 'Question profiles and multi-banner tables with significance testing.',
+    title: 'Quant analysis',
+    desc: 'Question profiles, multi-banner crosstabs with significance testing, and filters.',
   },
   {
     icon: PieChart,
@@ -50,12 +56,12 @@ const FEATURES = [
   {
     icon: Database,
     title: 'Exports & reports',
-    desc: 'Raw data, codebook export, and client-ready PDF/PPT report builder.',
+    desc: 'Raw data, codebooks, and client-ready PDF/PPT decks with optional AI narrative.',
   },
   {
     icon: Zap,
     title: 'Live LimeSurvey',
-    desc: 'Connected to your Elastic Tree survey instance in real time.',
+    desc: 'Quant fieldwork connected to your Elastic Tree survey instance in real time.',
   },
 ]
 
@@ -104,15 +110,13 @@ export function LandingPage() {
         <div className="animate-fade-in">
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--et-teal)]/30 bg-[var(--et-teal)]/10 px-3.5 py-1.5 text-xs font-semibold text-[var(--et-teal-light)]">
             <Sparkles size={14} />
-            Built for the Elastic Tree team
+            {ET_LANDING_BADGE}
           </div>
           <h1 className="font-display text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl lg:text-[3.25rem]">
-            Analytics that feel as sharp as your research.
+            {ET_LANDING_TITLE}
           </h1>
           <p className="mt-5 max-w-lg text-base leading-relaxed text-white/75 sm:text-lg">
-            {ET_PRODUCT_NAME} turns LimeSurvey data into profiles, crosstabs, charts,
-            QC review, fielding dashboards, and client-ready exports — one workspace for programming,
-            field, research, and delivery.
+            {ET_LANDING_SUBTITLE}
           </p>
 
           <div className="mt-10 grid gap-2.5 sm:grid-cols-2">

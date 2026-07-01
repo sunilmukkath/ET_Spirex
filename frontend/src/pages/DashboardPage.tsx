@@ -34,10 +34,11 @@ import { EmptyState, ErrorState, LoadingState, SkeletonBlock } from '../componen
 
 const STATS_BATCH = 50
 const PRIORITY_STATS_COUNT = 30
+const DASHBOARD_STRIP_LIMIT = 10
 
 type StatusFilter = 'all' | 'active' | 'inactive' | 'expired'
 type SortKey = 'newest' | 'oldest' | 'name' | 'responses' | 'expiring'
-type ViewMode = 'grid' | 'table'
+type ViewMode = 'strips' | 'table'
 
 function parseCreated(value: string | null | undefined): number {
   if (!value || value.startsWith('0000')) return 0
@@ -156,9 +157,11 @@ export function DashboardPage() {
   const [sortKey, setSortKey] = useState<SortKey>(
     () => (appSession?.dashboardSortKey as SortKey | undefined) ?? 'newest',
   )
-  const [viewMode, setViewMode] = useState<ViewMode>(
-    () => (appSession?.dashboardViewMode as ViewMode | undefined) ?? 'grid',
-  )
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = appSession?.dashboardViewMode as string | undefined
+    if (saved === 'table') return 'table'
+    return 'strips'
+  })
   const { pinnedIds, pinnedSet, toggle: togglePinned } = usePinnedSurveys()
   const pinnedIdsRef = useRef(pinnedIds)
   pinnedIdsRef.current = pinnedIds
@@ -341,6 +344,11 @@ export function DashboardPage() {
   const totalResponses = useMemo(
     () => projects.reduce((sum, p) => sum + (p.responses.loaded ? p.responses.completed : 0), 0),
     [projects],
+  )
+
+  const stripProjects = useMemo(
+    () => filtered.slice(0, DASHBOARD_STRIP_LIMIT),
+    [filtered],
   )
 
   const hasActiveFilters =
@@ -585,21 +593,21 @@ export function DashboardPage() {
             <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
               <button
                 type="button"
-                onClick={() => setViewMode('grid')}
-                className={`rounded-md p-2 transition ${viewMode === 'grid' ? 'bg-white text-[var(--et-teal-dark)] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                aria-label="Grid view"
-                aria-pressed={viewMode === 'grid'}
+                onClick={() => setViewMode('strips')}
+                className={`rounded-md p-2 transition ${viewMode === 'strips' ? 'bg-white text-[var(--et-teal-dark)] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                aria-label="Strip list view"
+                aria-pressed={viewMode === 'strips'}
               >
-                <LayoutGrid size={16} />
+                <List size={16} />
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode('table')}
                 className={`rounded-md p-2 transition ${viewMode === 'table' ? 'bg-white text-[var(--et-teal-dark)] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                aria-label="Table view"
+                aria-label="Full table view"
                 aria-pressed={viewMode === 'table'}
               >
-                <List size={16} />
+                <LayoutGrid size={16} />
               </button>
             </div>
           </div>
@@ -644,9 +652,27 @@ export function DashboardPage() {
         </div>
 
         <p className="text-xs text-slate-500">
-          Showing <span className="font-semibold text-slate-700">{filtered.length}</span> of{' '}
-          {projects.length} projects
-          {!showPinnedOnly && pinnedIds.length > 0 && sortKey === 'newest' && (
+          {viewMode === 'strips' ? (
+            <>
+              Showing <span className="font-semibold text-slate-700">{stripProjects.length}</span> of{' '}
+              {filtered.length} matching
+              {filtered.length !== projects.length && (
+                <>
+                  {' '}
+                  (<span className="font-semibold text-slate-700">{projects.length}</span> total)
+                </>
+              )}
+              {filtered.length > DASHBOARD_STRIP_LIMIT && (
+                <span className="text-slate-400"> · Switch to table view for all</span>
+              )}
+            </>
+          ) : (
+            <>
+              Showing <span className="font-semibold text-slate-700">{filtered.length}</span> of{' '}
+              {projects.length} projects
+            </>
+          )}
+          {!showPinnedOnly && pinnedIds.length > 0 && sortKey === 'newest' && viewMode === 'strips' && (
             <span className="text-slate-400"> · Pinned projects shown first</span>
           )}
         </p>
@@ -661,10 +687,10 @@ export function DashboardPage() {
               : 'Try a different search term or status filter.'
           }
         />
-      ) : viewMode === 'grid' ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((project) => (
-            <SurveyCard
+      ) : viewMode === 'strips' ? (
+        <div className="space-y-2">
+          {stripProjects.map((project) => (
+            <SurveyStrip
               key={project.id}
               project={project}
               openHref={resolveSurveyHref(user?.username, project.id)}
@@ -722,7 +748,7 @@ function PinnedSurveyChip({
   )
 }
 
-function SurveyCard({
+function SurveyStrip({
   project,
   openHref,
   isPinned,
@@ -737,63 +763,53 @@ function SurveyCard({
   const loaded = project.responses.loaded
 
   return (
-    <article className="et-card group relative flex flex-col p-5">
+    <article className="group flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white px-3 py-3 shadow-sm transition hover:border-[var(--et-teal)]/35 hover:shadow-md sm:gap-4 sm:px-4">
       <button
         type="button"
         onClick={(e) => {
           e.preventDefault()
           onTogglePin()
         }}
-        className="absolute right-3 top-3 z-10 rounded-lg p-1.5 text-slate-300 hover:bg-slate-50 hover:text-[var(--et-teal)]"
-        aria-label={isPinned ? 'Unpin survey' : 'Pin survey'}
+        className="shrink-0 rounded-lg p-1.5 text-slate-300 hover:bg-slate-50 hover:text-[var(--et-teal)]"
+        aria-label={isPinned ? 'Unpin project' : 'Pin project'}
       >
-        <Pin size={16} className={isPinned ? 'fill-[var(--et-teal)] text-[var(--et-teal)]' : ''} />
+        <Pin size={15} className={isPinned ? 'fill-[var(--et-teal)] text-[var(--et-teal)]' : ''} />
       </button>
 
       <Link
         to={openHref}
         state={{ title: project.title }}
-        className="flex flex-1 flex-col"
+        className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4"
       >
-        <div className="flex items-start justify-between gap-2 pr-8">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+          <div className="flex min-w-0 items-center gap-2">
             <StatusBadge status={project.status} />
             {expiryHint && project.status === 'active' && (
-              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 ring-1 ring-amber-200">
+              <span className="hidden rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 ring-1 ring-amber-200 sm:inline">
                 {expiryHint}
               </span>
             )}
+            <span className="shrink-0 font-mono text-[10px] text-slate-400">#{project.id}</span>
           </div>
-          <span className="shrink-0 font-mono text-xs text-slate-400">#{project.id}</span>
+          <h3 className="min-w-0 truncate text-sm font-semibold text-slate-900 group-hover:text-[var(--et-teal-dark)] sm:text-base">
+            {project.title}
+          </h3>
         </div>
 
-        <h3 className="mt-3 line-clamp-2 flex-1 text-base font-semibold leading-snug text-slate-900 group-hover:text-[var(--et-teal-dark)]">
-          {project.title}
-        </h3>
-
-        <div className="mt-3">
+        <div className="hidden shrink-0 text-right tabular-nums sm:block sm:min-w-[7rem]">
           {!loaded ? (
-            <div className="space-y-2">
-              <SkeletonBlock className="h-5 w-32 rounded-full" />
-              <SkeletonBlock className="h-3 w-24" />
-            </div>
+            <SkeletonBlock className="ml-auto h-4 w-16" />
           ) : (
-            <div className="space-y-1">
-              <p className="text-sm font-semibold tabular-nums text-slate-800">
-                {project.responses.completed.toLocaleString()}{' '}
-                <span className="font-normal text-slate-500">completed</span>
+            <>
+              <p className="text-sm font-semibold text-slate-800">
+                {project.responses.completed.toLocaleString()}
               </p>
-              {(project.responses.incomplete > 0 || project.responses.total > project.responses.completed) && (
-                <p className="text-xs text-slate-500">
-                  {project.responses.incomplete.toLocaleString()} incomplete ·{' '}
-                  {project.responses.total.toLocaleString()} total
-                </p>
-              )}
-            </div>
+              <p className="text-[10px] text-slate-500">completed</p>
+            </>
           )}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+        <div className="hidden items-center gap-3 text-xs text-slate-500 lg:flex">
           {project.language && (
             <span className="inline-flex items-center gap-1">
               <Globe size={12} className="text-slate-400" />
@@ -801,39 +817,44 @@ function SurveyCard({
             </span>
           )}
           {project.owner != null && String(project.owner).trim() !== '' && (
-            <span className="inline-flex items-center gap-1">
-              <User size={12} className="text-slate-400" />
+            <span className="inline-flex max-w-[8rem] items-center gap-1 truncate">
+              <User size={12} className="shrink-0 text-slate-400" />
               {String(project.owner)}
             </span>
           )}
-          {project.created_date && !project.created_date.startsWith('0000') ? (
-            <span className="inline-flex items-center gap-1">
+          {(project.created_date && !project.created_date.startsWith('0000')) ||
+          (project.expire_date && !project.expire_date.startsWith('0000')) ? (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap">
               <Calendar size={12} className="text-slate-400" />
-              {formatDate(project.created_date)}
-            </span>
-          ) : project.expire_date && !project.expire_date.startsWith('0000') ? (
-            <span className="inline-flex items-center gap-1">
-              <Calendar size={12} className="text-slate-400" />
-              Expires {formatDate(project.expire_date)}
+              {project.created_date && !project.created_date.startsWith('0000')
+                ? formatDate(project.created_date)
+                : `Exp ${formatDate(project.expire_date)}`}
             </span>
           ) : null}
         </div>
       </Link>
 
-      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
-        <div className="flex gap-2 opacity-0 transition group-hover:opacity-100">
-          <QuickAction to={`/projects/${project.id}?mode=explore&view=compare`} icon={<Table2 size={12} />} label="Crosstabs" />
-          <QuickAction to={`/projects/${project.id}?mode=workflow`} icon={<ClipboardList size={12} />} label="Workflow" />
-        </div>
-        <Link
-          to={openHref}
-          state={{ title: project.title }}
-          className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-[var(--et-teal)] opacity-0 transition group-hover:opacity-100"
-        >
-          Open
-          <ChevronRight size={14} />
-        </Link>
+      <div className="hidden shrink-0 items-center gap-2 opacity-0 transition group-hover:opacity-100 md:flex">
+        <QuickAction
+          to={`/projects/${project.id}?mode=explore&view=compare`}
+          icon={<Table2 size={12} />}
+          label="Crosstabs"
+        />
+        <QuickAction
+          to={`/projects/${project.id}?mode=workflow`}
+          icon={<ClipboardList size={12} />}
+          label="Workflow"
+        />
       </div>
+
+      <Link
+        to={openHref}
+        state={{ title: project.title }}
+        className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-[var(--et-teal-light)]/30 hover:text-[var(--et-teal-dark)]"
+        aria-label="Open project"
+      >
+        <ChevronRight size={18} />
+      </Link>
     </article>
   )
 }

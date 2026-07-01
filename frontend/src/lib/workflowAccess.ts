@@ -70,6 +70,7 @@ export type WorkspaceMode =
   | 'data'
   | 'multivariate'
   | 'workflow'
+  | 'qual'
 
 /** Workspace tab → project module(s) required to open it. */
 export const MODE_MODULE: Partial<Record<WorkspaceMode, ProjectModule | ProjectModule[]>> = {
@@ -77,6 +78,7 @@ export const MODE_MODULE: Partial<Record<WorkspaceMode, ProjectModule | ProjectM
   charts: 'analysis',
   reports: 'export',
   multivariate: 'analysis',
+  qual: 'research',
   fields: ['field', 'qc'],
   variables: 'programming',
   data: 'export',
@@ -101,6 +103,7 @@ export function firstAllowedMode(access: WorkflowAccess | null | undefined): Wor
   const order: WorkspaceMode[] = [
     'home',
     'workflow',
+    'qual',
     'explore',
     'charts',
     'reports',

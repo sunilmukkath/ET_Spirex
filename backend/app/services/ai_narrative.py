@@ -114,26 +114,32 @@ def banner_context(result: dict[str, Any]) -> dict[str, Any]:
     return {"type": "banner", "tables": summarized, "confidence_level": result.get("confidence_level")}
 
 
-def generate_narrative(context: dict[str, Any]) -> str | None:
+def complete_custom(
+    user_prompt: str,
+    *,
+    system: str,
+    max_tokens: int = 1024,
+) -> str | None:
     provider = settings.resolved_ai_provider
     if not provider:
         return None
+    try:
+        if provider == "anthropic":
+            return _anthropic_complete(user_prompt, system=system, max_tokens=max_tokens)
+        if provider == "azure":
+            return _azure_complete(user_prompt, system=system, max_tokens=max_tokens)
+    except Exception as exc:
+        logger.warning("AI completion failed: %s", exc)
+        raise
+    return None
 
+
+def generate_narrative(context: dict[str, Any]) -> str | None:
     user_prompt = (
         "Write slide bullets interpreting this survey analysis data.\n\n"
         f"```json\n{json.dumps(context, ensure_ascii=False, indent=2)}\n```"
     )
-
-    try:
-        if provider == "anthropic":
-            return _anthropic_complete(user_prompt, system=SYSTEM_PROMPT)
-        if provider == "azure":
-            return _azure_complete(user_prompt, system=SYSTEM_PROMPT)
-    except Exception as exc:
-        logger.warning("AI narrative failed: %s", exc)
-        raise
-
-    return None
+    return complete_custom(user_prompt, system=SYSTEM_PROMPT, max_tokens=512)
 
 
 def generate_slide_plan(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:

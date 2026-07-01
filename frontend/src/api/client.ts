@@ -581,6 +581,53 @@ export interface TranslationRow {
   updated_at?: number | null
 }
 
+export type QualAssetType = 'transcript' | 'session_note'
+export type QualSessionStatus = 'draft' | 'reviewed' | 'coded'
+
+export interface QualAsset {
+  id: string
+  survey_id: number
+  title: string
+  asset_type: QualAssetType
+  content: string
+  respondent_id: string
+  session_date: string | null
+  moderator: string
+  tags: string[]
+  status: QualSessionStatus
+  word_count: number
+  created_by: string | null
+  created_at: number
+  updated_at: number
+}
+
+export interface QualAssetInput {
+  title: string
+  asset_type?: QualAssetType
+  content: string
+  respondent_id?: string
+  session_date?: string | null
+  moderator?: string
+  tags?: string[]
+  status?: QualSessionStatus
+}
+
+export interface QualSearchHit {
+  asset_id: string
+  title: string
+  asset_type: QualAssetType
+  snippet: string
+  match_count: number
+}
+
+export interface QualSummaryResult {
+  summary: string
+  themes: string[]
+  top_terms: { term: string; count: number }[]
+  ai_used: boolean
+  asset_count: number
+}
+
 export interface ProjectWorkflow {
   phase?: ProjectPhase
   study_type?: StudyType
@@ -1073,6 +1120,32 @@ export const api = {
       body: JSON.stringify({ body }),
     }),
   getMyTasks: () => fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/me/tasks'),
+  getQualAssets: (id: number) =>
+    fetchJson<{ assets: QualAsset[] }>(`/api/projects/${id}/qual/assets`),
+  createQualAsset: (id: number, body: QualAssetInput) =>
+    fetchJson<QualAsset>(`/api/projects/${id}/qual/assets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateQualAsset: (id: number, assetId: string, body: Partial<QualAssetInput>) =>
+    fetchJson<QualAsset>(`/api/projects/${id}/qual/assets/${assetId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteQualAsset: (id: number, assetId: string) =>
+    fetchJson<{ ok: boolean }>(`/api/projects/${id}/qual/assets/${assetId}`, { method: 'DELETE' }),
+  searchQualAssets: (id: number, q: string) =>
+    fetchJson<{ hits: QualSearchHit[]; query: string }>(
+      `/api/projects/${id}/qual/search?q=${encodeURIComponent(q)}`,
+    ),
+  generateQualSummary: (id: number, body?: { asset_ids?: string[]; focus?: string }) =>
+    fetchJson<QualSummaryResult>(`/api/projects/${id}/qual/summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    }),
   exportQuestionnaireSpec: async (
     id: number,
     format: 'xlsx' | 'docx',

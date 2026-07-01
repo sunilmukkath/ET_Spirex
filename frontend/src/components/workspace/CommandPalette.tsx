@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LayoutGrid, Search, Settings, X } from 'lucide-react'
-import type { WorkflowAccess } from '../../api/client'
+import type { StudyType, WorkflowAccess } from '../../api/client'
 import { NAV_GROUP_LABELS } from '../../lib/etCopy'
 import { searchNavItems, type WorkspaceNavItem } from '../../lib/workspaceNav'
 
@@ -20,6 +20,7 @@ interface Props {
   surveyId?: number
   surveyTitle?: string
   access?: WorkflowAccess | null
+  studyType?: StudyType
   extraItems?: CommandPaletteItem[]
 }
 
@@ -34,14 +35,14 @@ function toPaletteItem(row: WorkspaceNavItem & { href: string }, index: number):
   }
 }
 
-export function CommandPalette({ open, onClose, surveyId, access, extraItems = [] }: Props) {
+export function CommandPalette({ open, onClose, surveyId, access, studyType = 'quant', extraItems = [] }: Props) {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const items = useMemo(() => {
-    const fromNav = searchNavItems(query, access, surveyId).map(toPaletteItem)
+    const fromNav = searchNavItems(query, access, surveyId, studyType).map(toPaletteItem)
     if (!query.trim()) return [...fromNav, ...extraItems]
     const q = query.trim().toLowerCase()
     const filteredExtra = extraItems.filter((item) => {
@@ -49,7 +50,7 @@ export function CommandPalette({ open, onClose, surveyId, access, extraItems = [
       return haystack.includes(q)
     })
     return [...fromNav, ...filteredExtra]
-  }, [query, access, surveyId, extraItems])
+  }, [query, access, surveyId, studyType, extraItems])
 
   const go = useCallback(
     (href: string) => {

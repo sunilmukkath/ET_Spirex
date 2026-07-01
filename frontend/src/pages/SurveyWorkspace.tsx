@@ -32,6 +32,7 @@ import {
   type FilterSpec,
   type ProfileResult,
   type ProjectDetail,
+  type StudyType,
   type SurveySchema,
   type SurveyVariable,
   type WorkflowAccess,
@@ -48,6 +49,7 @@ import { ErrorState } from '../components/States'
 import { FieldOperationsPanel, type FieldView } from '../components/analysis/FieldOperationsPanel'
 import { SurveyHomePanel } from '../components/analysis/SurveyHomePanel'
 import { ProjectWorkflowPanel } from '../components/analysis/ProjectWorkflowPanel'
+import { QualPanel } from '../components/analysis/QualPanel'
 import { ReportBuilderPanel } from '../components/analysis/ReportBuilderPanel'
 import { filterPayload, treeToFlatFilters } from '../lib/filterTree'
 import type { ChartTypeId } from '../lib/chartTypes'
@@ -60,10 +62,10 @@ import {
   saveSurveyLayout,
   saveUserFieldDefaults,
 } from '../lib/surveyFieldDefaults'
-import { canAccessMode, firstAllowedMode } from '../lib/workflowAccess'
-import {
+import { filterWorkspaceNav,
   navItemToSearchParams,
   parseSetupView,
+  resolveActiveNavId,
   WORKSPACE_NAV_ITEMS,
   type SetupView,
   type WorkspaceNavItem,
@@ -118,11 +120,13 @@ type Mode =
   | 'data'
   | 'multivariate'
   | 'workflow'
+  | 'qual'
 type AnalyzeView = 'profile' | 'compare'
 
 function parseMode(raw: string | null): Mode {
   if (raw === 'crosstabs' || raw === 'compare') return 'explore'
   if (raw === 'home' || raw === 'overview') return 'home'
+  if (raw === 'qual' || raw === 'qual-library') return 'qual'
   if (raw === 'fielding' || raw === 'monitor' || raw === 'fieldteam' || raw === 'field-team') return 'fields'
   if (raw === 'reports' || raw === 'report-builder') return 'reports'
   if (raw === 'charts') return 'charts'
@@ -159,7 +163,7 @@ function parseFieldView(rawMode: string | null, rawView: string | null): FieldVi
 }
 
 function modeNeedsSchema(mode: Mode): boolean {
-  return mode !== 'home' && mode !== 'workflow'
+  return mode !== 'home' && mode !== 'workflow' && mode !== 'qual'
 }
 
 export function SurveyWorkspace() {
@@ -215,6 +219,7 @@ export function SurveyWorkspace() {
   } | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [workflowAccess, setWorkflowAccess] = useState<WorkflowAccess | null>(null)
+  const [studyType, setStudyType] = useState<StudyType>('quant')
   const [workflowAccessLoaded, setWorkflowAccessLoaded] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false)
@@ -317,6 +322,7 @@ export function SurveyWorkspace() {
       .then((res) => {
         if (!cancelled) {
           setWorkflowAccess(res.access)
+          setStudyType(res.workflow.study_type ?? 'quant')
           setWorkflowAccessLoaded(true)
         }
       })
@@ -333,13 +339,19 @@ export function SurveyWorkspace() {
 
   useEffect(() => {
     if (!workflowAccessLoaded || !workflowAccess) return
-    if (canAccessMode(workflowAccess, mode)) return
-    const fallback = firstAllowedMode(workflowAccess)
+    const navId = resolveActiveNavId(mode, analyzeView, fieldView, setupView)
+    const allowed = filterWorkspaceNav(workflowAccess, studyType)
+    if (allowed.some((item) => item.id === navId)) return
+    const fallbackItem = allowed[0]
+    if (!fallbackItem) return
+    const { mode: nextMode, view } = navItemToSearchParams(fallbackItem)
     setSearchParams((prev) => {
-      prev.set('mode', fallback)
+      prev.set('mode', nextMode)
+      if (view) prev.set('view', view)
+      else prev.delete('view')
       return prev
     }, { replace: true })
-  }, [workflowAccess, workflowAccessLoaded, mode, setSearchParams])
+  }, [workflowAccess, workflowAccessLoaded, mode, analyzeView, fieldView, setupView, studyType, setSearchParams])
 
   useCommandPaletteHotkey(() => setCommandOpen(true))
 
@@ -667,7 +679,7 @@ export function SurveyWorkspace() {
 
   useEffect(() => {
     if (!surveyId) return
-    if (mode === 'home' || mode === 'workflow') {
+    if (mode === 'home' || mode === 'workflow' || mode === 'qual') {
       setSchemaLoading(false)
       return
     }
@@ -751,7 +763,7 @@ export function SurveyWorkspace() {
 
   // Phase 2: full enrichment — defer on Home so opening a survey stays fast
   useEffect(() => {
-    if (!surveyId || mode === 'home') return
+    if (!surveyId || mode === 'home' || mode === 'qual') return
     let cancelled = false
     setEnriching(true)
 
@@ -1190,6 +1202,7 @@ export function SurveyWorkspace() {
         >
           <WorkspaceSidebar
             access={workflowAccess}
+            studyType={studyType}
             activeId={activeNavId}
             collapsed={sidebarCollapsed}
             onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
@@ -1312,6 +1325,8 @@ export function SurveyWorkspace() {
               globalRole={user.role}
             />
           )}
+
+          {mode === 'qual' && <QualPanel surveyId={surveyId} />}
 
           {mode === 'fields' && (
             <FieldOperationsPanel
@@ -1558,6 +1573,7 @@ export function SurveyWorkspace() {
         surveyId={surveyId}
         surveyTitle={project?.title || navTitle}
         access={workflowAccess}
+        studyType={studyType}
       />
     </div>
   )
