@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { applyRandomizeOrder } from '../lib/etSurveyRandomize'
 import { useParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { api, type EtCollectorSurvey, type EtQuestion } from '../api/client'
@@ -48,7 +49,13 @@ export function SurveyCollectorPage() {
       .finally(() => setLoading(false))
   }, [slug])
 
-  const blocks = survey?.definition.blocks ?? []
+  const blocks = useMemo(() => {
+    const raw = survey?.definition.blocks ?? []
+    return applyRandomizeOrder(raw).map((block) => ({
+      ...block,
+      questions: applyRandomizeOrder(block.questions),
+    }))
+  }, [survey])
   const settings = survey?.definition.settings
   const currentBlock = blocks[blockIndex]
   const singlePage = settings?.single_page ?? false

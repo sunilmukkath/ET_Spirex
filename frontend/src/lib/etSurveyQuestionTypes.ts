@@ -82,6 +82,7 @@ export function newQuestion(type: EtQuestionType, index: number): EtQuestion {
     allow_other: false,
     other_label: 'Other (please specify)',
     randomize_options: false,
+    randomize_code: '',
   }
 
   switch (type) {

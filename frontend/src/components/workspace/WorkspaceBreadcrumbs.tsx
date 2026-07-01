@@ -21,7 +21,7 @@ export function WorkspaceBreadcrumbs({ activeId, surveyTitle, onNavigate }: Prop
           <span key={`${crumb.label}-${index}`} className="inline-flex min-w-0 items-center gap-1">
             {index > 0 && <ChevronRight size={12} className="shrink-0 text-slate-300" />}
             {crumb.label === 'Surveys' ? (
-              <Link to="/dashboard" className="truncate hover:text-[var(--et-teal-dark)]">
+              <Link to="/quantitative" className="truncate hover:text-[var(--et-teal-dark)]">
                 {crumb.label}
               </Link>
             ) : navItem && !isLast ? (

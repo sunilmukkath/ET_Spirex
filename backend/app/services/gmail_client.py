@@ -209,6 +209,54 @@ def _normalize_message(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _extract_body_text(payload: dict[str, Any]) -> str:
+    mime = str(payload.get("mimeType") or "")
+    body = payload.get("body") or {}
+    data = body.get("data")
+    if data and mime in ("text/plain", ""):
+        try:
+            return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", errors="replace")
+        except Exception:
+            pass
+    parts = payload.get("parts") or []
+    plain = ""
+    html = ""
+    for part in parts:
+        part_mime = str(part.get("mimeType") or "")
+        if part_mime.startswith("multipart/"):
+            nested = _extract_body_text(part)
+            if nested:
+                return nested
+        if part_mime == "text/plain" and not plain:
+            plain = _extract_body_text(part)
+        elif part_mime == "text/html" and not html:
+            html = _extract_body_text(part)
+    if plain:
+        return plain
+    if html:
+        return re.sub(r"<[^>]+>", " ", html)
+    return ""
+
+
+def fetch_message_detail(username: str, message_id: str) -> dict[str, Any]:
+    from googleapiclient.errors import HttpError
+
+    def _fetch() -> dict[str, Any]:
+        service = get_gmail_service(username)
+        detail = (
+            service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute()
+        )
+        normalized = _normalize_message(detail)
+        payload = detail.get("payload") or {}
+        normalized["body_text"] = _extract_body_text(payload).strip()
+        return normalized
+
+    return _run_with_timeout(_fetch)
+
+
 def fetch_inbox_messages(username: str, *, max_results: int = 30) -> list[dict[str, Any]]:
     from googleapiclient.errors import HttpError
 

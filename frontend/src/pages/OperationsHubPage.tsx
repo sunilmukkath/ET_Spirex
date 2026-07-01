@@ -3,17 +3,16 @@ import { Link, useSearchParams } from 'react-router-dom'
 import {
   Bot,
   Briefcase,
-  Code2,
   DollarSign,
   Download,
   FileUp,
   FileText,
-  Link2,
   Loader2,
   Megaphone,
   Plus,
   RefreshCw,
   Save,
+  Settings2,
   Users,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
@@ -23,22 +22,30 @@ import {
   type PmAgentDraft,
   type PmClient,
   type PmFinanceSummary,
+  type PmImportConfig,
+  type PmImportPreview,
   type PmImportResult,
   type PmPipelineOverview,
-  type Project,
   type ProjectRequirements,
 } from '../api/client'
 import { ProjectRequirementsEditor, emptyProjectRequirements } from '../components/ProjectRequirementsEditor'
 import { useUserPreferences } from '../hooks/useUserPreferences'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
-type Tab = 'pipeline' | 'clients' | 'finance' | 'programming' | 'links'
+type Tab = 'pipeline' | 'clients' | 'finance'
 
-const TAB_IDS = new Set<Tab>(['pipeline', 'clients', 'finance', 'programming', 'links'])
+const TAB_IDS = new Set<Tab>(['pipeline', 'clients', 'finance'])
 
 function parseTab(value: string | null): Tab {
   if (value && TAB_IDS.has(value as Tab)) return value as Tab
   return 'pipeline'
+}
+
+function formatInr(value: number | null | undefined): string {
+  if (value == null) return '—'
+  return value.toLocaleString('en-IN', {
+    maximumFractionDigits: 0,
+  })
 }
 
 const STAGES = [
@@ -135,7 +142,7 @@ function DraftAgentPanel({ draft, loading }: { draft: PmAgentDraft | null; loadi
 }
 
 export function OperationsHubPage() {
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const { prefs } = useUserPreferences(user?.username)
   const [searchParams] = useSearchParams()
   const [tab, setTab] = useState<Tab>(() => parseTab(searchParams.get('tab')))
@@ -145,7 +152,6 @@ export function OperationsHubPage() {
 
   const [pipeline, setPipeline] = useState<PmPipelineOverview | null>(null)
   const [clients, setClients] = useState<PmClient[]>([])
-  const [limeSurveys, setLimeSurveys] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [finance, setFinance] = useState<PmFinanceSummary | null>(null)
   const [financeAgent, setFinanceAgent] = useState<PmAgentBrief | null>(null)
@@ -162,11 +168,14 @@ export function OperationsHubPage() {
 
   const [newClientName, setNewClientName] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
-  const [linkSurveyId, setLinkSurveyId] = useState('')
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<PmImportResult | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [importConfig, setImportConfig] = useState<PmImportConfig | null>(null)
+  const [configuring, setConfiguring] = useState(false)
+  const [importPreview, setImportPreview] = useState<PmImportPreview | null>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const masterInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -178,15 +187,14 @@ export function OperationsHubPage() {
         setPipeline(null)
         return
       }
-      const [pipe, clientRows, surveysRaw] = await Promise.all([
+      const [pipe, clientRows, config] = await Promise.all([
         api.getPmPipeline(),
         api.listPmClients(),
-        api.getProjects().catch(() => [] as Project[]),
+        api.getPmImportConfig().catch(() => null),
       ])
-      const surveys = Array.isArray(surveysRaw) ? surveysRaw : surveysRaw.projects
       setPipeline(pipe)
       setClients(clientRows)
-      setLimeSurveys(surveys)
+      setImportConfig(config)
       const first = pipe.projects[0]?.project_id ?? ''
       setSelectedProjectId((cur) => cur || first)
       setProposalProjectId((cur) => cur || first)
@@ -249,7 +257,10 @@ export function OperationsHubPage() {
     setImporting(true)
     setImportError(null)
     setImportResult(null)
+    setImportPreview(null)
     try {
+      const preview = await api.previewPmImport(file)
+      setImportPreview(preview)
       const result = await api.importPmProjects(file)
       setImportResult(result)
       await load()
@@ -260,15 +271,22 @@ export function OperationsHubPage() {
     }
   }
 
-  async function handleStageChange(projectId: string, stage: string) {
-    await api.updatePmProject(projectId, { stage })
-    await load()
+  async function handleConfigureMaster(file: File) {
+    setConfiguring(true)
+    setImportError(null)
+    try {
+      const config = await api.configurePmImportMaster(file)
+      setImportConfig(config)
+      setImportPreview(null)
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Could not configure import template')
+    } finally {
+      setConfiguring(false)
+    }
   }
 
-  async function handleLinkSurvey(projectId: string) {
-    const sid = linkSurveyId ? Number(linkSurveyId) : null
-    await api.linkPmSurvey(projectId, sid)
-    setLinkSurveyId('')
+  async function handleStageChange(projectId: string, stage: string) {
+    await api.updatePmProject(projectId, { stage })
     await load()
   }
 
@@ -359,7 +377,6 @@ export function OperationsHubPage() {
   if (error) return <div className="et-page py-10"><ErrorState message={error} /></div>
 
   const projects = pipeline?.projects ?? []
-  const surveyTitleById = new Map(limeSurveys.map((s) => [s.id, s.title]))
 
   return (
     <div className="et-page et-page-wide space-y-6 py-8">
@@ -367,7 +384,7 @@ export function OperationsHubPage() {
         <div>
           <h1 className="font-display text-2xl font-semibold text-slate-900">Operations hub</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            End-to-end from proposal to closure — clients, finance, marketing, survey programming, and LimeSurvey links in one place.
+            End-to-end from proposal to closure — clients, finance, and marketing in one place.
           </p>
         </div>
         <button
@@ -386,8 +403,6 @@ export function OperationsHubPage() {
             ['pipeline', 'Pipeline', Briefcase],
             ['clients', 'CRM & marketing', Users],
             ['finance', 'Finance', DollarSign],
-            ['programming', 'Programming', Code2],
-            ['links', 'Survey links', Link2],
           ] as const
         ).map(([id, label, Icon]) => (
           <button
@@ -421,9 +436,46 @@ export function OperationsHubPage() {
           <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 shadow-sm">
             <h3 className="text-sm font-semibold text-[var(--et-navy)]">Import projects from Excel</h3>
             <p className="mt-1 text-xs text-[var(--muted)]">
-              Upload a sheet with project names and LimeSurvey IDs or survey titles — ET Scout creates pipeline
-              entries and links studies automatically.
+              Upload your project sheet (.xls or .xlsx) with project names and LimeSurvey IDs or survey titles —
+              ET Scout creates pipeline entries and links studies automatically.
             </p>
+            {importConfig?.configured && (
+              <p className="mt-2 text-xs text-emerald-800">
+                Custom column mapping active ({importConfig.column_count} columns from your master sheet).
+              </p>
+            )}
+            {isAdmin && (
+              <div className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50/80 p-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <Settings2 size={14} />
+                  One-time master sheet setup
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Upload your real Elastic Tree project sheet (.xls) once — ET Scout learns your column headers
+                  and reuses that mapping for every import.
+                </p>
+                <input
+                  ref={masterInputRef}
+                  type="file"
+                  accept=".xls,.xlsx,.xlsm,.csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) void handleConfigureMaster(file)
+                    e.target.value = ''
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={configuring}
+                  onClick={() => masterInputRef.current?.click()}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {configuring ? <Loader2 size={14} className="animate-spin" /> : <FileUp size={14} />}
+                  Upload master sheet (.xls)
+                </button>
+              </div>
+            )}
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -436,7 +488,7 @@ export function OperationsHubPage() {
               <input
                 ref={importInputRef}
                 type="file"
-                accept=".xlsx,.xlsm,.csv"
+                accept=".xlsx,.xlsm,.xls,.csv"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0]
@@ -454,6 +506,13 @@ export function OperationsHubPage() {
                 Upload project sheet
               </button>
             </div>
+            {importPreview && (
+              <p className="mt-2 text-xs text-slate-600">
+                Preview: {importPreview.row_count} rows, {importPreview.headers.length} columns detected.
+                {Object.values(importPreview.suggested_column_map).includes('project_value_inr') &&
+                  ' Finance value column detected.'}
+              </p>
+            )}
             {importError && <p className="mt-2 text-xs text-rose-600">{importError}</p>}
             {importResult && (
               <div className="mt-3 rounded-lg bg-[var(--et-gray-50)] px-3 py-2 text-xs text-slate-700">
@@ -505,6 +564,8 @@ export function OperationsHubPage() {
                 <tr>
                   <th className="px-4 py-3">Project</th>
                   <th className="px-4 py-3">Client</th>
+                  <th className="px-4 py-3">FY / Month</th>
+                  <th className="px-4 py-3">Value INR</th>
                   <th className="px-4 py-3">Stage</th>
                   <th className="px-4 py-3">Survey</th>
                   <th className="px-4 py-3">Actions</th>
@@ -513,8 +574,18 @@ export function OperationsHubPage() {
               <tbody>
                 {projects.map((p) => (
                   <tr key={p.project_id} className="border-b border-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-900">{p.project_name}</td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-slate-900">{p.project_name}</p>
+                      {p.project_code && <p className="text-xs text-slate-500">{p.project_code}</p>}
+                    </td>
                     <td className="px-4 py-3 text-slate-600">{p.client_name ?? '—'}</td>
+                    <td className="px-4 py-3 text-xs text-slate-600">
+                      <p>{p.fiscal_year ?? '—'}</p>
+                      {p.billing_month && <p>{p.billing_month}</p>}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-700">
+                      {formatInr(p.project_value_inr ?? p.budget_estimate)}
+                    </td>
                     <td className="px-4 py-3">
                       <select
                         value={p.stage}
@@ -581,7 +652,11 @@ export function OperationsHubPage() {
                 {pipeline!.unlinked_survey_ids.length === 1 ? 'y' : 'ies'} not assigned to a PM project
               </p>
               <p className="mt-1 text-xs">
-                Open the <button type="button" className="font-semibold underline" onClick={() => setTab('links')}>Survey links</button> tab to assign them.
+                Open{' '}
+                <Link to="/quantitative?tab=links" className="font-semibold underline">
+                  Quantitative → Survey links
+                </Link>{' '}
+                to assign them.
               </p>
             </div>
           )}
@@ -691,15 +766,23 @@ export function OperationsHubPage() {
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="text-xs text-slate-500">Budget estimate</p>
-                <p className="text-xl font-semibold">{finance.budget_estimate?.toLocaleString() ?? '—'}</p>
+                <p className="text-xl font-semibold">{formatInr(finance.budget_estimate)}</p>
+                {finance.project_value_inr != null && (
+                  <p className="mt-1 text-xs text-slate-500">Project value: {formatInr(finance.project_value_inr)}</p>
+                )}
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="text-xs text-slate-500">Actual</p>
-                <p className="text-xl font-semibold">{finance.budget_actual?.toLocaleString() ?? '—'}</p>
+                <p className="text-xl font-semibold">{formatInr(finance.budget_actual)}</p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="text-xs text-slate-500">Outstanding</p>
-                <p className="text-xl font-semibold">{finance.total_outstanding?.toLocaleString() ?? '—'}</p>
+                <p className="text-xl font-semibold">{formatInr(finance.total_outstanding)}</p>
+                {(finance.fiscal_year || finance.billing_month) && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {[finance.fiscal_year, finance.billing_month].filter(Boolean).join(' · ')}
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -716,146 +799,10 @@ export function OperationsHubPage() {
         </div>
       )}
 
-      {tab === 'programming' && (
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">
-            Survey programming uses LimeSurvey as the engine. Link a survey to a PM project, then open the workspace for question setup, quotas, and spec export.
-          </p>
-          <ul className="space-y-3">
-            {projects.map((p) => (
-              <li
-                key={p.project_id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4"
-              >
-                <div>
-                  <p className="font-medium text-slate-900">{p.project_name}</p>
-                  <p className="text-xs text-slate-500">Stage: {p.stage}</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {p.limesurvey_survey_id ? (
-                    <>
-                      <Link
-                        to={`/projects/${p.limesurvey_survey_id}?mode=variables`}
-                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
-                      >
-                        Data setup
-                      </Link>
-                      <Link
-                        to={`/projects/${p.limesurvey_survey_id}?mode=workflow`}
-                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
-                      >
-                        Workflow
-                      </Link>
-                      <a
-                        href={`/api/projects/${p.limesurvey_survey_id}/questionnaire/export?format=xlsx`}
-                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
-                      >
-                        Export spec
-                      </a>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedProjectId(p.project_id)
-                        setTab('links')
-                      }}
-                      className="text-xs font-medium text-amber-700 underline"
-                    >
-                      Link survey first
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {tab === 'links' && (
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">
-            Assign each LimeSurvey study to exactly one PM project. Team members open the linked workspace from the dashboard or pipeline.
-          </p>
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-slate-100 bg-slate-50 text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">PM project</th>
-                  <th className="px-4 py-3">LimeSurvey ID</th>
-                  <th className="px-4 py-3">Assign</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projects.map((p) => (
-                  <tr key={p.project_id} className="border-b border-slate-50">
-                    <td className="px-4 py-3">
-                      <p className="font-medium">{p.project_name}</p>
-                      <p className="text-xs text-slate-500">{p.client_name}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      {p.limesurvey_survey_id ? (
-                        <Link
-                          to={`/projects/${p.limesurvey_survey_id}`}
-                          className="font-mono text-[var(--et-teal-dark)] hover:underline"
-                        >
-                          {p.limesurvey_survey_id}
-                          {surveyTitleById.get(p.limesurvey_survey_id)
-                            ? ` — ${surveyTitleById.get(p.limesurvey_survey_id)}`
-                            : ''}
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <select
-                          value={selectedProjectId === p.project_id ? linkSurveyId : ''}
-                          onFocus={() => setSelectedProjectId(p.project_id)}
-                          onChange={(e) => {
-                            setSelectedProjectId(p.project_id)
-                            setLinkSurveyId(e.target.value)
-                          }}
-                          className="et-select max-w-[220px] text-xs"
-                        >
-                          <option value="">Select survey…</option>
-                          {limeSurveys.map((s) => (
-                            <option key={s.id} value={String(s.id)}>
-                              {s.id} — {s.title.slice(0, 40)}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => void handleLinkSurvey(p.project_id)}
-                          className="rounded-lg bg-[var(--et-teal)] px-3 py-1.5 text-xs text-white"
-                        >
-                          Save link
-                        </button>
-                        {p.limesurvey_survey_id && (
-                          <button
-                            type="button"
-                            onClick={() => void api.linkPmSurvey(p.project_id, null).then(() => load())}
-                            className="text-xs text-slate-500 hover:text-red-600"
-                          >
-                            Unlink
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       <p className="text-xs text-slate-400">
         Fieldwork daily tracking: <Link to="/fieldwork" className="text-[var(--et-teal-dark)] hover:underline">Fieldwork tracker</Link>
         {' · '}
-        LimeSurvey studies: <Link to="/dashboard" className="text-[var(--et-teal-dark)] hover:underline">Dashboard</Link>
+        LimeSurvey &amp; programming: <Link to="/quantitative" className="text-[var(--et-teal-dark)] hover:underline">Quantitative</Link>
       </p>
 
       {requirementsProjectId && (

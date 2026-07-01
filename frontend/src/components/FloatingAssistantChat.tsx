@@ -16,7 +16,7 @@ const WELCOME =
   'Hi — I\'m Scout. Ask how to navigate the app, run analysis, fieldwork, qual, or operations workflows.'
 
 function pageHint(pathname: string): string {
-  if (pathname === '/dashboard') return 'Projects dashboard (LimeSurvey studies)'
+  if (pathname === '/quantitative' || pathname === '/dashboard') return 'Quantitative — LimeSurvey studies, programming, links, Studio'
   if (pathname === '/home') return 'Home — PM projects or Lime fallback'
   if (pathname === '/my-work') return 'My work — assigned tasks'
   if (pathname === '/operations') return 'Operations hub — PM projects'

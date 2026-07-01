@@ -177,7 +177,7 @@ export const APP_COMMAND_ITEMS: Array<{
   {
     label: 'All projects',
     description: 'Elastic Tree study list on the dashboard',
-    href: '/dashboard',
+    href: '/quantitative',
     group: 'App',
     keywords: ['dashboard', 'projects', 'studies', 'surveys', 'list'],
   },

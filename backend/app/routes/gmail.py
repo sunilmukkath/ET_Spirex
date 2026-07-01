@@ -9,7 +9,10 @@ from app.config import settings
 from app.models.gmail import (
     CreateTaskFromEmailRequest,
     CreateTaskFromEmailResponse,
+    CreateTasksFromEmailBatchRequest,
+    CreateTasksFromEmailBatchResponse,
     GmailConnectionStatus,
+    GmailEmailBreakdown,
     GmailMessageSummary,
     GmailTaskSuggestion,
 )
@@ -23,13 +26,16 @@ from app.services.gmail_client import (
     is_gmail_configured,
 )
 from app.services import gmail_store
+from app.services.gmail_suggest import suggest_task_from_message
 from app.services.gmail_tasks import (
+    break_down_email,
     create_task_from_email,
+    create_tasks_from_email_batch,
     get_connection_status,
-    suggest_task_from_message,
     sync_inbox,
+    _resolve_message,
+    _survey_title_for,
 )
-from app.services.project_workflow_store import get_project_workflow
 
 router = APIRouter(prefix="/gmail", tags=["gmail"])
 
@@ -81,7 +87,7 @@ def gmail_oauth_callback(code: str | None = None, state: str | None = None, erro
     try:
         tokens = exchange_code_for_tokens(code)
         gmail_store.save_tokens(record.username, tokens)
-    except Exception as exc:
+    except Exception:
         return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=error&reason=token_exchange")
     return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=connected")
 
@@ -109,11 +115,23 @@ def gmail_inbox(sync: bool = False, username: str = Depends(require_auth)):
 
 @router.get("/messages/{message_id}/suggestion", response_model=GmailTaskSuggestion)
 def gmail_message_suggestion(message_id: str, username: str = Depends(require_auth)):
-    cache = gmail_store.get_inbox_cache(username)
-    message = next((m for m in cache.get("messages") or [] if m.get("id") == message_id), None)
-    if not message:
-        raise HTTPException(status_code=404, detail="Message not in cache — sync inbox first")
+    try:
+        message = _resolve_message(username, message_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return suggest_task_from_message(message)
+
+
+@router.get("/messages/{message_id}/breakdown", response_model=GmailEmailBreakdown)
+def gmail_message_breakdown(message_id: str, username: str = Depends(require_auth)):
+    try:
+        return break_down_email(username, message_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GmailNotConnectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not break down email: {exc}") from exc
 
 
 @router.post("/messages/{message_id}/task", response_model=CreateTaskFromEmailResponse)
@@ -122,15 +140,9 @@ def gmail_create_task(
     body: CreateTaskFromEmailRequest,
     username: str = Depends(require_auth),
 ):
-    workflow = get_project_workflow(body.survey_id)
-    client = workflow.client_name.strip()
-    code = workflow.project_code.strip()
-    if client and code:
-        survey_title = f"{client} — {code}"
-    elif client:
-        survey_title = client
-    else:
-        survey_title = f"Survey {body.survey_id}"
+    survey_title = ""
+    if body.survey_id is not None:
+        survey_title = _survey_title_for(body.survey_id)
     try:
         return create_task_from_email(
             username,
@@ -144,3 +156,19 @@ def gmail_create_task(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not create task: {exc}") from exc
+
+
+@router.post("/messages/{message_id}/tasks", response_model=CreateTasksFromEmailBatchResponse)
+def gmail_create_tasks_batch(
+    message_id: str,
+    body: CreateTasksFromEmailBatchRequest,
+    username: str = Depends(require_auth),
+):
+    try:
+        return create_tasks_from_email_batch(username, message_id, body)
+    except GmailNotConnectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not create tasks: {exc}") from exc

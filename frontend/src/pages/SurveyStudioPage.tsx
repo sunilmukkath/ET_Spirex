@@ -4,7 +4,7 @@ import { Loader2, PenLine, Plus, Sparkles } from 'lucide-react'
 import { api, type EtStudioSurveyListItem } from '../api/client'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
-export function SurveyStudioPage() {
+export function SurveyStudioPage({ embedded = false }: { embedded?: boolean }) {
   const [available, setAvailable] = useState<boolean | null>(null)
   const [surveys, setSurveys] = useState<EtStudioSurveyListItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,7 +53,8 @@ export function SurveyStudioPage() {
   if (loading) return <LoadingState message="Loading Survey Studio…" />
 
   return (
-    <div className="et-page et-page-wide py-8">
+    <div className={embedded ? 'space-y-6' : 'et-page et-page-wide py-8'}>
+      {!embedded && (
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="mb-2 flex items-center gap-2">
@@ -66,6 +67,13 @@ export function SurveyStudioPage() {
           </p>
         </div>
       </div>
+      )}
+
+      {embedded && (
+        <p className="text-sm text-slate-600">
+          Program quant surveys inside ET Scout — customisable blocks, question types, and a hosted collector.
+        </p>
+      )}
 
       {error && <ErrorState message={error} />}
 

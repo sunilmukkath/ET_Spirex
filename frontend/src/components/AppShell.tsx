@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { BarChart3, ClipboardList, Home, LayoutGrid, LogOut, Menu, PenLine, Settings, Users, X } from 'lucide-react'
+import { BarChart3, ClipboardList, Home, Landmark, LayoutGrid, LogOut, Menu, Settings, Users, X } from 'lucide-react'
 import type { CommandPaletteItem } from './workspace/CommandPalette'
 import { useAuth } from '../auth/AuthContext'
 import { BrandLogo } from './BrandLogo'
@@ -16,20 +16,12 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
     keywords: ['landing', 'dashboard', 'start', 'hub'],
   },
   {
-    id: 'app-studio',
-    label: 'Survey Studio',
-    description: 'Program ET Scout native surveys — replace LimeSurvey for new studies',
+    id: 'app-quantitative',
+    label: 'Quantitative',
+    description: 'LimeSurvey studies, programming, survey links, and Survey Studio',
     group: 'App',
-    href: '/studio',
-    keywords: ['builder', 'questionnaire', 'program', 'native', 'authoring'],
-  },
-  {
-    id: 'app-dashboard',
-    label: 'Projects',
-    description: 'LimeSurvey studies and workspace hub',
-    group: 'App',
-    href: '/dashboard',
-    keywords: ['home', 'surveys', 'limesurvey'],
+    href: '/quantitative',
+    keywords: ['home', 'surveys', 'limesurvey', 'quant', 'studio', 'programming'],
   },
   {
     id: 'app-my-work',
@@ -42,10 +34,18 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
   {
     id: 'app-operations',
     label: 'Operations',
-    description: 'Proposal-to-closure pipeline, finance, CRM, survey links',
+    description: 'Proposal-to-closure pipeline, finance, and CRM',
     group: 'App',
     href: '/operations',
     keywords: ['pm', 'pipeline', 'finance', 'crm', 'marketing', 'proposal', 'clients'],
+  },
+  {
+    id: 'app-accounting',
+    label: 'Accounting',
+    description: 'Chart of accounts, AR/AP, payments, Zoho migration',
+    group: 'App',
+    href: '/accounting',
+    keywords: ['books', 'zoho', 'invoices', 'bills', 'ledger', 'gst'],
   },
   {
     id: 'app-fieldwork',
@@ -80,6 +80,8 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const isWorkspace = /^\/projects\/\d+/.test(location.pathname)
+  const isQuantitative =
+    location.pathname === '/quantitative' || location.pathname.startsWith('/quantitative/')
 
   useCommandPaletteHotkey(() => {
     if (!isWorkspace) setCommandOpen(true)
@@ -121,18 +123,11 @@ export function AppShell() {
               Home
             </Link>
             <Link
-              to="/dashboard"
-              className={`et-chip ${location.pathname === '/dashboard' ? 'et-chip-active' : 'et-chip-inactive'}`}
+              to="/quantitative"
+              className={`et-chip ${isQuantitative ? 'et-chip-active' : 'et-chip-inactive'}`}
             >
-              <LayoutGrid size={14} />
-              Projects
-            </Link>
-            <Link
-              to="/studio"
-              className={`et-chip ${location.pathname.startsWith('/studio') ? 'et-chip-active' : 'et-chip-inactive'}`}
-            >
-              <PenLine size={14} />
-              Studio
+              <BarChart3 size={14} />
+              Quantitative
             </Link>
             <Link
               to="/my-work"
@@ -147,6 +142,13 @@ export function AppShell() {
             >
               <LayoutGrid size={14} />
               Operations
+            </Link>
+            <Link
+              to="/accounting"
+              className={`et-chip ${location.pathname === '/accounting' ? 'et-chip-active' : 'et-chip-inactive'}`}
+            >
+              <Landmark size={14} />
+              Accounting
             </Link>
             <Link
               to="/fieldwork"
@@ -246,14 +248,14 @@ export function AppShell() {
                 Home
               </Link>
               <Link
-                to="/dashboard"
+                to="/quantitative"
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/dashboard' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
+                  isQuantitative ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                <LayoutGrid size={16} />
-                Projects
+                <BarChart3 size={16} />
+                Quantitative
               </Link>
               <Link
                 to="/my-work"
@@ -274,6 +276,16 @@ export function AppShell() {
               >
                 <LayoutGrid size={16} />
                 Operations
+              </Link>
+              <Link
+                to="/accounting"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
+                  location.pathname === '/accounting' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Landmark size={16} />
+                Accounting
               </Link>
               <Link
                 to="/fieldwork"

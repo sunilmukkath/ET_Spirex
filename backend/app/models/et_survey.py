@@ -32,12 +32,14 @@ class EtAnswerOption(BaseModel):
     code: str
     label: str
     sort_order: int = 0
+    randomize_code: str = ""
 
 
 class EtMatrixRow(BaseModel):
     code: str
     label: str
     sort_order: int = 0
+    randomize_code: str = ""
 
 
 class EtShowIfRule(BaseModel):
@@ -65,6 +67,7 @@ class EtQuestion(BaseModel):
     allow_other: bool = False
     other_label: str = "Other (please specify)"
     randomize_options: bool = False
+    randomize_code: str = ""
     show_if: EtShowIfRule | None = None
 
 
@@ -73,6 +76,7 @@ class EtBlock(BaseModel):
     title: str
     description: str = ""
     sort_order: int = 0
+    randomize_code: str = ""
     questions: list[EtQuestion] = Field(default_factory=list)
 
 

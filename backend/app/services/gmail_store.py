@@ -78,26 +78,58 @@ def _save_links(data: dict[str, Any]) -> None:
     _links_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def _normalize_link_entry(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {"tasks": []}
+    if "tasks" in raw and isinstance(raw["tasks"], list):
+        return {"tasks": list(raw["tasks"])}
+    if raw.get("task_id"):
+        return {
+            "tasks": [
+                {
+                    "survey_id": raw.get("survey_id"),
+                    "task_id": raw.get("task_id"),
+                    "personal": raw.get("personal", raw.get("survey_id") is None),
+                    "created_by": raw.get("created_by"),
+                    "created_at": raw.get("created_at"),
+                }
+            ]
+        }
+    return {"tasks": []}
+
+
 def link_message_to_task(
     gmail_message_id: str,
     *,
-    survey_id: int,
+    survey_id: int | None,
     task_id: str,
     created_by: str,
+    personal: bool = False,
 ) -> None:
     links = _load_links()
-    links[gmail_message_id] = {
-        "survey_id": survey_id,
-        "task_id": task_id,
-        "created_by": created_by,
-        "created_at": time.time(),
-    }
+    entry = _normalize_link_entry(links.get(gmail_message_id))
+    entry["tasks"].append(
+        {
+            "survey_id": survey_id,
+            "task_id": task_id,
+            "personal": personal or survey_id is None,
+            "created_by": created_by,
+            "created_at": time.time(),
+        }
+    )
+    links[gmail_message_id] = entry
     _save_links(links)
 
 
+def get_message_links(gmail_message_id: str) -> list[dict[str, Any]]:
+    entry = _normalize_link_entry(_load_links().get(gmail_message_id))
+    return list(entry.get("tasks") or [])
+
+
 def get_message_link(gmail_message_id: str) -> dict[str, Any] | None:
-    return _load_links().get(gmail_message_id)
+    tasks = get_message_links(gmail_message_id)
+    return tasks[0] if tasks else None
 
 
 def message_has_task(gmail_message_id: str) -> bool:
-    return gmail_message_id in _load_links()
+    return bool(get_message_links(gmail_message_id))

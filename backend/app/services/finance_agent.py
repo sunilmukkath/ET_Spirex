@@ -47,6 +47,9 @@ def run_finance_agent(session: Session, project_id) -> AgentBriefResponse:
 def _finance_context(data: FinanceSummary) -> dict[str, Any]:
     return {
         "project_name": data.project_name,
+        "fiscal_year": data.fiscal_year,
+        "billing_month": data.billing_month,
+        "project_value_inr": float(data.project_value_inr) if data.project_value_inr else None,
         "budget_estimate": float(data.budget_estimate) if data.budget_estimate else None,
         "budget_actual": float(data.budget_actual) if data.budget_actual else None,
         "total_estimated_lines": float(data.total_estimated_lines) if data.total_estimated_lines else None,

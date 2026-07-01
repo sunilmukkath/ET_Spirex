@@ -9,6 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import pandas as pd
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +17,12 @@ from sqlalchemy.orm import Session
 from app.db.models import Client, Project
 from app.models.pm import PmImportResult, PmImportRowResult, PmProjectCreate
 from app.services import pm_ops_store, pm_store
+from app.services.project_import_config import (
+    import_config_info,
+    load_column_mapping,
+    save_column_mapping,
+    save_master_template,
+)
 
 VALID_STAGES: set[str] = {
     "Proposal",
@@ -32,6 +39,9 @@ VALID_STAGES: set[str] = {
 
 HEADER_ALIASES: dict[str, str] = {
     "projectname": "project_name",
+    "projectno": "project_code",
+    "projectnumber": "project_code",
+    "projectcode": "project_code",
     "project": "project_name",
     "name": "project_name",
     "title": "project_name",
@@ -46,6 +56,21 @@ HEADER_ALIASES: dict[str, str] = {
     "limesurvey": "survey_name",
     "limesurveyname": "survey_name",
     "studyname": "survey_name",
+    "limesurveytitle": "survey_name",
+    "surveytitle": "survey_name",
+    "lsid": "limesurvey_survey_id",
+    "lsstudyid": "limesurvey_survey_id",
+    "projecttitle": "project_name",
+    "study": "project_name",
+    "studyname": "project_name",
+    "clientorg": "client_name",
+    "buyer": "client_name",
+    "fy": "fiscal_year",
+    "financialyear": "fiscal_year",
+    "fiscalyear": "fiscal_year",
+    "month": "billing_month",
+    "billingmonth": "billing_month",
+    "projectmonth": "billing_month",
     "projecttype": "project_type",
     "type": "project_type",
     "engagementtype": "engagement_type",
@@ -61,12 +86,21 @@ HEADER_ALIASES: dict[str, str] = {
     "duedate": "target_close_date",
     "budgetestimate": "budget_estimate",
     "budget": "budget_estimate",
+    "projectvalue": "project_value_inr",
+    "projectvalueinr": "project_value_inr",
+    "projectvalue₹": "project_value_inr",
+    "valueinr": "project_value_inr",
+    "invoicevalue": "project_value_inr",
+    "inrvalue": "project_value_inr",
     "notes": "status_notes",
     "statusnotes": "status_notes",
     "comments": "status_notes",
 }
 
 TEMPLATE_HEADERS = [
+    "project_code",
+    "fiscal_year",
+    "billing_month",
     "project_name",
     "client_name",
     "limesurvey_survey_id",
@@ -78,11 +112,15 @@ TEMPLATE_HEADERS = [
     "start_date",
     "target_close_date",
     "budget_estimate",
+    "project_value_inr",
     "status_notes",
 ]
 
 TEMPLATE_EXAMPLE = [
     [
+        "P2026_001",
+        "FY2026 - 2027",
+        "July'2026",
         "Brand Tracker Q3 2026",
         "Acme FMCG",
         "",
@@ -94,9 +132,13 @@ TEMPLATE_EXAMPLE = [
         "2026-07-01",
         "2026-09-30",
         "45000",
+        "45000",
         "Monthly tracker — link by survey name if ID blank",
     ],
     [
+        "P2026_002",
+        "FY2026 - 2027",
+        "Aug'2026",
         "Concept Test — Snacks",
         "Retail Co",
         "123456",
@@ -105,6 +147,7 @@ TEMPLATE_EXAMPLE = [
         "ad-hoc",
         "Analysis",
         "Ambika",
+        "",
         "",
         "",
         "",
@@ -121,18 +164,21 @@ def project_import_template_xlsx() -> bytes:
     for row in TEMPLATE_EXAMPLE:
         ws.append(row)
     ws.freeze_panes = "A2"
-    for i, w in enumerate([36, 22, 18, 36, 12, 14, 24, 14, 14, 16, 14, 40], 1):
+    for i, w in enumerate([14, 16, 14, 36, 22, 14, 28, 14, 14, 22, 14, 14, 18, 16, 16, 40], 1):
         ws.column_dimensions[chr(64 + i) if i <= 26 else "A"].width = w
     # Fix column widths properly
     from openpyxl.utils import get_column_letter
 
-    widths = [36, 22, 18, 36, 12, 14, 24, 14, 14, 16, 14, 40]
+    widths = [14, 16, 14, 36, 22, 14, 28, 14, 14, 22, 14, 14, 18, 16, 16, 40]
     for idx, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(idx)].width = w
 
     help_ws = wb.create_sheet("Help")
     help_ws["A1"] = "Column guide"
     lines = [
+        "project_code — optional internal code, e.g. P2024_001",
+        "fiscal_year — optional finance year, e.g. FY2024 - 2025",
+        "billing_month — optional finance month",
         "project_name — required",
         "client_name — optional; created if new",
         "limesurvey_survey_id — LimeSurvey study ID (numeric); preferred when known",
@@ -143,6 +189,7 @@ def project_import_template_xlsx() -> bytes:
         "owner_name — Sunil, Ambika, Shilaja, or Ravikumar",
         "start_date / target_close_date — YYYY-MM-DD",
         "budget_estimate — number",
+        "project_value_inr — finance project value in INR; also used as budget_estimate if budget_estimate is blank",
         "status_notes — free text",
     ]
     for i, line in enumerate(lines, 2):
@@ -159,12 +206,121 @@ def _norm_header(value: Any) -> str:
 
 
 def _map_headers(raw_headers: list[Any]) -> dict[int, str]:
+    custom = load_column_mapping()
     mapped: dict[int, str] = {}
     for idx, raw in enumerate(raw_headers):
+        raw_str = str(raw or "").strip()
+        if raw_str in custom:
+            mapped[idx] = custom[raw_str]
+            continue
         key = HEADER_ALIASES.get(_norm_header(raw))
         if key:
             mapped[idx] = key
     return mapped
+
+
+def _suggest_field_for_header(header: str) -> str | None:
+    custom = load_column_mapping()
+    if header in custom:
+        return custom[header]
+    return HEADER_ALIASES.get(_norm_header(header))
+
+
+def _load_dataframe(data: bytes, filename: str) -> pd.DataFrame:
+    buf = io.BytesIO(data)
+    lower = (filename or "").lower()
+    if lower.endswith(".csv") or (not lower.endswith((".xls", ".xlsx", ".xlsm")) and data[:2] != b"PK"):
+        df = pd.read_csv(buf)
+    elif lower.endswith(".xls"):
+        df = pd.read_excel(buf, engine="xlrd")
+    else:
+        df = pd.read_excel(buf, engine="openpyxl")
+    df = df.dropna(how="all")
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+def _cell_to_str(val: Any) -> str:
+    if isinstance(val, pd.Timestamp):
+        return val.date().isoformat()
+    if isinstance(val, datetime):
+        return val.date().isoformat()
+    if isinstance(val, date):
+        return val.isoformat()
+    if isinstance(val, float) and val == int(val):
+        return str(int(val))
+    text = str(val).strip()
+    if text.endswith(".0") and text[:-2].lstrip("-").isdigit():
+        return text[:-2]
+    return text
+
+
+def _parse_rows_from_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
+    if df.empty:
+        return []
+    headers = list(df.columns)
+    col_map = _map_headers(headers)
+    if "project_name" not in col_map.values():
+        raise ValueError(
+            "Sheet must include a project name column. Upload your master sheet once under "
+            "Operations → Configure import, or use a project_name column."
+        )
+
+    out: list[dict[str, str]] = []
+    for _, series in df.iterrows():
+        if series.isna().all():
+            continue
+        item: dict[str, str] = {}
+        for idx, field in col_map.items():
+            if idx >= len(headers):
+                continue
+            val = series.iloc[idx]
+            if pd.isna(val):
+                continue
+            text = _cell_to_str(val)
+            if text and text.lower() != "nan":
+                item[field] = text
+        if item.get("project_name"):
+            out.append(item)
+    return out
+
+
+def inspect_project_sheet(data: bytes, *, filename: str = "") -> dict[str, Any]:
+    df = _load_dataframe(data, filename)
+    headers = list(df.columns)
+    suggested = {h: _suggest_field_for_header(h) for h in headers}
+    samples: list[dict[str, str]] = []
+    for _, series in df.head(5).iterrows():
+        row: dict[str, str] = {}
+        for h in headers:
+            val = series[h]
+            if pd.isna(val):
+                row[h] = ""
+            elif isinstance(val, pd.Timestamp):
+                row[h] = val.date().isoformat()
+            else:
+                row[h] = str(val).strip()
+        samples.append(row)
+    return {
+        "headers": headers,
+        "suggested_column_map": suggested,
+        "sample_rows": samples,
+        "row_count": int(len(df)),
+    }
+
+
+def configure_import_from_master(data: bytes, *, filename: str = "") -> dict[str, Any]:
+    inspection = inspect_project_sheet(data, filename=filename)
+    column_map = {
+        h: field
+        for h, field in inspection["suggested_column_map"].items()
+        if field
+    }
+    if "project_name" not in column_map.values():
+        raise ValueError("Could not detect a project name column — rename a column to 'Project name' or similar.")
+    save_column_mapping(column_map, source_filename=filename)
+    save_master_template(data)
+    return import_config_info()
 
 
 def _parse_rows_from_xlsx(data: bytes) -> list[dict[str, str]]:
@@ -224,12 +380,9 @@ def _parse_rows_from_csv(data: bytes) -> list[dict[str, str]]:
 
 
 def parse_project_sheet(data: bytes, *, filename: str = "") -> list[dict[str, str]]:
-    lower = filename.lower()
-    if lower.endswith(".csv"):
-        return _parse_rows_from_csv(data)
-    if lower.endswith(".xlsx") or lower.endswith(".xlsm"):
-        return _parse_rows_from_xlsx(data)
-    # Sniff: CSV if no xlsx magic
+    lower = (filename or "").lower()
+    if lower.endswith(".xls") or lower.endswith(".xlsx") or lower.endswith(".xlsm") or lower.endswith(".csv"):
+        return _parse_rows_from_dataframe(_load_dataframe(data, filename))
     if data[:2] != b"PK":
         return _parse_rows_from_csv(data)
     return _parse_rows_from_xlsx(data)
@@ -416,6 +569,8 @@ def import_projects_from_sheet(
                 )
                 continue
 
+        project_value_inr = _parse_decimal(row.get("project_value_inr"))
+        budget_estimate = _parse_decimal(row.get("budget_estimate")) or project_value_inr
         ptype = (row.get("project_type") or "quant").strip().lower()
         if ptype not in ("quant", "qual", "mixed"):
             ptype = "quant"
@@ -438,9 +593,13 @@ def import_projects_from_sheet(
                     stage=stage,  # type: ignore[arg-type]
                     owner_name=row.get("owner_name"),
                     limesurvey_survey_id=survey_id,
+                    project_code=row.get("project_code"),
+                    fiscal_year=row.get("fiscal_year"),
+                    billing_month=row.get("billing_month"),
                     start_date=_parse_date(row.get("start_date")),
                     target_close_date=_parse_date(row.get("target_close_date")),
-                    budget_estimate=_parse_decimal(row.get("budget_estimate")),
+                    budget_estimate=budget_estimate,
+                    project_value_inr=project_value_inr,
                     status_notes=row.get("status_notes"),
                 ),
             )

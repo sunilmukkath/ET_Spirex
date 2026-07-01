@@ -1090,14 +1090,14 @@ export function SurveyWorkspace() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
           <WorkspaceSidebarToggle onClick={() => setSidebarMobileOpen(true)} />
           <Link
-            to="/dashboard"
+            to="/quantitative"
             className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-[var(--et-teal-light)] hover:text-[var(--et-teal-dark)]"
           >
             <ArrowLeft size={16} />
             <span className="hidden sm:inline">Surveys</span>
           </Link>
           <div className="hidden h-6 w-px bg-slate-200 md:block" />
-          <Link to="/dashboard" className="hidden shrink-0 rounded-lg transition hover:opacity-90 md:block">
+          <Link to="/quantitative" className="hidden shrink-0 rounded-lg transition hover:opacity-90 md:block">
             <BrandLogo size="sm" />
           </Link>
           <div className="hidden h-6 w-px bg-slate-200 lg:block" />

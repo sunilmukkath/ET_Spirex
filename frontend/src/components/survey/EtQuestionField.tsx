@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { applyRandomizeOrder } from '../../lib/etSurveyRandomize'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { EtQuestion } from '../../api/client'
 
@@ -26,10 +27,11 @@ export function EtQuestionField({
     return <p className="text-sm leading-relaxed text-slate-700">{question.text}</p>
   }
 
-  const options = useMemo(
-    () => shuffledOptions(question.options ?? [], Boolean(question.randomize_options)),
-    [question.options, question.randomize_options],
-  )
+  const options = useMemo(() => {
+    const sorted = [...(question.options ?? [])].sort((a, b) => a.sort_order - b.sort_order)
+    if (question.randomize_options) return shuffledOptions(sorted, true)
+    return applyRandomizeOrder(sorted)
+  }, [question.options, question.randomize_options])
 
   return (
     <div>
@@ -240,6 +242,7 @@ function MatrixTable({
   onChange: (v: unknown) => void
 }) {
   const columns = useColumnDefs(question)
+  const rows = useMemo(() => applyRandomizeOrder(question.rows ?? []), [question.rows])
   const matrixVal = (value as Record<string, string> | undefined) ?? {}
 
   return (
@@ -256,7 +259,7 @@ function MatrixTable({
           </tr>
         </thead>
         <tbody>
-          {(question.rows ?? []).map((row) => (
+          {rows.map((row) => (
             <tr key={row.code} className="border-t border-slate-100">
               <td className="p-2 font-medium text-slate-800">{row.label}</td>
               {columns.map((col) => (
@@ -286,7 +289,7 @@ function CarouselArray({
   value: unknown
   onChange: (v: unknown) => void
 }) {
-  const rows = [...(question.rows ?? [])].sort((a, b) => a.sort_order - b.sort_order)
+  const rows = useMemo(() => applyRandomizeOrder(question.rows ?? []), [question.rows])
   const [index, setIndex] = useState(0)
   const columns = useColumnDefs(question)
   const matrixVal = (value as Record<string, string> | undefined) ?? {}

@@ -6,8 +6,8 @@ import { AppShell } from './components/AppShell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LandingPage } from './pages/LandingPage'
 
-const DashboardPage = lazy(() =>
-  import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+const QuantitativePage = lazy(() =>
+  import('./pages/QuantitativePage').then((m) => ({ default: m.QuantitativePage })),
 )
 const AdminSettingsPage = lazy(() =>
   import('./pages/AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })),
@@ -20,6 +20,9 @@ const FieldworkTrackerPage = lazy(() =>
 )
 const OperationsHubPage = lazy(() =>
   import('./pages/OperationsHubPage').then((m) => ({ default: m.OperationsHubPage })),
+)
+const AccountingPage = lazy(() =>
+  import('./pages/AccountingPage').then((m) => ({ default: m.AccountingPage })),
 )
 const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })))
 const SurveyWorkspace = lazy(() =>
@@ -64,9 +67,11 @@ function App() {
               }
             >
               <Route path="home" element={<HomePage />} />
-              <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="quantitative" element={<QuantitativePage />} />
+              <Route path="dashboard" element={<Navigate to="/quantitative" replace />} />
               <Route path="my-work" element={<MyWorkPage />} />
               <Route path="operations" element={<OperationsHubPage />} />
+              <Route path="accounting" element={<AccountingPage />} />
               <Route path="fieldwork" element={<FieldworkTrackerPage />} />
               <Route path="settings" element={<AdminSettingsPage />} />
               <Route path="studio" element={<SurveyStudioPage />} />

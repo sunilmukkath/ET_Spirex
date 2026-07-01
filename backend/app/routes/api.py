@@ -398,8 +398,21 @@ def unassigned_tasks_route(authorization: str | None = Header(default=None)):
 def _format_task_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     tasks = []
     for row in rows:
-        sid = int(row["survey_id"])
         task = row["task"]
+        if row.get("personal") or row.get("survey_id") is None:
+            tasks.append(
+                {
+                    "survey_id": None,
+                    "survey_title": "General activity",
+                    "phase": None,
+                    "client_name": "",
+                    "project_code": "",
+                    "personal": True,
+                    "task": task,
+                }
+            )
+            continue
+        sid = int(row["survey_id"])
         client = str(row.get("client_name") or "").strip()
         code = str(row.get("project_code") or "").strip()
         if client and code:
@@ -417,6 +430,7 @@ def _format_task_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "phase": row.get("phase"),
                 "client_name": client,
                 "project_code": code,
+                "personal": False,
                 "task": task,
             }
         )

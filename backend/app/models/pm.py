@@ -44,11 +44,15 @@ class PmProjectCreate(BaseModel):
     owner_id: UUID | None = None
     owner_name: str | None = None
     limesurvey_survey_id: int | None = None
+    project_code: str | None = None
+    fiscal_year: str | None = None
+    billing_month: str | None = None
     start_date: date | None = None
     target_close_date: date | None = None
     actual_close_date: date | None = None
     budget_estimate: Decimal | None = None
     budget_actual: Decimal | None = None
+    project_value_inr: Decimal | None = None
     status_notes: str | None = None
     requirements: ProjectRequirements | None = None
 
@@ -62,11 +66,15 @@ class PmProjectUpdate(BaseModel):
     owner_id: UUID | None = None
     owner_name: str | None = None
     limesurvey_survey_id: int | None = None
+    project_code: str | None = None
+    fiscal_year: str | None = None
+    billing_month: str | None = None
     start_date: date | None = None
     target_close_date: date | None = None
     actual_close_date: date | None = None
     budget_estimate: Decimal | None = None
     budget_actual: Decimal | None = None
+    project_value_inr: Decimal | None = None
     status_notes: str | None = None
     requirements: ProjectRequirements | None = None
 
@@ -83,11 +91,15 @@ class PmProjectOut(BaseModel):
     owner_id: UUID | None
     owner_name: str | None = None
     limesurvey_survey_id: int | None
+    project_code: str | None = None
+    fiscal_year: str | None = None
+    billing_month: str | None = None
     start_date: date | None
     target_close_date: date | None
     actual_close_date: date | None
     budget_estimate: Decimal | None
     budget_actual: Decimal | None
+    project_value_inr: Decimal | None = None
     status_notes: str | None
     requirements: ProjectRequirements | None = None
     created_at: datetime
@@ -269,6 +281,9 @@ class FinanceSummary(BaseModel):
     project_name: str
     budget_estimate: Decimal | None
     budget_actual: Decimal | None
+    project_value_inr: Decimal | None = None
+    fiscal_year: str | None = None
+    billing_month: str | None = None
     total_estimated_lines: Decimal | None
     total_actual_lines: Decimal | None
     total_invoiced: Decimal | None
@@ -377,6 +392,21 @@ class PmImportResult(BaseModel):
     skipped: int
     errors: int
     rows: list[PmImportRowResult] = Field(default_factory=list)
+
+
+class PmImportPreview(BaseModel):
+    headers: list[str]
+    suggested_column_map: dict[str, str | None]
+    sample_rows: list[dict[str, str]]
+    row_count: int
+
+
+class PmImportConfig(BaseModel):
+    configured: bool
+    column_count: int
+    column_map: dict[str, str]
+    template_exists: bool
+    template_size_bytes: int = 0
 
 
 # --- Agent I/O ---

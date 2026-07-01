@@ -379,18 +379,20 @@ def list_my_tasks(username: str) -> list[dict[str, Any]]:
     if not username:
         return []
     out: list[dict[str, Any]] = []
-    if not _DATA_DIR.is_dir():
-        return []
-    for path in sorted(_DATA_DIR.glob("*.json")):
-        try:
-            survey_id = int(path.stem)
-        except ValueError:
-            continue
-        workflow = get_project_workflow(survey_id)
-        for task in workflow.tasks:
-            if task.assignee != username or task.status == "done":
+    if _DATA_DIR.is_dir():
+        for path in sorted(_DATA_DIR.glob("*.json")):
+            try:
+                survey_id = int(path.stem)
+            except ValueError:
                 continue
-            out.append(_task_row(survey_id, workflow, task))
+            workflow = get_project_workflow(survey_id)
+            for task in workflow.tasks:
+                if task.assignee != username or task.status == "done":
+                    continue
+                out.append(_task_row(survey_id, workflow, task))
+    from app.services.personal_tasks_store import list_personal_task_rows
+
+    out.extend(list_personal_task_rows(username))
     out.sort(
         key=lambda row: (
             row["task"].get("due_date") or "9999",

@@ -317,8 +317,18 @@ export function SurveyBuilderPage() {
               <input
                 value={selectedBlock.title}
                 onChange={(e) => updateBlock(selectedBlock.id, { title: e.target.value })}
-                className="mb-3 w-full border-b border-transparent text-base font-semibold text-slate-900 focus:border-[var(--et-teal)] focus:outline-none"
+                className="mb-2 w-full border-b border-transparent text-base font-semibold text-slate-900 focus:border-[var(--et-teal)] focus:outline-none"
               />
+              <label className="mb-3 block text-xs text-slate-500">
+                Randomise code{' '}
+                <span className="text-slate-400">(sections with the same code shuffle together)</span>
+                <input
+                  value={selectedBlock.randomize_code ?? ''}
+                  onChange={(e) => updateBlock(selectedBlock.id, { randomize_code: e.target.value.trim() })}
+                  className="et-input mt-1 w-full font-mono text-sm"
+                  placeholder="e.g. G1"
+                />
+              </label>
               <div className="mb-3 space-y-2">
                 {QUESTION_TYPE_GROUPS.map((group) => (
                   <div key={group.title}>
@@ -461,6 +471,18 @@ function QuestionEditor({
           Required
         </label>
       )}
+      {question.type !== 'display' && (
+        <label className="block text-xs text-slate-500">
+          Randomise code{' '}
+          <span className="text-slate-400">(questions with the same code shuffle together)</span>
+          <input
+            value={question.randomize_code ?? ''}
+            onChange={(e) => onChange({ randomize_code: e.target.value.trim() })}
+            className="et-input mt-1 w-full font-mono text-sm"
+            placeholder="e.g. Q1"
+          />
+        </label>
+      )}
       {showChoiceExtras && (
         <>
           <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -544,6 +566,7 @@ function QuestionEditor({
           title={question.type === 'array_carousel' ? 'Carousel items (sub-questions)' : 'Matrix rows'}
           items={question.rows ?? []}
           codePrefix="R"
+          showRandomizeCode
           onChange={(rows) => onChange({ rows })}
         />
       )}
@@ -570,20 +593,27 @@ function OptionListEditor({
   onChange,
   codePrefix = '',
   hint,
+  showRandomizeCode = false,
 }: {
   title: string
-  items: { code: string; label: string; sort_order: number }[]
-  onChange: (items: { code: string; label: string; sort_order: number }[]) => void
+  items: { code: string; label: string; sort_order: number; randomize_code?: string }[]
+  onChange: (items: { code: string; label: string; sort_order: number; randomize_code?: string }[]) => void
   codePrefix?: string
   hint?: string
+  showRandomizeCode?: boolean
 }) {
   return (
     <div>
       <p className="mb-1 text-xs font-medium text-slate-500">{title}</p>
       {hint && <p className="mb-2 text-[10px] text-slate-400">{hint}</p>}
+      {showRandomizeCode && (
+        <p className="mb-2 text-[10px] text-slate-400">
+          Optional randomise code per row — rows sharing a code shuffle together.
+        </p>
+      )}
       <ul className="space-y-2">
         {items.map((opt, i) => (
-          <li key={`${opt.code}-${i}`} className="flex gap-2">
+          <li key={`${opt.code}-${i}`} className="flex flex-wrap gap-2">
             <input
               value={opt.code}
               onChange={(e) => {
@@ -601,9 +631,22 @@ function OptionListEditor({
                 next[i] = { ...opt, label: e.target.value }
                 onChange(next)
               }}
-              className="et-input flex-1 text-sm"
+              className="et-input min-w-0 flex-1 text-sm"
               placeholder="Label"
             />
+            {showRandomizeCode && (
+              <input
+                value={opt.randomize_code ?? ''}
+                onChange={(e) => {
+                  const next = [...items]
+                  next[i] = { ...opt, randomize_code: e.target.value.trim() }
+                  onChange(next)
+                }}
+                className="et-input w-20 font-mono text-xs"
+                placeholder="Rand"
+                title="Randomise code"
+              />
+            )}
             <button
               type="button"
               onClick={() => onChange(items.filter((_, j) => j !== i))}

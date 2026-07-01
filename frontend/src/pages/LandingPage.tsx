@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { BrandLockup } from '../components/BrandLockup'
+import { ElasticTreeLogo } from '../components/ElasticTreeLogo'
 import { SignInForm } from '../components/SignInForm'
 import { LoadingState } from '../components/States'
 import {
@@ -107,11 +108,15 @@ const CAPABILITY_GROUPS = [
 ] as const
 
 function scrollToSignIn() {
-  document.getElementById('signin')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const el = document.getElementById('signin')
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function scrollToCapabilities() {
-  document.getElementById('capabilities')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const el = document.getElementById('capabilities')
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 export function LandingPage() {
@@ -127,12 +132,12 @@ export function LandingPage() {
   }
 
   if (user) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/quantitative" replace />
   }
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[var(--et-navy)] text-white">
-      <div className="pointer-events-none absolute inset-0">
+    <div className="landing-page relative min-h-dvh bg-[var(--et-navy)] text-white">
+      <div className="pointer-events-none absolute inset-0 overflow-x-clip">
         <div className="landing-glow absolute -left-24 top-8 h-[28rem] w-[28rem] rounded-full bg-[var(--et-yellow)]/20 blur-3xl" />
         <div
           className="landing-glow absolute bottom-0 right-0 h-[32rem] w-[32rem] rounded-full bg-[var(--et-info-blue)]/10 blur-3xl"
@@ -142,11 +147,11 @@ export function LandingPage() {
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
       </div>
 
-      <header className="sticky top-0 z-20 border-b border-white/5 bg-[var(--et-navy)]/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
-          <div className="min-w-0">
+      <header className="sticky top-0 z-20 border-b border-white/5 bg-[var(--et-navy)] sm:bg-[var(--et-navy)]/80 sm:backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="min-w-0 shrink">
             <div className="sm:hidden">
-              <BrandLockup size="sm" variant="light" />
+              <ElasticTreeLogo size="sm" />
             </div>
             <div className="hidden sm:block">
               <BrandLockup size="lg" variant="light" />
@@ -155,7 +160,7 @@ export function LandingPage() {
           <button
             type="button"
             onClick={scrollToSignIn}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium transition hover:border-[var(--et-yellow)]/50 hover:bg-white/10 sm:px-5"
+            className="ml-auto inline-flex shrink-0 items-center gap-2 rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium transition hover:border-[var(--et-yellow)]/50 hover:bg-white/10 sm:px-5"
           >
             Sign in
             <ChevronRight size={14} className="text-[var(--et-yellow-bright)]" />
@@ -163,9 +168,9 @@ export function LandingPage() {
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto max-w-6xl px-4 pb-24 pt-10 sm:px-6 sm:pt-14 lg:pb-28">
-        <div className="grid gap-14 lg:grid-cols-[1.05fr_0.95fr] lg:items-start lg:gap-16">
-          <div>
+      <main className="relative z-10 mx-auto max-w-6xl px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] pt-8 sm:px-6 sm:pt-14 sm:pb-28 lg:pb-28">
+        <div className="grid gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-start lg:gap-16">
+          <div className="order-1 lg:order-none">
             <div className="animate-fade-in">
               <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--et-yellow)]/40 bg-[var(--et-yellow)]/15 px-3.5 py-1.5 text-xs font-semibold text-[var(--et-yellow-bright)]">
                 <Sparkles size={14} />
@@ -209,8 +214,43 @@ export function LandingPage() {
                 </button>
               </div>
             </div>
+          </div>
 
-            <section className="animate-fade-in-delay-1 mt-12">
+          <aside className="order-2 lg:order-none lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-24">
+            <div
+              id="signin"
+              className="scroll-mt-20 rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.1] to-white/[0.04] p-1 shadow-2xl shadow-black/20 ring-1 ring-white/10 sm:scroll-mt-28"
+            >
+              <div className="rounded-[0.9rem] bg-[var(--et-navy)]/40 px-5 py-4 sm:px-6">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--et-teal-light)]">
+                  Team access
+                </p>
+                <p className="mt-1 text-sm text-white/70">
+                  Elastic Tree researchers and project managers — sign in to open your home hub.
+                </p>
+                <ul className="mt-4 space-y-2 border-t border-white/10 pt-4 text-xs text-white/60">
+                  <li className="flex items-start gap-2">
+                    <ChevronRight size={14} className="mt-0.5 shrink-0 text-[var(--et-teal-light)]" />
+                    Tasks, projects, proposals, and finance in one place
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ChevronRight size={14} className="mt-0.5 shrink-0 text-[var(--et-teal-light)]" />
+                    Pick up LimeSurvey studies where you left off
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ChevronRight size={14} className="mt-0.5 shrink-0 text-[var(--et-teal-light)]" />
+                    QC, quotas, and client-ready exports per study
+                  </li>
+                </ul>
+              </div>
+              <div className="p-4 sm:p-5">
+                <SignInForm onSuccess={() => navigate('/quantitative')} />
+              </div>
+            </div>
+          </aside>
+
+          <div className="order-3 space-y-12 lg:order-none lg:col-start-1 lg:row-start-2">
+            <section className="animate-fade-in-delay-1">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-white/40">
                 Proposal to closure
               </p>
@@ -236,7 +276,7 @@ export function LandingPage() {
               </div>
             </section>
 
-            <section id="capabilities" className="animate-fade-in-delay-2 mt-14 scroll-mt-24">
+            <section id="capabilities" className="animate-fade-in-delay-2 scroll-mt-24">
               <div className="mb-6 flex items-end justify-between gap-4">
                 <div>
                   <h2 className="font-display text-xl font-semibold text-white sm:text-2xl">
@@ -276,39 +316,6 @@ export function LandingPage() {
               </div>
             </section>
           </div>
-
-          <aside className="animate-fade-in-delay-3 lg:sticky lg:top-24">
-            <div
-              id="signin"
-              className="scroll-mt-28 overflow-hidden rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.1] to-white/[0.04] p-1 shadow-2xl shadow-black/20 ring-1 ring-white/10"
-            >
-              <div className="rounded-[0.9rem] bg-[var(--et-navy)]/40 px-5 py-4 sm:px-6">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--et-teal-light)]">
-                  Team access
-                </p>
-                <p className="mt-1 text-sm text-white/70">
-                  Elastic Tree researchers and project managers — sign in to open your home hub.
-                </p>
-                <ul className="mt-4 space-y-2 border-t border-white/10 pt-4 text-xs text-white/60">
-                  <li className="flex items-start gap-2">
-                    <ChevronRight size={14} className="mt-0.5 shrink-0 text-[var(--et-teal-light)]" />
-                    Tasks, projects, proposals, and finance in one place
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <ChevronRight size={14} className="mt-0.5 shrink-0 text-[var(--et-teal-light)]" />
-                    Pick up LimeSurvey studies where you left off
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <ChevronRight size={14} className="mt-0.5 shrink-0 text-[var(--et-teal-light)]" />
-                    QC, quotas, and client-ready exports per study
-                  </li>
-                </ul>
-              </div>
-              <div className="p-4 sm:p-5">
-                <SignInForm onSuccess={() => navigate('/dashboard')} />
-              </div>
-            </div>
-          </aside>
         </div>
       </main>
 
@@ -327,7 +334,7 @@ export function LandingPage() {
         </div>
       </footer>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[var(--et-navy)]/95 p-3 backdrop-blur-md sm:hidden">
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[var(--et-navy)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:hidden">
         <button
           type="button"
           onClick={scrollToSignIn}

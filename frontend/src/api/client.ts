@@ -551,6 +551,7 @@ export interface ProjectTask {
   source?: 'manual' | 'email' | 'pilot'
   gmail_message_id?: string | null
   gmail_thread_id?: string | null
+  billable?: boolean
 }
 
 export type ActivityType =
@@ -687,11 +688,12 @@ export interface UserPreferences {
 }
 
 export interface MyTaskRow {
-  survey_id: number
+  survey_id: number | null
   survey_title: string
   phase?: ProjectPhase
   client_name?: string
   project_code?: string
+  personal?: boolean
   task: ProjectTask
 }
 
@@ -991,12 +993,14 @@ export interface EtAnswerOption {
   code: string
   label: string
   sort_order: number
+  randomize_code?: string
 }
 
 export interface EtMatrixRow {
   code: string
   label: string
   sort_order: number
+  randomize_code?: string
 }
 
 export interface EtShowIfRule {
@@ -1022,6 +1026,7 @@ export interface EtQuestion {
   allow_other?: boolean
   other_label?: string
   randomize_options?: boolean
+  randomize_code?: string
   show_if?: EtShowIfRule | null
 }
 
@@ -1030,6 +1035,7 @@ export interface EtBlock {
   title: string
   description?: string
   sort_order: number
+  randomize_code?: string
   questions: EtQuestion[]
 }
 
@@ -1276,8 +1282,30 @@ export interface GmailMessageSummary {
   internal_date: number | null
   is_unread: boolean
   has_task: boolean
+  task_count: number
   linked_survey_id: number | null
   linked_task_id: string | null
+  email_url: string
+}
+
+export interface GmailTaskDraft {
+  title: string
+  note: string
+  category: TaskCategory
+  assignee: string | null
+  priority: TaskPriority
+  billable: boolean
+  project_related: boolean
+  survey_id: number | null
+  confidence: 'high' | 'medium' | 'low'
+}
+
+export interface GmailEmailBreakdown {
+  gmail_message_id: string
+  subject: string
+  configured: boolean
+  tasks: GmailTaskDraft[]
+  email_url: string
 }
 
 export interface GmailTaskSuggestion {
@@ -1299,11 +1327,15 @@ export interface PmProject {
   owner_id: string | null
   owner_name: string | null
   limesurvey_survey_id: number | null
+  project_code: string | null
+  fiscal_year: string | null
+  billing_month: string | null
   start_date: string | null
   target_close_date: string | null
   actual_close_date: string | null
   budget_estimate: number | null
   budget_actual: number | null
+  project_value_inr: number | null
   status_notes: string | null
   requirements?: ProjectRequirements | null
   created_at: string
@@ -1375,6 +1407,9 @@ export interface PmFinanceSummary {
   project_name: string
   budget_estimate: number | null
   budget_actual: number | null
+  project_value_inr: number | null
+  fiscal_year: string | null
+  billing_month: string | null
   total_estimated_lines: number | null
   total_actual_lines: number | null
   total_invoiced: number | null
@@ -1404,6 +1439,94 @@ export interface PmSurveyLink {
   survey_url: string | null
 }
 
+export interface AcctDashboard {
+  total_receivables: number
+  total_payables: number
+  income_mtd: number
+  expense_mtd: number
+  cash_balance: number
+  invoice_count: number
+  bill_count: number
+  contact_count: number
+  account_count: number
+}
+
+export interface AcctAccount {
+  account_id: string
+  code: string
+  name: string
+  account_type: string
+  description?: string | null
+  is_active: boolean
+}
+
+export interface AcctContact {
+  contact_id: string
+  contact_type: string
+  display_name: string
+  company_name?: string | null
+  email?: string | null
+  phone?: string | null
+}
+
+export interface AcctSalesInvoice {
+  sales_invoice_id: string
+  invoice_number: string
+  contact_name?: string | null
+  status: string
+  invoice_date?: string | null
+  due_date?: string | null
+  total: number
+  amount_paid: number
+  balance: number
+  currency: string
+}
+
+export interface AcctBill {
+  bill_id: string
+  bill_number: string
+  contact_name?: string | null
+  status: string
+  bill_date?: string | null
+  due_date?: string | null
+  total: number
+  amount_paid: number
+  balance: number
+  currency: string
+}
+
+export interface AcctPayment {
+  payment_id: string
+  payment_type: string
+  contact_name?: string | null
+  amount: number
+  payment_date?: string | null
+  payment_mode?: string | null
+  reference_number?: string | null
+}
+
+export interface ZohoImportModule {
+  module: string
+  label: string
+  description: string
+  sample_columns: string[]
+}
+
+export interface ZohoImportPreview {
+  module: string
+  total_rows: number
+  valid_rows: number
+  error_rows: number
+  rows: Array<{ row: number; status: string; message: string; preview: Record<string, string> }>
+}
+
+export interface ZohoImportResult {
+  module: string
+  imported: number
+  skipped: number
+  errors: string[]
+}
+
 export interface PmPipelineProject extends PmProject {
   client_name: string | null
   proposal_status: string | null
@@ -1431,6 +1554,21 @@ export interface PmImportResult {
   skipped: number
   errors: number
   rows: PmImportRowResult[]
+}
+
+export interface PmImportPreview {
+  headers: string[]
+  suggested_column_map: Record<string, string | null>
+  sample_rows: Record<string, string>[]
+  row_count: number
+}
+
+export interface PmImportConfig {
+  configured: boolean
+  column_count: number
+  column_map: Record<string, string>
+  template_exists: boolean
+  template_size_bytes: number
 }
 
 export interface PmMarketingActivity {
@@ -2186,6 +2324,10 @@ export const api = {
     engagement_type: 'tracking' | 'ad-hoc'
     owner_name?: string
     limesurvey_survey_id?: number
+    project_code?: string
+    fiscal_year?: string
+    billing_month?: string
+    project_value_inr?: number
     stage?: string
   }) =>
     fetchJson<PmProject>(
@@ -2241,6 +2383,54 @@ export const api = {
       throw new Error(err.detail || 'Import failed')
     }
     return res.json() as Promise<PmImportResult>
+  },
+  getPmImportConfig: () =>
+    fetchJson<PmImportConfig>('/api/pm/projects/import/config', undefined, BOOTSTRAP_TIMEOUT_MS),
+  previewPmImport: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const token = localStorage.getItem('et_scout_auth')
+    let auth = ''
+    if (token) {
+      try {
+        auth = JSON.parse(token).token ?? ''
+      } catch {
+        auth = ''
+      }
+    }
+    const res = await fetch('/api/pm/projects/import/preview', {
+      method: 'POST',
+      headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+      body: form,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Preview failed')
+    }
+    return res.json() as Promise<PmImportPreview>
+  },
+  configurePmImportMaster: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const token = localStorage.getItem('et_scout_auth')
+    let auth = ''
+    if (token) {
+      try {
+        auth = JSON.parse(token).token ?? ''
+      } catch {
+        auth = ''
+      }
+    }
+    const res = await fetch('/api/pm/projects/import/configure', {
+      method: 'POST',
+      headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+      body: form,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Configure failed')
+    }
+    return res.json() as Promise<PmImportConfig>
   },
   getPmFieldworkDashboard: (projectId: string) =>
     fetchJson<PmFieldworkDashboard>(
@@ -2408,27 +2598,71 @@ export const api = {
       undefined,
       BOOTSTRAP_TIMEOUT_MS,
     ),
+  getGmailEmailBreakdown: (messageId: string) =>
+    fetchJson<GmailEmailBreakdown>(
+      `/api/gmail/messages/${messageId}/breakdown`,
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
   createTaskFromEmail: (
     messageId: string,
     body: {
-      survey_id: number
+      survey_id?: number | null
       title?: string
       description?: string
+      note?: string
       category?: TaskCategory
       assignee?: string | null
       priority?: TaskPriority
       due_date?: string | null
+      billable?: boolean
     },
   ) =>
     fetchJson<{
-      survey_id: number
+      survey_id: number | null
       task_id: string
       task_title: string
       assignee: string | null
       gmail_message_id: string
       survey_title: string
+      personal: boolean
+      billable: boolean
+      email_url: string
     }>(
       `/api/gmail/messages/${messageId}/task`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  createTasksFromEmail: (
+    messageId: string,
+    body: {
+      tasks: Array<{
+        title: string
+        note?: string
+        survey_id?: number | null
+        category?: TaskCategory
+        assignee?: string | null
+        priority?: TaskPriority
+        billable?: boolean
+      }>
+    },
+  ) =>
+    fetchJson<{ created: Array<{
+      survey_id: number | null
+      task_id: string
+      task_title: string
+      assignee: string | null
+      gmail_message_id: string
+      survey_title: string
+      personal: boolean
+      billable: boolean
+      email_url: string
+    }>; count: number }>(
+      `/api/gmail/messages/${messageId}/tasks`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2508,5 +2742,50 @@ export const api = {
       throw new Error(err.detail || 'Upload failed')
     }
     return res.json() as Promise<{ path: string; exists: boolean; size_bytes: number }>
+  },
+
+  getAcctDashboard: () =>
+    fetchJson<AcctDashboard>('/api/accounting/dashboard', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listAcctAccounts: () =>
+    fetchJson<AcctAccount[]>('/api/accounting/accounts', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listAcctContacts: (contactType?: string) =>
+    fetchJson<AcctContact[]>(
+      `/api/accounting/contacts${contactType ? `?contact_type=${contactType}` : ''}`,
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  listAcctInvoices: () =>
+    fetchJson<AcctSalesInvoice[]>('/api/accounting/invoices', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listAcctBills: () =>
+    fetchJson<AcctBill[]>('/api/accounting/bills', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listAcctPayments: () =>
+    fetchJson<AcctPayment[]>('/api/accounting/payments', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listZohoModules: () =>
+    fetchJson<ZohoImportModule[]>('/api/accounting/zoho/modules', undefined, BOOTSTRAP_TIMEOUT_MS),
+  previewZohoImport: async (module: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`/api/accounting/zoho/preview?module=${encodeURIComponent(module)}`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Preview failed')
+    }
+    return res.json() as Promise<ZohoImportPreview>
+  },
+  importZohoData: async (module: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`/api/accounting/zoho/import?module=${encodeURIComponent(module)}`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Import failed')
+    }
+    return res.json() as Promise<ZohoImportResult>
   },
 }

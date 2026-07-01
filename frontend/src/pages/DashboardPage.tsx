@@ -141,7 +141,7 @@ function mergeStats(projects: Project[], stats: Record<string, { completed: numb
   })
 }
 
-export function DashboardPage() {
+export function DashboardPage({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth()
   const { prefs, loading: prefsLoading, savePrefs } = useUserPreferences(user?.username)
   const appSession = useMemo(
@@ -393,6 +393,7 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {!embedded && (
       <section className="rounded-xl border border-slate-200/80 bg-white px-4 py-4 shadow-sm sm:px-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
@@ -442,6 +443,35 @@ export function DashboardPage() {
           </div>
         )}
       </section>
+      )}
+
+      {embedded && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {connection && (
+            <div
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                connection.connected
+                  ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
+                  : 'bg-amber-50 text-amber-900 ring-1 ring-amber-200'
+              }`}
+            >
+              {connection.connected ? <Wifi size={12} /> : <WifiOff size={12} />}
+              {connection.connected
+                ? `${connection.survey_count ?? projects.length} studies on LimeSurvey`
+                : connection.message || 'Not connected'}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => void handleRefresh()}
+            disabled={refreshing || statsLoading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            <RefreshCw size={13} className={refreshing || statsLoading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -487,7 +517,7 @@ export function DashboardPage() {
           </div>
           <ul className="divide-y divide-slate-100">
             {myTasks.slice(0, 8).map((row) => (
-              <li key={`${row.survey_id}-${row.task.id}`} className="px-4 py-3 sm:px-0">
+              <li key={`${row.personal ? 'p' : row.survey_id}-${row.task.id}`} className="px-4 py-3 sm:px-0">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-slate-900">{row.task.title}</p>
@@ -503,6 +533,7 @@ export function DashboardPage() {
                       {TASK_CATEGORY_LABELS[row.task.category]}
                       {' · '}
                       {TASK_STATUS_LABELS[row.task.status]}
+                      {row.task.billable === false ? ' · non-billable' : ''}
                       {row.task.due_date && (
                         <>
                           {' '}
@@ -511,6 +542,7 @@ export function DashboardPage() {
                       )}
                     </p>
                   </div>
+                  {!row.personal && row.survey_id != null && (
                   <Link
                     to={`/projects/${row.survey_id}?mode=workflow`}
                     state={{ title: row.survey_title }}
@@ -519,6 +551,7 @@ export function DashboardPage() {
                     Open workflow
                     <ChevronRight size={14} />
                   </Link>
+                  )}
                 </div>
               </li>
             ))}

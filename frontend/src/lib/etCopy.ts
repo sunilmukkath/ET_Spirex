@@ -11,9 +11,13 @@ export const ET_LANDING_SUBTITLE =
 
 export const ET_SIGNIN_TAGLINE = 'Sign in to run quant and qual studies with your ET team.'
 
-export const ET_DASHBOARD_TITLE = 'Projects'
+export const ET_DASHBOARD_TITLE = 'LimeSurvey studies'
 export const ET_DASHBOARD_SUBTITLE =
-  'Quant fieldwork, qual transcripts, analysis, and client delivery — your Elastic Tree studies in one place.'
+  'Connected Elastic Tree LimeSurvey studies — open a workspace for programming, fieldwork, and analysis.'
+
+export const ET_QUANTITATIVE_TITLE = 'Quantitative'
+export const ET_QUANTITATIVE_SUBTITLE =
+  'LimeSurvey fieldwork, survey programming, PM links, and ET Survey Studio for quant studies.'
 
 export const ET_SURVEY_HOME_TITLE = 'Study overview'
 export const ET_SURVEY_HOME_TAGLINE =

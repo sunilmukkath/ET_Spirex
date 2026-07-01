@@ -78,7 +78,18 @@ function TaskList({ rows, empty }: { rows: MyTaskRow[]; empty: string }) {
   return (
     <ul className="space-y-2">
       {rows.map((row) => (
-        <li key={`${row.survey_id}-${row.task.id}`}>
+        <li key={`${row.personal ? 'p' : row.survey_id}-${row.task.id}`}>
+          {row.personal || row.survey_id == null ? (
+            <div className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
+              <Circle size={14} className="mt-0.5 shrink-0 text-slate-400" />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-900">{row.task.title}</p>
+                <p className="text-xs text-slate-500">
+                  {row.survey_title} · {TASK_CATEGORY_LABELS[row.task.category] ?? row.task.category}
+                </p>
+              </div>
+            </div>
+          ) : (
           <Link
             to={`/projects/${row.survey_id}?mode=workflow`}
             className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 transition hover:border-[var(--et-teal)]/30 hover:bg-[var(--et-teal-light)]/10"
@@ -93,6 +104,7 @@ function TaskList({ rows, empty }: { rows: MyTaskRow[]; empty: string }) {
               </p>
             </div>
           </Link>
+          )}
         </li>
       ))}
     </ul>
@@ -307,7 +319,7 @@ export function HomePage() {
             Draft proposal
           </Link>
         )}
-        <Link to="/dashboard" className="et-btn-secondary">
+        <Link to="/quantitative" className="et-btn-secondary">
           <LayoutGrid size={16} />
           All LimeSurvey studies
         </Link>
@@ -341,7 +353,7 @@ export function HomePage() {
         <ModuleCard
           title="My projects"
           icon={LayoutGrid}
-          href="/dashboard"
+          href="/quantitative"
           actionLabel="All studies"
           badge={myPmProjects.length || limeProjects.length}
         >

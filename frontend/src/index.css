@@ -160,6 +160,11 @@ body {
   animation: landing-glow 8s ease-in-out infinite;
 }
 
+.landing-page {
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
 @keyframes pulse-soft {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

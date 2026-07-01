@@ -41,6 +41,8 @@ from app.models.pm import (
     MarketingActivityCreate,
     MarketingActivityOut,
     PipelineOverview,
+    PmImportConfig,
+    PmImportPreview,
     PmImportResult,
     PmProjectCreate,
     PmProjectOut,
@@ -54,11 +56,18 @@ from app.models.pm import (
 )
 from app.models.project_requirements import ProjectRequirements
 from app.services import pm_ops_store, pm_store
-from app.services.pm_import import import_projects_from_sheet, project_import_template_xlsx
+from app.services.pm_import import (
+    configure_import_from_master,
+    import_config_info,
+    import_projects_from_sheet,
+    inspect_project_sheet,
+    project_import_template_xlsx,
+)
 from app.services.crm_agent import run_crm_agent
 from app.services.finance_agent import run_finance_agent
 from app.services.proposal_agent import run_proposal_writing_agent
 from app.services.auth import get_session
+from app.services.team_registry_store import is_global_admin
 from app.db.models import TeamMember
 from sqlalchemy import select
 
@@ -155,6 +164,47 @@ def pm_project_import_template(_: str = Depends(require_auth)):
     )
 
 
+@router.get("/projects/import/config", response_model=PmImportConfig)
+def pm_import_config(_: str = Depends(require_auth)):
+    return PmImportConfig.model_validate(import_config_info())
+
+
+@router.post("/projects/import/preview", response_model=PmImportPreview)
+async def pm_import_preview(
+    file: UploadFile = File(...),
+    _: str = Depends(require_auth),
+):
+    filename = file.filename or "upload.xlsx"
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    try:
+        preview = inspect_project_sheet(data, filename=filename)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PmImportPreview.model_validate(preview)
+
+
+@router.post("/projects/import/configure", response_model=PmImportConfig)
+async def pm_import_configure(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not is_global_admin(record.username):
+        raise HTTPException(status_code=403, detail="Only admins can configure the import template")
+    filename = file.filename or "master.xls"
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    try:
+        return PmImportConfig.model_validate(configure_import_from_master(data, filename=filename))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/projects/import", response_model=PmImportResult)
 async def pm_import_projects(
     file: UploadFile = File(...),
@@ -163,8 +213,8 @@ async def pm_import_projects(
 ):
     filename = file.filename or "upload.xlsx"
     lower = filename.lower()
-    if not lower.endswith((".xlsx", ".xlsm", ".csv")):
-        raise HTTPException(status_code=400, detail="Upload .xlsx or .csv project sheet")
+    if not lower.endswith((".xlsx", ".xlsm", ".xls", ".csv")):
+        raise HTTPException(status_code=400, detail="Upload .xls, .xlsx, or .csv project sheet")
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")

@@ -134,6 +134,10 @@ def _apply_schema_patches(engine: Engine) -> None:
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS requirements JSONB"
             )
         )
+        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_code VARCHAR(80)"))
+        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS fiscal_year VARCHAR(40)"))
+        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS billing_month VARCHAR(40)"))
+        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_value_inr NUMERIC(14, 2)"))
 
 
 def _seed_team_members(engine: Engine) -> None:

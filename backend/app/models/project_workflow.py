@@ -86,6 +86,7 @@ class ProjectTask(BaseModel):
     source: Literal["manual", "email", "pilot"] = "manual"
     gmail_message_id: str | None = None
     gmail_thread_id: str | None = None
+    billable: bool = True
 
 
 class ProjectWorkflow(BaseModel):

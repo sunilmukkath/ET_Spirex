@@ -1,6 +1,6 @@
 """Tests for Gmail → task suggestions."""
 
-from app.services.gmail_tasks import suggest_assignee, suggest_category, suggest_task_from_message
+from app.services.gmail_suggest import suggest_assignee, suggest_category, suggest_task_from_message
 
 
 def test_suggest_assignee_from_subject():

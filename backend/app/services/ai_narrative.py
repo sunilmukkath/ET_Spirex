@@ -51,6 +51,17 @@ def ai_status() -> dict[str, Any]:
     }
 
 
+def ai_configured() -> bool:
+    return settings.resolved_ai_provider is not None
+
+
+def complete_json(user_prompt: str, *, system: str, max_tokens: int = 1024) -> str:
+    text = complete_custom(user_prompt, system=system, max_tokens=max_tokens)
+    if not text:
+        raise RuntimeError("AI returned no response")
+    return text
+
+
 def format_ai_error(exc: BaseException) -> str:
     """User-safe message from an AI provider failure."""
     if isinstance(exc, httpx.HTTPStatusError):
