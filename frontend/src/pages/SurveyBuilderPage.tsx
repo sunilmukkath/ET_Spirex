@@ -12,12 +12,14 @@ import {
 } from 'lucide-react'
 import {
   api,
+  type AiStatus,
   type EtBlock,
   type EtQuestion,
   type EtQuestionType,
   type EtStudioSurvey,
   type EtSurveyDefinition,
 } from '../api/client'
+import { AiAssistPanel } from '../components/ai/AiAssistPanel'
 import { ErrorState, LoadingState } from '../components/States'
 
 const QUESTION_TYPES: { value: EtQuestionType; label: string }[] = [
@@ -78,6 +80,10 @@ export function SurveyBuilderPage() {
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const [aiBrief, setAiBrief] = useState('')
+  const [aiGenerating, setAiGenerating] = useState(false)
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null)
+  const [aiMessage, setAiMessage] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!Number.isFinite(id)) return
@@ -100,6 +106,10 @@ export function SurveyBuilderPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    api.getAiStatus().then(setAiStatus).catch(() => setAiStatus(null))
+  }, [])
 
   const selectedBlock = useMemo(
     () => definition?.blocks.find((b) => b.id === selectedBlockId) ?? null,
@@ -196,6 +206,28 @@ export function SurveyBuilderPage() {
     }
   }
 
+  async function handleAiDraft() {
+    if (!survey || !aiBrief.trim()) return
+    setAiGenerating(true)
+    setError(null)
+    setAiMessage(null)
+    try {
+      const result = await api.draftStudioQuestionnaire(survey.workspace_id, { brief: aiBrief.trim() })
+      setDefinition(result.definition)
+      setSaved(false)
+      setAiMessage(result.message)
+      const firstBlock = result.definition.blocks[0]
+      setSelectedBlockId(firstBlock?.id ?? null)
+      setSelectedQuestionId(firstBlock?.questions[0]?.id ?? null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'AI draft failed')
+    } finally {
+      setAiGenerating(false)
+    }
+  }
+
+  const aiReady = Boolean(aiStatus?.configured)
+
   if (loading) return <LoadingState message="Loading survey builder…" />
   if (error && !survey) return <ErrorState message={error} />
   if (!survey || !definition) return <ErrorState message="Survey not found" />
@@ -255,7 +287,7 @@ export function SurveyBuilderPage() {
               type="button"
               onClick={() => void handlePublish()}
               disabled={publishing}
-              className="inline-flex items-center gap-1 rounded-lg bg-[var(--et-teal)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-lg et-btn-accent px-3 py-1.5 text-xs disabled:opacity-50"
             >
               {publishing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               Publish
@@ -265,6 +297,22 @@ export function SurveyBuilderPage() {
       </header>
 
       {error && <p className="bg-rose-50 px-4 py-2 text-sm text-rose-800">{error}</p>}
+
+      <div className="mx-auto w-full max-w-7xl p-4 pb-0">
+        <AiAssistPanel
+          title="Draft questionnaire with AI"
+          description="Describe audience, objectives, and key topics. AI generates sections and questions you can edit before publishing."
+          brief={aiBrief}
+          onBriefChange={setAiBrief}
+          onGenerate={() => void handleAiDraft()}
+          generating={aiGenerating}
+          aiReady={aiReady}
+        >
+          {aiMessage && (
+            <p className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-xs text-[var(--et-navy)]">{aiMessage}</p>
+          )}
+        </AiAssistPanel>
+      </div>
 
       <div className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-12">
         <aside className="rounded-xl border border-slate-200 bg-white p-3 lg:col-span-3">

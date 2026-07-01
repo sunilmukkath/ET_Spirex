@@ -19,8 +19,10 @@ from app.services.report_template import (
     load_template,
 )
 
-ET_TEAL = RGBColor(0x00, 0x79, 0x6B)
+ET_NAVY = RGBColor(0x0B, 0x25, 0x45)
+ET_YELLOW = RGBColor(0xF0, 0xB4, 0x29)
 ET_SLATE = RGBColor(0x33, 0x41, 0x55)
+ET_TEAL = ET_NAVY  # legacy alias
 
 
 def _safe_text(text: str, max_len: int = 120) -> str:
@@ -73,7 +75,7 @@ def _add_branded_footer(slide) -> None:
     height = Inches(0.42)
     bar = slide.shapes.add_shape(1, left, top, width, height)
     bar.fill.solid()
-    bar.fill.fore_color.rgb = ET_TEAL
+    bar.fill.fore_color.rgb = ET_NAVY
     bar.line.fill.background()
     tf = bar.text_frame
     tf.text = "Elastic Tree · Research analytics"

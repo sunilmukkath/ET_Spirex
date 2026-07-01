@@ -13,7 +13,7 @@ interface ChatMessage {
 }
 
 const WELCOME =
-  'Hi — I\'m ET Scout Copilot. Ask how to navigate the app, run analysis, fieldwork, qual, or operations workflows.'
+  'Hi — I\'m Scout. Ask how to navigate the app, run analysis, fieldwork, qual, or operations workflows.'
 
 function pageHint(pathname: string): string {
   if (pathname === '/dashboard') return 'Projects dashboard (LimeSurvey studies)'
@@ -134,7 +134,7 @@ export function FloatingAssistantChat() {
           className="fixed bottom-24 right-4 z-[80] flex w-[min(100vw-2rem,24rem)] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
           style={{ height: 'min(32rem, calc(100vh - 7rem))' }}
           role="dialog"
-          aria-label="ET Scout Copilot"
+          aria-label="Scout"
         >
           <header className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--canvas)] px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
@@ -142,7 +142,7 @@ export function FloatingAssistantChat() {
                 <Sparkles size={16} />
               </span>
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-[var(--ink)]">ET Scout Copilot</p>
+                <p className="truncate text-sm font-semibold text-[var(--ink)]">Scout</p>
                 <p className="truncate text-xs text-[var(--muted)]">{pageHint(location.pathname)}</p>
               </div>
             </div>
@@ -213,7 +213,7 @@ export function FloatingAssistantChat() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="fixed bottom-5 right-5 z-[80] flex h-14 w-14 items-center justify-center rounded-full bg-[var(--et-navy)] text-[var(--et-yellow-bright)] shadow-lg transition hover:scale-105 hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--et-yellow)] focus-visible:ring-offset-2"
-        aria-label={open ? 'Close ET Scout Copilot' : 'Open ET Scout Copilot'}
+        aria-label={open ? 'Close Scout' : 'Open Scout'}
         aria-expanded={open}
       >
         {open ? <X size={22} /> : <MessageCircle size={22} />}

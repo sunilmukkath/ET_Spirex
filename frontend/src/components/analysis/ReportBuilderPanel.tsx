@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Download, FileText, Layers, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { AiStatusBadge } from '../ai/AiAssistPanel'
 import {
   api,
   type AiStatus,
@@ -55,7 +56,9 @@ export function ReportBuilderPanel({
   const [planReady, setPlanReady] = useState(false)
   const [generatingPlan, setGeneratingPlan] = useState(false)
   const [generatingReport, setGeneratingReport] = useState(false)
+  const [generatingTopline, setGeneratingTopline] = useState(false)
   const [reportDraft, setReportDraft] = useState<PmAgentDraft | null>(null)
+  const [toplineDraft, setToplineDraft] = useState<PmAgentDraft | null>(null)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -181,6 +184,27 @@ export function ReportBuilderPanel({
     }
   }
 
+  async function handleGenerateTopline() {
+    const payloads = buildSectionPayloads()
+    if (payloads.length === 0) {
+      setError('Configure at least one section before generating a topline')
+      return
+    }
+    setGeneratingTopline(true)
+    setError(null)
+    try {
+      const draft = await api.runToplineAgent(surveyId, {
+        deck_title: `${deckTitle} — Topline`,
+        sections: payloads,
+      })
+      setToplineDraft(draft)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Topline agent failed')
+    } finally {
+      setGeneratingTopline(false)
+    }
+  }
+
   async function handleGenerateReportDraft() {
     const payloads = buildSectionPayloads()
     if (payloads.length === 0) {
@@ -262,13 +286,14 @@ export function ReportBuilderPanel({
     <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll">
       <div className="mx-auto max-w-3xl space-y-5">
         <header>
-          <div className="flex items-center gap-2">
-            <FileText size={20} className="text-[var(--et-teal)]" />
-            <h2 className="font-display text-xl font-semibold text-slate-900">Report builder</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <FileText size={20} className="text-[var(--et-navy)]" />
+            <h2 className="font-display text-xl font-semibold text-[var(--ink)]">Report builder</h2>
+            <AiStatusBadge status={aiStatus} />
           </div>
-          <p className="mt-1 text-sm text-slate-500">
-            Build a branded Elastic Tree deck — generate an AI slide plan, review bullets, then export
-            one merged PowerPoint.
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Build a branded Elastic Tree deck — AI slide plan, topline, full report draft, then export
+            PowerPoint using your template.
           </p>
         </header>
 
@@ -288,8 +313,8 @@ export function ReportBuilderPanel({
           <label
             className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
               aiReady
-                ? 'border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/30'
-                : 'border-slate-200 bg-slate-50 text-slate-400'
+                ? 'border-[var(--et-yellow)]/40 bg-[var(--et-yellow-light)]'
+                : 'border-[var(--et-gray-200)] bg-[var(--et-gray-50)] text-[var(--muted)]'
             }`}
             title={
               aiReady
@@ -327,35 +352,48 @@ export function ReportBuilderPanel({
         )}
 
         {aiReady && (
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs text-[var(--et-teal-dark)]">
+          <div className="et-ai-panel flex flex-wrap items-center gap-2">
+            <p className="w-full text-xs font-medium text-[var(--et-navy)]">
               AI connected: {aiStatus?.provider} · {aiStatus?.model}
             </p>
             <button
               type="button"
               onClick={() => void handleGeneratePlan()}
               disabled={generatingPlan || configuredCount === 0}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/40 bg-white px-3 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)]/20 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-navy)]/15 bg-white px-3 py-1.5 text-xs font-semibold text-[var(--et-navy)] hover:bg-[var(--et-yellow-light)] disabled:opacity-50"
             >
               {generatingPlan ? (
                 <Loader2 size={14} className="animate-spin" />
               ) : (
                 <Sparkles size={14} />
               )}
-              Generate AI slide plan
+              Slide plan
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleGenerateTopline()}
+              disabled={generatingTopline || configuredCount === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-navy)]/15 bg-white px-3 py-1.5 text-xs font-semibold text-[var(--et-navy)] hover:bg-[var(--et-yellow-light)] disabled:opacity-50"
+            >
+              {generatingTopline ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Sparkles size={14} />
+              )}
+              Topline report
             </button>
             <button
               type="button"
               onClick={() => void handleGenerateReportDraft()}
               disabled={generatingReport || configuredCount === 0}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/40 bg-white px-3 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)]/20 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg et-btn-accent px-3 py-1.5 text-xs disabled:opacity-50"
             >
               {generatingReport ? (
                 <Loader2 size={14} className="animate-spin" />
               ) : (
                 <FileText size={14} />
               )}
-              Report writing agent
+              Full report draft
             </button>
             {planReady && (
               <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 ring-1 ring-emerald-200">
@@ -383,10 +421,36 @@ export function ReportBuilderPanel({
           </div>
         )}
 
-        {reportDraft && (
-          <div className="rounded-xl border border-[var(--et-teal)]/25 bg-white p-4 shadow-sm">
+        {toplineDraft && (
+          <div className="rounded-xl border border-[var(--et-yellow)]/30 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-[var(--et-teal-dark)]">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[var(--et-navy)]">
+                Topline {toplineDraft.configured ? '(AI)' : '(template)'}
+              </div>
+              <button
+                type="button"
+                onClick={() => void navigator.clipboard.writeText(toplineDraft.draft_markdown)}
+                className="text-xs font-medium text-[var(--et-navy)] hover:underline"
+              >
+                Copy markdown
+              </button>
+            </div>
+            <h3 className="mt-2 font-display text-lg font-semibold text-[var(--ink)]">{toplineDraft.title}</h3>
+            <div className="mt-3 max-h-56 space-y-3 overflow-y-auto et-scroll">
+              {toplineDraft.sections.map((s) => (
+                <section key={s.heading}>
+                  <h4 className="text-sm font-semibold text-[var(--ink)]">{s.heading}</h4>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--muted)]">{s.body}</p>
+                </section>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {reportDraft && (
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[var(--et-navy)]">
                 Report draft {reportDraft.configured ? '(AI)' : '(template)'}
               </div>
               <button

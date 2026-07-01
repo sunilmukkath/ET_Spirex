@@ -6,10 +6,10 @@ import json
 from typing import Any
 
 from app.models.assistant import AssistantChatRequest, AssistantChatResponse, AssistantMessage
-from app.services.ai_narrative import ai_status, complete_chat
+from app.services.ai_narrative import ai_status, complete_chat, format_ai_error
 from app.services.auth import VALID_USERS
 
-ASSISTANT_SYSTEM = """You are ET Scout Copilot — a helpful assistant inside Elastic Tree's research workspace (ET Scout).
+ASSISTANT_SYSTEM = """You are Scout — a helpful assistant inside Elastic Tree's research workspace (ET Scout).
 
 You help Elastic Tree team members with:
 - Navigating ET Scout (Home, Projects/LimeSurvey dashboard, My work, Operations, Fieldwork, Settings, survey workspace tabs)
@@ -82,9 +82,10 @@ def run_assistant_chat(username: str, body: AssistantChatRequest) -> AssistantCh
 
     try:
         reply = complete_chat(messages, system=ASSISTANT_SYSTEM, max_tokens=900)
-    except Exception:
+    except Exception as exc:
+        detail = format_ai_error(exc)
         return AssistantChatResponse(
-            reply="Sorry — the AI request failed. Please try again in a moment.",
+            reply=f"Sorry — the AI request failed. {detail}",
             configured=True,
         )
 

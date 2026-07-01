@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2, Mail, Save, Settings, Shield, Sparkles, SlidersHorizontal, Users, Wifi, WifiOff } from 'lucide-react'
-import { api, type AiStatus, type GlobalRole, type TeamRegistry } from '../api/client'
+import { FileUp, Loader2, Mail, Save, Settings, Shield, Sparkles, SlidersHorizontal, Users, Wifi, WifiOff } from 'lucide-react'
+import { api, type AiHealth, type AiStatus, type GlobalRole, type TeamRegistry } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { TEAM_USERS } from '../auth/AuthContext'
 import { useUserPreferences } from '../hooks/useUserPreferences'
+import { AI_FEATURES } from '../lib/aiFeatures'
+import { AiStatusBadge } from '../components/ai/AiAssistPanel'
 import { ET_LIMESURVEY_LABEL, ET_SETTINGS_SUBTITLE } from '../lib/etCopy'
 
 const ROLE_LABELS: Record<GlobalRole, string> = {
@@ -20,11 +22,16 @@ export function AdminSettingsPage() {
   const [sessions, setSessions] = useState<{ username: string; last_seen: number }[]>([])
   const [registry, setRegistry] = useState<TeamRegistry | null>(null)
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null)
+  const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
   const [gmailStatus, setGmailStatus] = useState<Awaited<ReturnType<typeof api.getGmailStatus>> | null>(null)
   const [gmailConnecting, setGmailConnecting] = useState(false)
   const [savingRoles, setSavingRoles] = useState(false)
   const [roleError, setRoleError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [templateInfo, setTemplateInfo] = useState<{ path: string; exists: boolean; size_bytes: number } | null>(null)
+  const [uploadingTemplate, setUploadingTemplate] = useState(false)
+  const [templateError, setTemplateError] = useState<string | null>(null)
+  const templateInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     Promise.all([
@@ -34,14 +41,18 @@ export function AdminSettingsPage() {
         .catch(() => ({ sessions: [] })),
       api.getTeamRegistry().catch(() => null),
       api.getAiStatus().catch(() => null),
+      api.getAiHealth().catch(() => null),
       api.getGmailStatus().catch(() => null),
+      api.getReportTemplateInfo().catch(() => null),
     ])
-      .then(([conn, sess, reg, ai, gmail]) => {
+      .then(([conn, sess, reg, ai, aiLive, gmail, template]) => {
         setConnection(conn)
         setSessions(sess.sessions ?? [])
         setRegistry(reg)
         setAiStatus(ai)
+        setAiHealth(aiLive)
         setGmailStatus(gmail)
+        setTemplateInfo(template)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -72,6 +83,26 @@ export function AdminSettingsPage() {
     } finally {
       setSavingRoles(false)
     }
+  }
+
+  async function handleTemplateUpload(file: File) {
+    if (!isAdmin) return
+    setUploadingTemplate(true)
+    setTemplateError(null)
+    try {
+      const info = await api.uploadReportTemplate(file)
+      setTemplateInfo(info)
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploadingTemplate(false)
+    }
+  }
+
+  function formatBytes(n: number) {
+    if (n < 1024) return `${n} B`
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`
   }
 
   if (loading) {
@@ -349,34 +380,101 @@ export function AdminSettingsPage() {
         </p>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2">
-          <Sparkles size={18} className="text-[var(--et-teal)]" />
-          <h2 className="text-sm font-semibold text-slate-900">AI report narratives</h2>
+      <section className="et-ai-panel">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Sparkles size={18} className="text-[var(--et-yellow)]" />
+            <h2 className="text-sm font-semibold text-[var(--et-navy)]">AI features in ET Scout</h2>
+            <AiStatusBadge status={aiStatus} />
+          </div>
+          <p className="text-xs text-[var(--muted)]">
+            {aiStatus?.configured
+              ? `${aiStatus.provider} · ${aiStatus.model}`
+              : 'Set ANTHROPIC_API_KEY on Railway for Claude'}
+          </p>
         </div>
-        <p className="mt-2 text-sm text-slate-600">
-          {aiStatus?.configured
-            ? `Connected — ${aiStatus.provider} (${aiStatus.model})`
-            : 'Not configured on this server'}
-        </p>
+        {aiStatus?.configured && (
+          <p
+            className={`mt-2 rounded-lg px-3 py-2 text-xs ${
+              aiHealth?.ok
+                ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
+                : 'bg-rose-50 text-rose-800 ring-1 ring-rose-200'
+            }`}
+          >
+            {aiHealth?.ok
+              ? 'Live connection verified — Copilot and AI features should work.'
+              : aiHealth?.error ??
+                'Could not verify AI connection. Check Railway variables and redeploy.'}
+          </p>
+        )}
         {!aiStatus?.configured && (
-          <div className="mt-3 space-y-2 text-xs leading-relaxed text-slate-500">
+          <div className="mt-3 space-y-2 text-xs leading-relaxed text-[var(--muted)]">
             <p>
-              <span className="font-medium text-slate-700">Claude (recommended):</span> create an API key at{' '}
+              <span className="font-medium text-[var(--ink)]">Claude (recommended):</span> create an API key at{' '}
               <span className="font-mono">console.anthropic.com</span> and set{' '}
-              <span className="font-mono">ANTHROPIC_API_KEY</span> on the server. A claude.ai Pro subscription does
-              not include API access.
-            </p>
-            <p>
-              <span className="font-medium text-slate-700">Azure OpenAI:</span> pay-as-you-go (new Azure accounts may
-              get trial credits — not permanently free). Set{' '}
-              <span className="font-mono">AZURE_OPENAI_ENDPOINT</span>,{' '}
-              <span className="font-mono">AZURE_OPENAI_API_KEY</span>, and{' '}
-              <span className="font-mono">AZURE_OPENAI_DEPLOYMENT</span>.
+              <span className="font-mono">ANTHROPIC_API_KEY</span> on the server.
             </p>
           </div>
         )}
+        <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+          {AI_FEATURES.map((feature) => (
+            <li
+              key={feature.id}
+              className="rounded-lg border border-[var(--border-subtle)] bg-white/90 px-3 py-2.5"
+            >
+              <div className="text-sm font-medium text-[var(--ink)]">{feature.title}</div>
+              <p className="mt-0.5 text-xs text-[var(--muted)]">{feature.description}</p>
+              <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-[var(--et-navy)]">
+                {feature.where}
+              </p>
+              {feature.href && (
+                <Link to={feature.href} className="mt-1 inline-block text-xs text-[var(--et-navy)] hover:underline">
+                  Open →
+                </Link>
+              )}
+            </li>
+          ))}
+        </ul>
       </section>
+
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2">
+            <FileUp size={18} className="text-[var(--et-navy)]" />
+            <h2 className="text-sm font-semibold text-slate-900">PowerPoint report template</h2>
+          </div>
+          <p className="mt-2 text-sm text-slate-600">
+            Upload your Elastic Tree branded <span className="font-mono">.pptx</span> template for report exports.
+            Layouts: title (0), content (1), section (2), blank (6).
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
+            {templateInfo?.exists
+              ? `Current template: ${formatBytes(templateInfo.size_bytes)} on server`
+              : 'No custom template — using bundled default'}
+          </p>
+          <input
+            ref={templateInputRef}
+            type="file"
+            accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) void handleTemplateUpload(file)
+              e.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            disabled={uploadingTemplate}
+            onClick={() => templateInputRef.current?.click()}
+            className="et-btn-accent mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-50"
+          >
+            {uploadingTemplate ? <Loader2 size={16} className="animate-spin" /> : <FileUp size={16} />}
+            Upload .pptx template
+          </button>
+          {templateError && <p className="mt-2 text-xs text-rose-600">{templateError}</p>}
+        </section>
+      )}
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-center gap-2">

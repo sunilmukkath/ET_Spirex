@@ -46,8 +46,63 @@ def ai_status() -> dict[str, Any]:
         "hints": {
             "anthropic": "Set ANTHROPIC_API_KEY from console.anthropic.com (separate from claude.ai Pro).",
             "azure": "Set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT.",
+            "model": "If chat fails after key is set, update ANTHROPIC_MODEL (e.g. claude-sonnet-4-6).",
         },
     }
+
+
+def format_ai_error(exc: BaseException) -> str:
+    """User-safe message from an AI provider failure."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        detail = ""
+        try:
+            body = exc.response.json()
+            err = body.get("error")
+            if isinstance(err, dict):
+                detail = str(err.get("message") or err.get("type") or "").strip()
+            elif err:
+                detail = str(err).strip()
+        except Exception:
+            detail = (exc.response.text or "")[:240].strip()
+
+        status = exc.response.status_code
+        model = settings.resolved_ai_model or "unknown"
+        lowered = detail.lower()
+        if status in {400, 404} and ("model" in lowered or "not_found" in lowered):
+            return (
+                f"The configured model ({model}) is unavailable or retired. "
+                "Set ANTHROPIC_MODEL=claude-sonnet-4-6 in Railway and redeploy."
+            )
+        if status == 401:
+            return "Invalid API key — check ANTHROPIC_API_KEY in Railway."
+        if status == 429:
+            return "AI rate limit reached — wait a moment and try again."
+        if detail:
+            return detail
+        return f"AI provider returned HTTP {status}."
+
+    text = str(exc).strip()
+    return text or "Unknown AI error"
+
+
+def probe_ai_connection() -> dict[str, Any]:
+    """Lightweight live check — key present is not enough if model/key is wrong."""
+    status = ai_status()
+    if not status.get("configured"):
+        return {**status, "ok": False, "error": "No AI provider configured"}
+
+    try:
+        reply = complete_chat(
+            [{"role": "user", "content": "Reply with exactly: OK"}],
+            system="Reply with exactly: OK",
+            max_tokens=16,
+        )
+        if not reply:
+            return {**status, "ok": False, "error": "AI returned an empty response"}
+        return {**status, "ok": True}
+    except Exception as exc:
+        logger.warning("AI probe failed: %s", exc)
+        return {**status, "ok": False, "error": format_ai_error(exc)}
 
 
 def profile_context(result: dict[str, Any]) -> dict[str, Any]:

@@ -31,6 +31,26 @@ def load_template() -> Presentation:
     return Presentation(str(ensure_template()))
 
 
+def template_info() -> dict[str, object]:
+    path = ensure_template()
+    stat = path.stat()
+    return {
+        "path": str(path.name),
+        "exists": path.is_file(),
+        "size_bytes": stat.st_size if path.is_file() else 0,
+        "updated_at": stat.st_mtime if path.is_file() else None,
+    }
+
+
+def save_template_bytes(data: bytes) -> None:
+    if not data or len(data) < 1000:
+        raise ValueError("File does not look like a valid PowerPoint template")
+    if not data[:2] == b"PK":
+        raise ValueError("Upload must be a .pptx file")
+    TEMPLATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TEMPLATE_PATH.write_bytes(data)
+
+
 def build_template_bytes() -> bytes:
     """Widescreen 16:9 presentation used as the merge-deck base."""
     prs = Presentation()

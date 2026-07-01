@@ -1,7 +1,7 @@
 import os
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.lime_client import (
@@ -90,11 +90,14 @@ from app.services.report_export import (
     profile_to_pptx,
 )
 from app.services.report_agent import run_report_writing_agent
+from app.services.topline_agent import run_topline_agent
+from app.services.report_template import save_template_bytes, template_info
 from app.services.ai_narrative import (
     ai_status,
     banner_context,
     generate_narrative,
     generate_slide_plan,
+    probe_ai_connection,
     profile_context,
 )
 from app.services.raw_data import get_raw_data_page, raw_data_to_csv
@@ -1050,6 +1053,53 @@ def get_variable_setup_defaults(
 def get_ai_status(authorization: str | None = Header(default=None)):
     _optional_username(authorization)
     return ai_status()
+
+
+@router.get("/ai/health")
+def get_ai_health(authorization: str | None = Header(default=None)):
+    _optional_username(authorization)
+    return probe_ai_connection()
+
+
+@router.get("/settings/report-template")
+def get_report_template(authorization: str | None = Header(default=None)):
+    _optional_username(authorization)
+    return template_info()
+
+
+@router.post("/settings/report-template")
+async def upload_report_template(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not is_global_admin(record.username):
+        raise HTTPException(status_code=403, detail="Only admins can upload report templates")
+    data = await file.read()
+    try:
+        save_template_bytes(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return template_info()
+
+
+@router.post("/projects/{survey_id}/analysis/topline-agent", response_model=AgentDraftResponse)
+def topline_writing_agent(
+    survey_id: int,
+    body: ReportWritingRequest,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    if not body.sections:
+        raise HTTPException(status_code=400, detail="At least one section required")
+    return run_topline_agent(
+        survey_id,
+        body.sections,
+        deck_title=body.deck_title,
+        client_context=body.client_context,
+    )
 
 
 @router.post("/projects/{survey_id}/analysis/report-narrative")

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # AI narratives for reports — anthropic | azure | auto (default: first key found)
     ai_provider: str = "auto"
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-20250514"
+    anthropic_model: str = "claude-sonnet-4-6"
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""
     azure_openai_deployment: str = "gpt-4o-mini"

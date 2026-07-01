@@ -956,6 +956,11 @@ export interface AiStatus {
   hints: Record<string, string>
 }
 
+export interface AiHealth extends AiStatus {
+  ok: boolean
+  error?: string
+}
+
 export interface AssistantChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -1576,6 +1581,7 @@ export const api = {
     }),
   getConnection: () => fetchJson<ConnectionStatus>('/api/connection', undefined, LIMESURVEY_TIMEOUT_MS),
   getAiStatus: () => fetchJson<AiStatus>('/api/ai/status'),
+  getAiHealth: () => fetchJson<AiHealth>('/api/ai/health'),
   assistantChat: (body: {
     message: string
     history?: AssistantChatMessage[]
@@ -2390,4 +2396,47 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  draftStudioQuestionnaire: (workspaceId: number, body: { brief: string; language?: string }) =>
+    fetchJson<{ configured: boolean; definition: EtSurveyDefinition; message: string }>(
+      `/api/studio/surveys/${workspaceId}/ai/questionnaire`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+  runToplineAgent: (
+    surveyId: number,
+    body: { deck_title?: string; client_context?: string; sections: ReportSectionPayload[] },
+  ) =>
+    fetchJson<PmAgentDraft>(`/api/projects/${surveyId}/analysis/topline-agent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  getReportTemplateInfo: () =>
+    fetchJson<{ path: string; exists: boolean; size_bytes: number }>('/api/settings/report-template'),
+  uploadReportTemplate: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const token = localStorage.getItem('et_scout_auth')
+    let auth = ''
+    if (token) {
+      try {
+        auth = JSON.parse(token).token ?? ''
+      } catch {
+        auth = ''
+      }
+    }
+    const res = await fetch('/api/settings/report-template', {
+      method: 'POST',
+      headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+      body: form,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Upload failed')
+    }
+    return res.json() as Promise<{ path: string; exists: boolean; size_bytes: number }>
+  },
 }

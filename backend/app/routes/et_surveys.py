@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+
+from pydantic import BaseModel, Field
 
 from app.models.et_survey import (
     EtCollectorSurvey,
@@ -25,9 +27,15 @@ from app.services.et_survey_store import (
     submit_response,
     update_et_survey,
 )
+from app.services.questionnaire_agent import run_questionnaire_agent
 
 router = APIRouter(tags=["et-surveys"])
 collector_router = APIRouter(tags=["collector"])
+
+
+class QuestionnaireAiRequest(BaseModel):
+    brief: str = Field(min_length=10)
+    language: str = "en"
 
 
 def _extract_token(authorization: str | None) -> str | None:
@@ -110,6 +118,23 @@ def studio_publish_survey(workspace_id: int, _: str = Depends(require_auth)):
     if not survey:
         raise HTTPException(status_code=404, detail="Survey not found")
     return survey
+
+
+@router.post("/studio/surveys/{workspace_id}/ai/questionnaire")
+def studio_ai_questionnaire(
+    workspace_id: int,
+    body: QuestionnaireAiRequest,
+    _: str = Depends(require_auth),
+):
+    _require_studio()
+    survey = get_et_survey(workspace_id)
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    return run_questionnaire_agent(
+        title=survey.title,
+        brief=body.brief,
+        language=body.language or survey.language,
+    )
 
 
 @collector_router.get("/collector/{slug}", response_model=EtCollectorSurvey)
