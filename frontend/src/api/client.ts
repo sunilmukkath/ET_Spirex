@@ -379,6 +379,8 @@ export interface BannerRequest {
   show_significance?: boolean
   confidence_level?: number
   metric?: string
+  show_base_row?: boolean
+  summary_stats?: string[]
 }
 
 export interface TableCell {
@@ -395,6 +397,8 @@ export interface TableRow {
   label: string
   cells: TableCell[]
   is_total?: boolean
+  is_base?: boolean
+  is_summary?: boolean
 }
 
 export interface BannerResult {
@@ -418,6 +422,8 @@ export interface BannerResult {
   show_col_pct?: boolean
   show_row_pct?: boolean
   show_significance?: boolean
+  show_base_row?: boolean
+  summary_stats?: string[]
 }
 
 export interface ProfileResult {
@@ -489,6 +495,14 @@ export interface QcConfig {
 }
 
 export type GlobalRole = 'admin' | 'manager' | 'member'
+export type AppModule =
+  | 'home'
+  | 'quantitative'
+  | 'my_work'
+  | 'operations'
+  | 'accounting'
+  | 'team'
+  | 'settings'
 export type ProjectModule =
   | 'programming'
   | 'field'
@@ -511,10 +525,64 @@ export type TaskPriority = 'low' | 'medium' | 'high'
 export interface TeamUser {
   username: string
   role: GlobalRole
+  modules?: AppModule[]
 }
 
 export interface TeamRegistry {
   users: TeamUser[]
+}
+
+export type StaffStatus = 'active' | 'away' | 'inactive'
+export type LoadLevel = 'light' | 'balanced' | 'busy' | 'overloaded'
+
+export interface StaffProfile {
+  username: string
+  full_name: string
+  email: string
+  phone: string
+  job_title: string
+  department: string
+  location: string
+  employee_id: string
+  manager: string | null
+  start_date: string | null
+  notes: string
+  status: StaffStatus
+}
+
+export interface StaffTaskPreview {
+  task_id: string
+  title: string
+  priority: TaskPriority
+  status: TaskStatus
+  category: TaskCategory
+  due_date: string | null
+  personal: boolean
+  survey_id: number | null
+  survey_title: string
+}
+
+export interface StaffWorkload {
+  open_tasks: number
+  high_priority: number
+  personal_tasks: number
+  project_tasks: number
+  pm_projects_owned: number
+  load_level: LoadLevel
+  load_label: string
+}
+
+export interface StaffMember {
+  profile: StaffProfile
+  role: GlobalRole
+  scout_id: string
+  workload: StaffWorkload
+  open_tasks_preview: StaffTaskPreview[]
+}
+
+export interface TeamDirectory {
+  members: StaffMember[]
+  summary: Record<string, number | string>
 }
 
 export type ProjectPhase =
@@ -1336,11 +1404,32 @@ export interface GmailTaskDraft {
   confidence: 'high' | 'medium' | 'low'
 }
 
+export interface GmailProposalBriefHint {
+  detected: boolean
+  project_name: string
+  client_name: string
+  assignee: string | null
+  confidence: 'high' | 'medium' | 'low'
+}
+
 export interface GmailEmailBreakdown {
   gmail_message_id: string
   subject: string
   configured: boolean
   tasks: GmailTaskDraft[]
+  email_url: string
+  proposal_brief?: GmailProposalBriefHint | null
+}
+
+export interface CreatePipelineFromEmailResponse {
+  project_id: string
+  project_name: string
+  client_name: string | null
+  owner_name: string | null
+  assignee: string | null
+  proposal_id: string | null
+  tasks_created: number
+  operations_url: string
   email_url: string
 }
 
@@ -1567,6 +1656,8 @@ export interface PmPipelineProject extends PmProject {
   client_name: string | null
   proposal_status: string | null
   has_survey_link: boolean
+  data_collection_status: string
+  data_collection_pct: number | null
 }
 
 export interface PmPipelineOverview {
@@ -1689,6 +1780,7 @@ export const api = {
       role?: GlobalRole
       email?: string | null
       is_super_admin?: boolean
+      modules?: AppModule[]
     }>(
       '/api/auth/me',
       undefined,
@@ -1708,6 +1800,15 @@ export const api = {
   getTeamRegistry: () => fetchJson<TeamRegistry>('/api/team/registry'),
   setTeamRegistry: (body: TeamRegistry) =>
     fetchJson<TeamRegistry>('/api/team/registry', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  getTeamDirectory: () => fetchJson<TeamDirectory>('/api/team/directory', undefined, BOOTSTRAP_TIMEOUT_MS),
+  getTeamStaffMember: (username: string) =>
+    fetchJson<StaffMember>(`/api/team/staff/${encodeURIComponent(username)}`, undefined, BOOTSTRAP_TIMEOUT_MS),
+  updateTeamStaffMember: (username: string, body: Partial<StaffProfile>) =>
+    fetchJson<StaffMember>(`/api/team/staff/${encodeURIComponent(username)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1733,6 +1834,20 @@ export const api = {
     }),
   getMyTasks: () =>
     fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/me/tasks', undefined, BOOTSTRAP_TIMEOUT_MS),
+  createTask: (body: {
+    title: string
+    description?: string
+    survey_id?: number | null
+    assignee?: string | null
+    category?: string
+    priority?: string
+    billable?: boolean
+  }) =>
+    fetchJson<{ task: MyTaskRow }>('/api/me/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   getUnassignedTasks: () =>
     fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/tasks/unassigned', undefined, BOOTSTRAP_TIMEOUT_MS),
   getTeamAssignedTasks: () =>
@@ -2373,7 +2488,12 @@ export const api = {
       undefined,
       BOOTSTRAP_TIMEOUT_MS,
     ),
-  listPmProjects: () => fetchJson<PmProject[]>('/api/pm/projects', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listPmProjects: (live = false) =>
+    fetchJson<PmProject[]>(
+      `/api/pm/projects${live ? '?live=true' : ''}`,
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
   getPmProject: (projectId: string) =>
     fetchJson<PmProject>(`/api/pm/projects/${projectId}`, undefined, BOOTSTRAP_TIMEOUT_MS),
   createPmProject: (body: {
@@ -2459,6 +2579,26 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       throw new Error(err.detail || 'Master import failed')
+    }
+    return res.json() as Promise<PmImportResult>
+  },
+  bootstrapPmClientImport: async () => {
+    const token = localStorage.getItem('et_scout_auth')
+    let auth = ''
+    if (token) {
+      try {
+        auth = JSON.parse(token).token ?? ''
+      } catch {
+        auth = ''
+      }
+    }
+    const res = await fetch('/api/pm/clients/import/bootstrap-master', {
+      method: 'POST',
+      headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Client master import failed')
     }
     return res.json() as Promise<PmImportResult>
   },
@@ -2767,6 +2907,35 @@ export const api = {
       email_url: string
     }>; count: number }>(
       `/api/gmail/messages/${messageId}/tasks`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  createPipelineFromEmail: (
+    messageId: string,
+    body: {
+      project_name: string
+      client_name?: string | null
+      owner_name?: string | null
+      project_type?: 'quant' | 'qual' | 'mixed'
+      engagement_type?: 'tracking' | 'ad-hoc'
+      create_tasks?: boolean
+      tasks?: Array<{
+        title: string
+        note?: string
+        survey_id?: number | null
+        category?: TaskCategory
+        assignee?: string | null
+        priority?: TaskPriority
+        billable?: boolean
+      }>
+    },
+  ) =>
+    fetchJson<CreatePipelineFromEmailResponse>(
+      `/api/gmail/messages/${messageId}/pipeline`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

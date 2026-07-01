@@ -27,10 +27,12 @@ from app.models.analysis import (
 from app.models.pinned_surveys import PinnedSurveys
 from app.models.pm import AgentDraftResponse
 from app.models.project_workflow import (
+    CreateTaskRequest,
     ProjectActivityCreate,
     ProjectWorkflow,
     TaskCommentCreate,
 )
+from app.models.team_hr import StaffMemberOut, StaffProfileUpdate, TeamDirectoryOut
 from app.models.team_registry import TeamRegistry, PROJECT_MODULES
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
 from app.services.auth import get_session, list_active_sessions, logout
@@ -107,6 +109,7 @@ from app.services.project_workflow_store import (
     add_task_comment,
     can_access_module,
     can_manage_project_team,
+    create_manual_task,
     get_project_workflow,
     list_my_tasks,
     list_unassigned_tasks,
@@ -137,8 +140,15 @@ from app.models.user_preferences import UserPreferences, UserPreferencesUpdate
 from app.services.team_registry_store import (
     get_global_role,
     get_team_registry,
+    get_user_modules,
     is_global_admin,
+    is_global_manager_or_above,
     set_team_registry,
+)
+from app.services.team_hr_store import (
+    get_staff_member,
+    get_team_directory,
+    update_staff_profile,
 )
 from app.services.super_admin import is_super_admin, super_admin_email, super_admin_username, email_for_username
 
@@ -209,6 +219,7 @@ def auth_me(authorization: str | None = Header(default=None)):
         "role": get_global_role(record.username),
         "email": email_for_username(record.username) or (super_admin_email() if is_super_admin(record.username) else None),
         "is_super_admin": is_super_admin(record.username),
+        "modules": get_user_modules(record.username),
     }
 
 
@@ -290,6 +301,45 @@ def team_registry_update(
     if not is_global_admin(record.username):
         raise HTTPException(status_code=403, detail="Only admins can update team roles")
     return set_team_registry(body)
+
+
+@router.get("/team/directory", response_model=TeamDirectoryOut)
+def team_directory(authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return get_team_directory()
+
+
+@router.get("/team/staff/{username}", response_model=StaffMemberOut)
+def team_staff_member(username: str, authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    member = get_staff_member(username)
+    if not member:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    return member
+
+
+@router.put("/team/staff/{username}", response_model=StaffMemberOut)
+def team_staff_update(
+    username: str,
+    body: StaffProfileUpdate,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not is_global_manager_or_above(record.username):
+        raise HTTPException(status_code=403, detail="Only managers and admins can update staff profiles")
+    updated = update_staff_profile(username, body)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    member = get_staff_member(username)
+    if not member:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    return member
 
 
 @router.get("/projects/{survey_id}/workflow")
@@ -385,6 +435,18 @@ def my_tasks_route(authorization: str | None = Header(default=None)):
         raise HTTPException(status_code=401, detail="Not signed in")
     rows = list_my_tasks(record.username)
     return {"tasks": _format_task_rows(rows), "count": len(rows)}
+
+
+@router.post("/me/tasks")
+def create_task_route(body: CreateTaskRequest, authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    try:
+        row = create_manual_task(record.username, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"task": _format_task_rows([row])[0]}
 
 
 @router.get("/tasks/unassigned")
@@ -1594,6 +1656,8 @@ def banner_analysis(survey_id: int, body: BannerRequest):
             show_significance=body.show_significance,
             confidence_level=body.confidence_level,
             metric=body.metric,
+            show_base_row=body.show_base_row,
+            summary_stats=body.summary_stats,
         )
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
@@ -1626,6 +1690,8 @@ def banner_export(survey_id: int, body: BannerRequest):
             show_significance=body.show_significance,
             confidence_level=body.confidence_level,
             metric=body.metric,
+            show_base_row=body.show_base_row,
+            summary_stats=body.summary_stats,
         )
         if result.get("error") and not result.get("tables"):
             raise HTTPException(status_code=400, detail=result["error"])

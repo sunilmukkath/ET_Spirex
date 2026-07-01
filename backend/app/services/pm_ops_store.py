@@ -13,6 +13,7 @@ from app.config import settings
 from app.db.models import (
     BudgetLineItem,
     Client,
+    FieldworkProgress,
     Invoice,
     MarketingActivity,
     Project,
@@ -322,6 +323,59 @@ STAGE_ORDER = [
     "Delivered",
 ]
 
+_DATA_COLLECTION_STAGES = frozenset(
+    {
+        "Deployment Prep",
+        "Fieldwork/Data Collection",
+        "QC",
+    }
+)
+
+
+def _latest_fieldwork_by_project(session: Session, project_ids: list[UUID]) -> dict[UUID, FieldworkProgress]:
+    if not project_ids:
+        return {}
+    rows = session.scalars(
+        select(FieldworkProgress)
+        .where(FieldworkProgress.project_id.in_(project_ids))
+        .order_by(FieldworkProgress.entry_date.desc(), FieldworkProgress.updated_at.desc())
+    ).all()
+    latest: dict[UUID, FieldworkProgress] = {}
+    for row in rows:
+        if row.project_id not in latest:
+            latest[row.project_id] = row
+    return latest
+
+
+def _data_collection_status(stage: str, entry: FieldworkProgress | None) -> tuple[str, float | None]:
+    clean_stage = (stage or "").strip()
+    if clean_stage == "Delivered":
+        return "Delivered", 100.0 if entry else None
+    if clean_stage not in _DATA_COLLECTION_STAGES:
+        return "Not started", None
+    if not entry:
+        if clean_stage == "Deployment Prep":
+            return "Prep — no field log", None
+        if clean_stage == "QC":
+            return "QC — no field log", None
+        return "Live — no entries", None
+    cumulative = int(entry.cumulative_completes or 0)
+    target = entry.target_completes
+    pct = round(100 * cumulative / int(target), 1) if target and int(target) > 0 else None
+    if clean_stage == "QC":
+        label = f"QC · {cumulative}"
+        if target:
+            label += f" / {int(target)}"
+        if pct is not None:
+            label += f" ({pct}%)"
+        return label, pct
+    if target:
+        label = f"{cumulative} / {int(target)}"
+        if pct is not None:
+            label += f" ({pct}%)"
+        return label, pct
+    return f"{cumulative} completes logged", None
+
 
 def pipeline_overview(session: Session, linked_survey_ids: list[int] | None = None) -> PipelineOverview:
     rows = sort_projects(
@@ -337,13 +391,19 @@ def pipeline_overview(session: Session, linked_survey_ids: list[int] | None = No
 
     projects: list[PipelineProjectOut] = []
     linked = set()
+    project_ids = [row.project_id for row in rows]
+    fieldwork_latest = _latest_fieldwork_by_project(session, project_ids)
     for row in rows:
         base = project_to_out(row)
+        fw = fieldwork_latest.get(row.project_id)
+        dc_status, dc_pct = _data_collection_status(row.stage, fw)
         p = PipelineProjectOut(
             **base.model_dump(),
             client_name=row.client.client_name if row.client else None,
             proposal_status=proposal_status.get(row.project_id),
             has_survey_link=row.limesurvey_survey_id is not None,
+            data_collection_status=dc_status,
+            data_collection_pct=dc_pct,
         )
         projects.append(p)
         if row.limesurvey_survey_id:

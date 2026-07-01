@@ -35,6 +35,8 @@ class BannerRequest(BaseModel):
     show_significance: bool = True
     confidence_level: float = 0.95
     metric: str = "auto"
+    show_base_row: bool = True
+    summary_stats: list[str] = Field(default_factory=list)
 
 
 class ChartRequest(BaseModel):

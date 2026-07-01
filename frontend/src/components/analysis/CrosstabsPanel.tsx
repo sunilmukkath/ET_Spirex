@@ -34,6 +34,14 @@ function metricLabel(metric: string): string {
   return labels[metric] || metric
 }
 
+const SUMMARY_STAT_OPTIONS: { id: string; label: string }[] = [
+  { id: 'mean', label: 'Mean' },
+  { id: 'std', label: 'Std dev' },
+  { id: 'se', label: 'Std error' },
+  { id: 'top2box', label: 'Top 2 box %' },
+  { id: 'bottom2box', label: 'Bottom 2 box %' },
+]
+
 function SelectionChips({
   vars,
   onRemove,
@@ -130,6 +138,10 @@ export interface CrosstabsPanelProps {
   onShowColPctChange: (v: boolean) => void
   showRowPct: boolean
   onShowRowPctChange: (v: boolean) => void
+  showBaseRow: boolean
+  onShowBaseRowChange: (v: boolean) => void
+  summaryStats: string[]
+  onSummaryStatsChange: (stats: string[]) => void
   heatmapEnabled: boolean
   onHeatmapEnabledChange: (v: boolean) => void
   heatmapMetric: CrosstabHeatmapMetric
@@ -188,6 +200,10 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
     onShowColPctChange,
     showRowPct,
     onShowRowPctChange,
+    showBaseRow,
+    onShowBaseRowChange,
+    summaryStats,
+    onSummaryStatsChange,
     heatmapEnabled,
     onHeatmapEnabledChange,
     heatmapMetric,
@@ -250,10 +266,15 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
       showCounts ? 'Counts' : null,
       showColPct ? 'Col %' : null,
       showRowPct ? 'Row %' : null,
+      showBaseRow ? 'Base row' : null,
     ].filter(Boolean)
     const sig = sigEnabled ? `${Math.round(confidenceLevel * 100)}% sig` : 'Sig off'
-    return `${metricLabel(metric)} · ${sig}${showParts.length ? ` · ${showParts.join(', ')}` : ''}`
-  }, [metric, sigEnabled, confidenceLevel, showCounts, showColPct, showRowPct])
+    const stats =
+      summaryStats.length > 0
+        ? ` · ${summaryStats.length} stat${summaryStats.length === 1 ? '' : 's'}`
+        : ''
+    return `${metricLabel(metric)} · ${sig}${showParts.length ? ` · ${showParts.join(', ')}` : ''}${stats}`
+  }, [metric, sigEnabled, confidenceLevel, showCounts, showColPct, showRowPct, showBaseRow, summaryStats.length])
 
   const filtersSummary = useMemo(() => {
     const count = filters.length
@@ -482,6 +503,35 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
               <input type="checkbox" checked={showRowPct} onChange={(e) => onShowRowPctChange(e.target.checked)} />
               Row %
             </label>
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={showBaseRow} onChange={(e) => onShowBaseRowChange(e.target.checked)} />
+              Base row
+            </label>
+          </div>
+
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <p className="text-xs font-medium text-slate-500">Summary statistics (scale questions)</p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600">
+              {SUMMARY_STAT_OPTIONS.map((opt) => (
+                <label key={opt.id} className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={summaryStats.includes(opt.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        onSummaryStatsChange([...summaryStats, opt.id])
+                      } else {
+                        onSummaryStatsChange(summaryStats.filter((s) => s !== opt.id))
+                      }
+                    }}
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">
+              Shown as extra rows below answer categories (mean, SD, SE, top/bottom 2 box). Rebuild tables after changing.
+            </p>
           </div>
 
           <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-4">

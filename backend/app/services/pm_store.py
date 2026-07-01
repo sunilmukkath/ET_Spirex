@@ -51,6 +51,12 @@ def list_projects(session: Session) -> list[PmProjectOut]:
     return [project_to_out(row) for row in sort_projects(rows)]
 
 
+def list_live_fieldwork_projects(session: Session) -> list[PmProjectOut]:
+    from app.services.pm_stage import is_live_fieldwork_stage
+
+    return [project for project in list_projects(session) if is_live_fieldwork_stage(project.stage)]
+
+
 def get_project(session: Session, project_id: UUID) -> Project | None:
     return session.scalar(
         select(Project).options(joinedload(Project.owner)).where(Project.project_id == project_id)

@@ -67,6 +67,11 @@ from app.services.pm_import import (
     project_import_template_xlsx,
 )
 from app.services.pm_bootstrap import bootstrap_projects_from_master, bundled_master_sheet
+from app.services.pm_client_import import (
+    bootstrap_clients_from_master,
+    bundled_client_contact_sheet,
+    import_clients_from_contact_sheet,
+)
 from app.services.crm_agent import run_crm_agent
 from app.services.finance_agent import run_finance_agent
 from app.services.proposal_agent import run_proposal_writing_agent
@@ -144,9 +149,12 @@ def pm_team_members(
 
 @router.get("/projects", response_model=list[PmProjectOut])
 def pm_list_projects(
+    live: bool = False,
     _: str = Depends(require_auth),
     session: Session = Depends(get_pm_db),
 ):
+    if live:
+        return pm_store.list_live_fieldwork_projects(session)
     return pm_store.list_projects(session)
 
 
@@ -438,6 +446,47 @@ def pm_update_client(
     if not row:
         raise HTTPException(status_code=404, detail="Client not found")
     return ClientOut.model_validate(row)
+
+
+@router.post("/clients/import", response_model=PmImportResult)
+async def pm_import_clients(
+    file: UploadFile = File(...),
+    _: str = Depends(require_auth),
+    session: Session = Depends(get_pm_db),
+):
+    filename = file.filename or "upload.xlsx"
+    lower = filename.lower()
+    if not lower.endswith((".xlsx", ".xlsm", ".xls", ".csv")):
+        raise HTTPException(status_code=400, detail="Upload .xls, .xlsx, or .csv client contact sheet")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    try:
+        return import_clients_from_contact_sheet(session, data, filename=filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/clients/import/bootstrap-master", response_model=PmImportResult)
+def pm_import_client_bootstrap_master(
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_pm_db),
+):
+    """Import bundled client contact sheet (admin). Updates matched clients; creates new ones."""
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not is_global_admin(record.username):
+        raise HTTPException(status_code=403, detail="Only admins can run master client import")
+    if not bundled_client_contact_sheet():
+        raise HTTPException(status_code=404, detail="Bundled client contact sheet not found on server")
+    try:
+        result = bootstrap_clients_from_master(session)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Bundled client contact sheet not found on server")
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # --- Proposals ---

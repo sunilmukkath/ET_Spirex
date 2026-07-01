@@ -375,6 +375,54 @@ def add_task_to_workflow(
     return updated, saved_task
 
 
+def create_manual_task(username: str, body: dict[str, Any]) -> dict[str, Any]:
+    from app.services.personal_tasks_store import create_personal_task
+
+    title = str(body.get("title") or "").strip()
+    if not title:
+        raise ValueError("Task title is required.")
+    assignee_raw = body.get("assignee")
+    assignee = str(assignee_raw).strip() if assignee_raw else None
+    survey_id = body.get("survey_id")
+
+    if survey_id is not None:
+        task = ProjectTask(
+            id=uuid.uuid4().hex[:12],
+            title=title,
+            description=str(body.get("description") or "").strip(),
+            category=body.get("category") or "general",
+            assignee=assignee,
+            status="todo",
+            priority=body.get("priority") or "medium",
+            due_date=body.get("due_date"),
+            created_by=username,
+            source="manual",
+            billable=bool(body.get("billable", False)),
+        )
+        workflow, created = add_task_to_workflow(int(survey_id), task, editor=username)
+        return _task_row(int(survey_id), workflow, created)
+
+    created = create_personal_task(
+        username,
+        title=title,
+        description=str(body.get("description") or "").strip(),
+        category=body.get("category") or "general",
+        assignee=assignee,
+        priority=body.get("priority") or "medium",
+        due_date=body.get("due_date"),
+        billable=bool(body.get("billable", False)),
+        default_assignee_to_owner=False,
+    )
+    return {
+        "survey_id": None,
+        "task": created.model_dump(),
+        "phase": None,
+        "client_name": "",
+        "project_code": "",
+        "personal": True,
+    }
+
+
 def list_my_tasks(username: str) -> list[dict[str, Any]]:
     if not username:
         return []
@@ -390,9 +438,9 @@ def list_my_tasks(username: str) -> list[dict[str, Any]]:
                 if task.assignee != username or task.status == "done":
                     continue
                 out.append(_task_row(survey_id, workflow, task))
-    from app.services.personal_tasks_store import list_personal_task_rows
+    from app.services.personal_tasks_store import list_assigned_personal_task_rows
 
-    out.extend(list_personal_task_rows(username))
+    out.extend(list_assigned_personal_task_rows(username))
     out.sort(
         key=lambda row: (
             row["task"].get("due_date") or "9999",
@@ -406,17 +454,21 @@ def list_unassigned_tasks() -> list[dict[str, Any]]:
     """Open tasks with no assignee — team inbox for new work."""
     out: list[dict[str, Any]] = []
     if not _DATA_DIR.is_dir():
-        return []
-    for path in sorted(_DATA_DIR.glob("*.json")):
-        try:
-            survey_id = int(path.stem)
-        except ValueError:
-            continue
-        workflow = get_project_workflow(survey_id)
-        for task in workflow.tasks:
-            if task.assignee or task.status == "done":
+        pass
+    else:
+        for path in sorted(_DATA_DIR.glob("*.json")):
+            try:
+                survey_id = int(path.stem)
+            except ValueError:
                 continue
-            out.append(_task_row(survey_id, workflow, task))
+            workflow = get_project_workflow(survey_id)
+            for task in workflow.tasks:
+                if task.assignee or task.status == "done":
+                    continue
+                out.append(_task_row(survey_id, workflow, task))
+    from app.services.personal_tasks_store import list_unassigned_personal_task_rows
+
+    out.extend(list_unassigned_personal_task_rows())
     out.sort(
         key=lambda row: (
             -(row["task"].get("created_at") or 0),

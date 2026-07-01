@@ -7,6 +7,8 @@ from fastapi.responses import RedirectResponse
 
 from app.config import settings
 from app.models.gmail import (
+    CreatePipelineFromEmailRequest,
+    CreatePipelineFromEmailResponse,
     CreateTaskFromEmailRequest,
     CreateTaskFromEmailResponse,
     CreateTasksFromEmailBatchRequest,
@@ -31,6 +33,7 @@ from app.services.gmail_client import (
 )
 from app.services import gmail_store
 from app.services.gmail_suggest import suggest_task_from_message
+from app.services.gmail_pipeline import create_pipeline_from_email
 from app.services.gmail_tasks import (
     break_down_email,
     create_task_from_email,
@@ -188,6 +191,22 @@ def gmail_create_task(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not create task: {exc}") from exc
+
+
+@router.post("/messages/{message_id}/pipeline", response_model=CreatePipelineFromEmailResponse)
+def gmail_create_pipeline(
+    message_id: str,
+    body: CreatePipelineFromEmailRequest,
+    username: str = Depends(require_auth),
+):
+    try:
+        return create_pipeline_from_email(username, message_id, body)
+    except GmailNotConnectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not create pipeline: {exc}") from exc
 
 
 @router.post("/messages/{message_id}/tasks", response_model=CreateTasksFromEmailBatchResponse)

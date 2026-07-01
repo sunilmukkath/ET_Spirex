@@ -32,7 +32,8 @@ def test_bootstrap_imports_master_sheet(pm_session):
     assert result is not None
     assert result.total_rows == 188
     assert result.created == 186
-    assert result.skipped == 2
+    assert result.updated == 2
+    assert result.skipped == 0
     assert result.errors == 0
     count = pm_session.scalar(select(func.count()).select_from(Project))
     assert count == 186

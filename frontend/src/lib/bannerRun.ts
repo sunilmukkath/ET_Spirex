@@ -54,6 +54,8 @@ export function mergeBannerChunkResults(
     show_col_pct: request.show_col_pct,
     show_row_pct: request.show_row_pct,
     show_significance: request.show_significance,
+    show_base_row: request.show_base_row,
+    summary_stats: request.summary_stats,
   }
 }
 

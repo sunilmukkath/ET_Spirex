@@ -14,6 +14,7 @@
     "budget_estimate": "budget_estimate",
     "status_notes": "status_notes",
     "start_date / target_close_date": "start_date",
+    "start_date\u00a0/\u00a0target_close_date": "start_date",
     "Project_Value_INR": "project_value_inr"
   },
   "source_filename": "Project sheet.xlsx"

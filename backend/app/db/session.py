@@ -64,6 +64,7 @@ def ensure_database_ready() -> None:
             _apply_schema_patches(engine)
             _seed_team_members(engine)
             _bootstrap_pm_projects(engine)
+            _bootstrap_pm_client_contacts(engine)
             _db_ready = True
             _db_init_error = None
             _db_init_failed = False
@@ -174,6 +175,33 @@ def _bootstrap_pm_projects(engine: Engine) -> None:
             session.close()
     except Exception:
         logger.exception("PM bootstrap module unavailable")
+
+
+def _bootstrap_pm_client_contacts(engine: Engine) -> None:
+    """Upsert CRM clients from bundled client contact sheet on deploy."""
+    try:
+        from app.services.pm_client_import import bootstrap_clients_from_master
+
+        factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        session = factory()
+        try:
+            result = bootstrap_clients_from_master(session)
+            if result:
+                logger.info(
+                    "PM client contact bootstrap: created=%s updated=%s skipped=%s errors=%s",
+                    result.created,
+                    result.updated,
+                    result.skipped,
+                    result.errors,
+                )
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception("PM client contact bootstrap failed")
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("PM client contact bootstrap module unavailable")
 
 
 def reset_engine_for_tests() -> None:

@@ -24,8 +24,6 @@ import {
   type PmPipelineProject,
   type PmProposal,
   type Project,
-  type ProjectTask,
-  type ProjectWorkflow,
 } from '../api/client'
 import { ET_HOME_SUBTITLE, ET_HOME_TAGLINE, ET_PRODUCT_NAME } from '../lib/etCopy'
 import { TASK_CATEGORY_LABELS, TASK_STATUS_LABELS } from '../lib/workflowAccess'
@@ -233,26 +231,6 @@ function TaskList({ rows, empty }: { rows: MyTaskRow[]; empty: string }) {
   )
 }
 
-function emptyTask(createdBy: string): ProjectTask {
-  return {
-    id: crypto.randomUUID().slice(0, 12),
-    title: '',
-    description: '',
-    category: 'general',
-    assignee: createdBy,
-    status: 'todo',
-    priority: 'medium',
-    due_date: null,
-    created_by: createdBy,
-    created_at: Date.now() / 1000,
-    updated_at: Date.now() / 1000,
-    comments: [],
-    source: 'manual',
-    gmail_message_id: null,
-    gmail_thread_id: null,
-  }
-}
-
 export function HomePage() {
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -356,19 +334,15 @@ export function HomePage() {
 
   async function handleCreateTask(e: FormEvent) {
     e.preventDefault()
-    if (!taskTitle.trim() || taskSurveyId === '') return
+    if (!taskTitle.trim()) return
     setCreatingTask(true)
     setError(null)
     try {
-      const { workflow } = await api.getProjectWorkflow(Number(taskSurveyId))
-      const task = emptyTask(user?.username ?? '')
-      task.title = taskTitle.trim()
-      task.assignee = taskAssignee || null
-      const updated: ProjectWorkflow = {
-        ...workflow,
-        tasks: [task, ...workflow.tasks],
-      }
-      await api.setProjectWorkflow(Number(taskSurveyId), updated)
+      await api.createTask({
+        title: taskTitle.trim(),
+        survey_id: taskSurveyId === '' ? null : Number(taskSurveyId),
+        assignee: taskAssignee || null,
+      })
       setShowNewTask(false)
       setTaskTitle('')
       setTaskSurveyId('')
@@ -688,18 +662,17 @@ export function HomePage() {
           >
             <h3 className="text-lg font-semibold text-slate-900">New task</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Add a task to a LimeSurvey study workflow, or use My work for personal tasks.
+              Link to a study or leave project empty for general work. Leave assignee empty for the team new-task queue.
             </p>
             <div className="mt-4 space-y-3">
               <label className="block text-sm">
-                <span className="mb-1 block text-slate-600">LimeSurvey study</span>
+                <span className="mb-1 block text-slate-600">Study / project (optional)</span>
                 <select
                   className="et-input w-full"
                   value={taskSurveyId}
                   onChange={(e) => setTaskSurveyId(e.target.value ? Number(e.target.value) : '')}
-                  required
                 >
-                  <option value="">Select study…</option>
+                  <option value="">No project — general task</option>
                   {limeProjects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.title} (#{p.id})
@@ -737,7 +710,7 @@ export function HomePage() {
               <button type="button" className="et-btn-secondary" onClick={() => setShowNewTask(false)}>
                 Cancel
               </button>
-              <button type="submit" className="et-btn-primary" disabled={creatingTask || taskSurveyId === ''}>
+              <button type="submit" className="et-btn-primary" disabled={creatingTask || !taskTitle.trim()}>
                 {creatingTask ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                 Create task
               </button>

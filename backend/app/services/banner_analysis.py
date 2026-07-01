@@ -300,7 +300,10 @@ def run_banner_table(
     show_significance: bool = True,
     confidence_level: float = 0.95,
     metric: str = "auto",
+    show_base_row: bool = True,
+    summary_stats: list[str] | None = None,
 ) -> dict[str, Any]:
+    summary_stats = summary_stats or []
     row_ids = row_variable_ids or [row_variable_id]
     row_ids = [rid for rid in row_ids if rid]
 
@@ -327,6 +330,8 @@ def run_banner_table(
             show_significance=show_significance,
             confidence_level=confidence_level,
             metric=metric,
+            show_base_row=show_base_row,
+            summary_stats=summary_stats,
         )
 
     if filter_tree or filters:
@@ -381,6 +386,8 @@ def run_banner_table(
             show_significance=show_significance,
             confidence_level=confidence_level,
             metric=metric,
+            show_base_row=show_base_row,
+            summary_stats=summary_stats,
             schema=schema,
             df_raw=df_raw,
             banner_setup=banner_setup,
@@ -405,6 +412,8 @@ def run_banner_table(
         "show_col_pct": show_col_pct,
         "show_row_pct": show_row_pct,
         "show_significance": show_significance,
+        "show_base_row": show_base_row,
+        "summary_stats": summary_stats,
     }
 
 
@@ -423,10 +432,13 @@ def _build_banner_table(
     show_significance: bool = True,
     confidence_level: float = 0.95,
     metric: str = "auto",
+    show_base_row: bool = True,
+    summary_stats: list[str] | None = None,
     schema: dict[str, Any] | None = None,
     df_raw: pd.DataFrame | None = None,
     banner_setup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    summary_stats = summary_stats or []
     if schema is None or df_raw is None:
         schema, df = load_filtered_context(
             survey_id,
@@ -502,6 +514,29 @@ def _build_banner_table(
                 section["header_rows"] = header_rows
                 section["banner_layer_count"] = table["banner_layer_count"]
 
+    if table.get("table_type") == "array" and table.get("sections"):
+        for section in table["sections"]:
+            section_var = _section_row_var(row_var, section)
+            _apply_table_enhancements(
+                section,
+                section_var,
+                df,
+                banner_columns,
+                column_masks,
+                show_base_row=show_base_row,
+                summary_stats=summary_stats,
+            )
+    else:
+        _apply_table_enhancements(
+            table,
+            row_var,
+            df,
+            banner_columns,
+            column_masks,
+            show_base_row=show_base_row,
+            summary_stats=summary_stats,
+        )
+
     return {
         "row_variable": _var_summary(row_var),
         "banner_variables": [_var_summary(v) for v in banner_vars],
@@ -513,6 +548,8 @@ def _build_banner_table(
         "show_col_pct": show_col_pct,
         "show_row_pct": show_row_pct,
         "show_significance": show_significance,
+        "show_base_row": show_base_row,
+        "summary_stats": summary_stats,
         "confidence_level": confidence_level,
         **table,
     }
@@ -1197,7 +1234,119 @@ def _compute_metric_masked(
         count = int(str_vals.isin(bottom_codes).sum())
         return {"value": round((count / n) * 100, 1), "base": n, "col_pct": round((count / n) * 100, 1), "count": count}
 
+    if metric == "std":
+        return {"value": round(float(valid.std()), 2), "base": n} if n > 1 else {"value": None, "base": n}
+
+    if metric == "se":
+        if n <= 1:
+            return {"value": None, "base": n}
+        std = float(valid.std())
+        return {"value": round(std / math.sqrt(n), 2), "base": n}
+
     return {"value": round(float(valid.mean()), 2), "base": n}
+
+
+_SUMMARY_STAT_LABELS: dict[str, str] = {
+    "mean": "Mean",
+    "std": "Std dev",
+    "se": "Std error",
+    "top2box": "Top 2 box %",
+    "bottom2box": "Bottom 2 box %",
+}
+
+_BASE_ROW_TABLE_TYPES = frozenset({"distribution", "checkbox_rate"})
+
+
+def _section_row_var(row_var: dict[str, Any], section: dict[str, Any]) -> dict[str, Any]:
+    subq = section.get("subquestion")
+    if not subq:
+        return row_var
+    for sq in row_var.get("subquestions") or []:
+        if sq.get("label") == subq:
+            col = sq.get("column")
+            return {**row_var, "columns": [col] if col else row_var.get("columns", []), "text": subq}
+    return row_var
+
+
+def _column_bases_from_table(table: dict[str, Any]) -> list[int] | None:
+    rows = table.get("rows") or []
+    total_row = next((r for r in rows if r.get("is_total")), None)
+    if total_row:
+        return [int(c.get("base", c.get("count", 0)) or 0) for c in total_row.get("cells", [])]
+    for row in rows:
+        cells = row.get("cells") or []
+        if cells:
+            return [int(c.get("base", 0) or 0) for c in cells]
+    return None
+
+
+def _inject_base_row(table: dict[str, Any]) -> None:
+    if table.get("table_type") not in _BASE_ROW_TABLE_TYPES:
+        return
+    rows = table.get("rows") or []
+    if any(r.get("is_base") for r in rows):
+        return
+    bases = _column_bases_from_table(table)
+    if not bases:
+        return
+    base_cells = [{"count": base, "base": base} for base in bases]
+    table["rows"] = [{"code": "_base", "label": "Base", "cells": base_cells, "is_base": True}, *rows]
+
+
+def _supports_summary_stats(row_var: dict[str, Any]) -> bool:
+    return row_var.get("kind") in ("single", "numeric", "rank")
+
+
+def _append_summary_rows(
+    table: dict[str, Any],
+    row_var: dict[str, Any],
+    df: pd.DataFrame,
+    banner_columns: list[dict[str, Any]],
+    column_masks: list[pd.Series] | None,
+    summary_stats: list[str],
+) -> None:
+    if table.get("table_type") != "distribution" or not summary_stats:
+        return
+    if not _supports_summary_stats(row_var):
+        return
+    col = _find_column(row_var, df)
+    if not col or col not in df.columns:
+        return
+
+    rows = table.get("rows") or []
+    summary_rows = []
+    for stat in summary_stats:
+        label = _SUMMARY_STAT_LABELS.get(stat)
+        if not label:
+            continue
+        cells = _metric_cells(df, col, banner_columns, stat, row_var, column_masks=column_masks)
+        if not cells:
+            continue
+        summary_rows.append({"code": f"_summary_{stat}", "label": label, "cells": cells, "is_summary": True})
+
+    if not summary_rows:
+        return
+
+    data_rows = [r for r in rows if not r.get("is_total") and not r.get("is_base") and not r.get("is_summary")]
+    base_rows = [r for r in rows if r.get("is_base")]
+    total_rows = [r for r in rows if r.get("is_total")]
+    table["rows"] = base_rows + data_rows + summary_rows + total_rows
+
+
+def _apply_table_enhancements(
+    table: dict[str, Any],
+    row_var: dict[str, Any],
+    df: pd.DataFrame,
+    banner_columns: list[dict[str, Any]],
+    column_masks: list[pd.Series] | None,
+    *,
+    show_base_row: bool,
+    summary_stats: list[str],
+) -> None:
+    if show_base_row:
+        _inject_base_row(table)
+    if summary_stats:
+        _append_summary_rows(table, row_var, df, banner_columns, column_masks, summary_stats)
 
 
 def _apply_row_pcts(table: dict[str, Any]) -> None:

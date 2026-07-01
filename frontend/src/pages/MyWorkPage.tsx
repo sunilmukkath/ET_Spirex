@@ -1,16 +1,15 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Circle, Loader2, Plus, RefreshCw, Sparkles, User, Users, type LucideIcon } from 'lucide-react'
+import { Circle, Briefcase, Loader2, Plus, RefreshCw, Sparkles, User, Users, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import {
   api,
   type GmailConnectionStatus,
   type GmailMessageSummary,
+  type GmailProposalBriefHint,
   type GmailTaskDraft,
   type MyTaskRow,
   type Project,
-  type ProjectTask,
-  type ProjectWorkflow,
 } from '../api/client'
 import { TEAM_USERS } from '../auth/AuthContext'
 import { MyWorkEmailPanel } from '../components/mywork/MyWorkEmailPanel'
@@ -24,26 +23,6 @@ type EditableDraft = Omit<GmailTaskDraft, 'survey_id'> & {
 function gmailUrl(messageId: string | null | undefined) {
   if (!messageId) return null
   return `https://mail.google.com/mail/u/0/#inbox/${messageId}`
-}
-
-function emptyTask(createdBy: string): ProjectTask {
-  return {
-    id: crypto.randomUUID().slice(0, 12),
-    title: '',
-    description: '',
-    category: 'general',
-    assignee: createdBy,
-    status: 'todo',
-    priority: 'medium',
-    due_date: null,
-    created_by: createdBy,
-    created_at: Date.now() / 1000,
-    updated_at: Date.now() / 1000,
-    comments: [],
-    source: 'manual',
-    gmail_message_id: null,
-    gmail_thread_id: null,
-  }
 }
 
 function TaskCard({ row, showAssignee }: { row: MyTaskRow; showAssignee?: boolean }) {
@@ -150,6 +129,11 @@ export function MyWorkPage() {
   const [drafts, setDrafts] = useState<EditableDraft[]>([])
   const [breakdownLoading, setBreakdownLoading] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [creatingPipeline, setCreatingPipeline] = useState(false)
+  const [proposalBrief, setProposalBrief] = useState<GmailProposalBriefHint | null>(null)
+  const [pipelineProjectName, setPipelineProjectName] = useState('')
+  const [pipelineClientName, setPipelineClientName] = useState('')
+  const [pipelineOwner, setPipelineOwner] = useState('')
   const [banner, setBanner] = useState<string | null>(null)
   const [showNewTask, setShowNewTask] = useState(false)
   const [taskSurveyId, setTaskSurveyId] = useState<number | ''>('')
@@ -249,10 +233,22 @@ export function MyWorkPage() {
   async function openBreakdown(email: GmailMessageSummary) {
     setSelectedEmail(email)
     setDrafts([])
+    setProposalBrief(null)
     setBreakdownLoading(true)
     setError(null)
     try {
       const result = await api.getGmailEmailBreakdown(email.id)
+      const hint = result.proposal_brief?.detected ? result.proposal_brief : null
+      setProposalBrief(hint)
+      if (hint) {
+        setPipelineProjectName(hint.project_name)
+        setPipelineClientName(hint.client_name)
+        setPipelineOwner(hint.assignee ?? user?.username ?? '')
+      } else {
+        setPipelineProjectName('')
+        setPipelineClientName('')
+        setPipelineOwner(user?.username ?? '')
+      }
       setDrafts(
         result.tasks.map((task) => ({
           ...task,
@@ -270,6 +266,40 @@ export function MyWorkPage() {
 
   function updateDraft(index: number, patch: Partial<EditableDraft>) {
     setDrafts((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+  }
+
+  async function handleCreatePipeline() {
+    if (!selectedEmail || !pipelineProjectName.trim()) return
+    setCreatingPipeline(true)
+    setError(null)
+    try {
+      const result = await api.createPipelineFromEmail(selectedEmail.id, {
+        project_name: pipelineProjectName.trim(),
+        client_name: pipelineClientName.trim() || null,
+        owner_name: pipelineOwner.trim() || null,
+        create_tasks: true,
+        tasks: drafts.map((draft) => ({
+          title: draft.title.trim(),
+          note: draft.note.trim(),
+          survey_id: draft.survey_id === '' ? null : Number(draft.survey_id),
+          category: draft.category,
+          assignee: draft.assignee ?? (pipelineOwner.trim() || null),
+          priority: draft.priority,
+          billable: draft.billable,
+        })),
+      })
+      setSelectedEmail(null)
+      setDrafts([])
+      setProposalBrief(null)
+      setBanner(
+        `Pipeline created — ${result.project_name} assigned to ${result.owner_name ?? 'you'} (${result.tasks_created} task${result.tasks_created === 1 ? '' : 's'})`,
+      )
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create pipeline')
+    } finally {
+      setCreatingPipeline(false)
+    }
   }
 
   async function handleCreateTasks(e: FormEvent) {
@@ -313,19 +343,15 @@ export function MyWorkPage() {
 
   async function handleCreateTask(e: FormEvent) {
     e.preventDefault()
-    if (!taskTitle.trim() || taskSurveyId === '') return
+    if (!taskTitle.trim()) return
     setCreatingTask(true)
     setError(null)
     try {
-      const { workflow } = await api.getProjectWorkflow(Number(taskSurveyId))
-      const task = emptyTask(user?.username ?? '')
-      task.title = taskTitle.trim()
-      task.assignee = taskAssignee || null
-      const updated: ProjectWorkflow = {
-        ...workflow,
-        tasks: [task, ...workflow.tasks],
-      }
-      await api.setProjectWorkflow(Number(taskSurveyId), updated)
+      await api.createTask({
+        title: taskTitle.trim(),
+        survey_id: taskSurveyId === '' ? null : Number(taskSurveyId),
+        assignee: taskAssignee || null,
+      })
       setShowNewTask(false)
       setTaskTitle('')
       setTaskSurveyId('')
@@ -349,7 +375,7 @@ export function MyWorkPage() {
             Tasks first, then email{user?.username ? ` — ${user.username}` : ''}
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
-            My tasks, new work, and team assignments on top. Email below — read, reply, and schedule like Gmail.
+            Tasks up top. A full inbox below — search, read, reply, and turn briefs into pipeline work.
           </p>
         </div>
         <button type="button" onClick={() => void load()} className="et-btn-secondary">
@@ -435,6 +461,52 @@ export function MyWorkPage() {
                   Scout is reading the email…
                 </div>
               )}
+              {!breakdownLoading && proposalBrief && (
+                <div className="rounded-xl border border-[var(--et-teal)]/30 bg-teal-50/50 p-4">
+                  <div className="flex items-start gap-2">
+                    <Briefcase size={18} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-slate-900">New proposal or client brief</p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        Create a pipeline project in Proposal stage and assign follow-up tasks.
+                      </p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <label className="block text-sm sm:col-span-2">
+                          <span className="mb-1 block text-xs font-medium text-slate-600">Project name</span>
+                          <input
+                            className="et-input w-full"
+                            value={pipelineProjectName}
+                            onChange={(e) => setPipelineProjectName(e.target.value)}
+                            required
+                          />
+                        </label>
+                        <label className="block text-sm">
+                          <span className="mb-1 block text-xs font-medium text-slate-600">Client</span>
+                          <input
+                            className="et-input w-full"
+                            value={pipelineClientName}
+                            onChange={(e) => setPipelineClientName(e.target.value)}
+                          />
+                        </label>
+                        <label className="block text-sm">
+                          <span className="mb-1 block text-xs font-medium text-slate-600">Assign owner</span>
+                          <select
+                            className="et-input w-full"
+                            value={pipelineOwner}
+                            onChange={(e) => setPipelineOwner(e.target.value)}
+                          >
+                            {TEAM_USERS.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
               {!breakdownLoading &&
                 drafts.map((draft, index) => (
                   <div key={`draft-${index}`} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
@@ -502,24 +574,36 @@ export function MyWorkPage() {
                 ))}
             </div>
 
-            <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 px-6 py-4">
               <button
                 type="button"
                 className="et-btn-secondary"
                 onClick={() => {
                   setSelectedEmail(null)
                   setDrafts([])
+                  setProposalBrief(null)
                 }}
               >
                 Cancel
               </button>
+              {proposalBrief && (
+                <button
+                  type="button"
+                  className="et-btn-primary"
+                  disabled={creatingPipeline || breakdownLoading || !pipelineProjectName.trim()}
+                  onClick={() => void handleCreatePipeline()}
+                >
+                  {creatingPipeline ? <Loader2 size={14} className="animate-spin" /> : <Briefcase size={14} />}
+                  Create pipeline & assign
+                </button>
+              )}
               <button
                 type="submit"
-                className="et-btn-primary"
-                disabled={creating || breakdownLoading || drafts.length === 0}
+                className={proposalBrief ? 'et-btn-secondary' : 'et-btn-primary'}
+                disabled={creating || creatingPipeline || breakdownLoading || drafts.length === 0}
               >
                 {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                Create {drafts.length} task{drafts.length === 1 ? '' : 's'}
+                {proposalBrief ? 'Tasks only' : `Create ${drafts.length} task${drafts.length === 1 ? '' : 's'}`}
               </button>
             </div>
           </form>
@@ -534,18 +618,18 @@ export function MyWorkPage() {
           >
             <h3 className="text-lg font-semibold text-slate-900">New task</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Add to a study workflow. Leave assignee empty to put it in the New tasks box.
+              Link to a study or leave project empty for general work. Leave assignee empty to put it in the New tasks
+              box.
             </p>
             <div className="mt-4 space-y-3">
               <label className="block text-sm">
-                <span className="mb-1 block text-slate-600">Study / project</span>
+                <span className="mb-1 block text-slate-600">Study / project (optional)</span>
                 <select
                   className="et-input w-full"
                   value={taskSurveyId}
                   onChange={(e) => setTaskSurveyId(e.target.value ? Number(e.target.value) : '')}
-                  required
                 >
-                  <option value="">Select study…</option>
+                  <option value="">No project — general task</option>
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.title} (#{p.id})
@@ -583,7 +667,7 @@ export function MyWorkPage() {
               <button type="button" className="et-btn-secondary" onClick={() => setShowNewTask(false)}>
                 Cancel
               </button>
-              <button type="submit" className="et-btn-primary" disabled={creatingTask || taskSurveyId === ''}>
+              <button type="submit" className="et-btn-primary" disabled={creatingTask || !taskTitle.trim()}>
                 {creatingTask ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                 Create task
               </button>

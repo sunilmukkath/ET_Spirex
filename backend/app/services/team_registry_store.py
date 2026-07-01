@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from app.models.app_modules import AppModule
 from app.models.team_registry import GlobalRole, TeamRegistry, TeamUser
+from app.services.app_module_access import get_user_app_modules, resolve_user_modules
 from app.services.auth import VALID_USERS
 from app.services.super_admin import is_super_admin, super_admin_username
 
@@ -39,7 +41,23 @@ def _normalize_registry(raw: dict[str, Any] | None) -> TeamRegistry:
         role = str(item.get("role") or "member").strip().lower()
         if role not in {"admin", "manager", "member"}:
             role = "member"
-        merged[username] = TeamUser(username=username, role=role)  # type: ignore[arg-type]
+        modules_raw = item.get("modules")
+        modules: list[AppModule] = []
+        if isinstance(modules_raw, list):
+            allowed = {
+                "home",
+                "quantitative",
+                "my_work",
+                "operations",
+                "accounting",
+                "team",
+                "settings",
+            }
+            for mod in modules_raw:
+                key = str(mod or "").strip()
+                if key in allowed and key not in modules:
+                    modules.append(key)  # type: ignore[arg-type]
+        merged[username] = TeamUser(username=username, role=role, modules=modules)  # type: ignore[arg-type]
 
     return _enforce_super_admin(TeamRegistry(users=sorted(merged.values(), key=lambda u: u.username.lower())))
 
@@ -49,10 +67,22 @@ def _enforce_super_admin(registry: TeamRegistry) -> TeamRegistry:
     users: list[TeamUser] = []
     for user in registry.users:
         if user.username == owner:
-            users.append(TeamUser(username=user.username, role="admin"))
+            users.append(
+                TeamUser(
+                    username=user.username,
+                    role="admin",
+                    modules=list(user.modules),
+                )
+            )
         else:
             users.append(user)
     return TeamRegistry(users=users)
+
+
+def get_user_modules(username: str | None) -> list[AppModule]:
+    registry = get_team_registry()
+    role = get_global_role(username)
+    return get_user_app_modules(username, registry, role)
 
 
 def get_team_registry() -> TeamRegistry:

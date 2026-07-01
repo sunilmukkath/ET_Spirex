@@ -11,6 +11,7 @@ import {
 import { CHART_PALETTES } from '../../lib/chartPalettes'
 import { ErrorState } from '../States'
 import { FilterEditor } from './FilterEditor'
+import { CollapsibleSection } from '../CollapsibleSection'
 import { Loader2 } from 'lucide-react'
 import { ChevronDown } from 'lucide-react'
 
@@ -400,30 +401,43 @@ function MultiCrosstabList({
             {isOpen && (
               <div className="border-t border-slate-200 p-4">
                 {controls && rowId && (
-                  <div className="mb-4 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
-                    <FilterEditor
-                      surveyId={controls.surveyId}
-                      completionStatus={controls.completionStatus}
-                      variables={controls.variables}
-                      filters={tableFilterList}
-                      onChange={(next) => controls.onTableFiltersChange(rowId, next)}
-                      compact
-                      heading="Table filters"
-                      applyLabel="Apply to this table"
-                      onApply={() => controls.onRefreshTable(rowId, index)}
-                      applying={refreshing}
-                      showPresets={Boolean(controls.onTablePresetApply)}
-                      onPresetApply={
-                        controls.onTablePresetApply
-                          ? (preset) => controls.onTablePresetApply!(rowId, preset)
-                          : undefined
+                  <div className="mb-4">
+                    <CollapsibleSection
+                      title="Table filters"
+                      summary={
+                        hasCustomFilters
+                          ? 'Custom filters applied'
+                          : tableFilterList.length > 0
+                            ? `${tableFilterList.length} filter${tableFilterList.length === 1 ? '' : 's'}`
+                            : 'No filters'
                       }
-                    />
-                    {!hasCustomFilters && controls.globalFilters.length > 0 && (
-                      <p className="mt-2 text-xs text-slate-500">
-                        Using default filters from the toolbar. Change filters here and apply to override for this table only.
-                      </p>
-                    )}
+                      defaultOpen={false}
+                    >
+                      <FilterEditor
+                        surveyId={controls.surveyId}
+                        completionStatus={controls.completionStatus}
+                        variables={controls.variables}
+                        filters={tableFilterList}
+                        onChange={(next) => controls.onTableFiltersChange(rowId, next)}
+                        compact
+                        heading="Table filters"
+                        applyLabel="Apply to this table"
+                        onApply={() => controls.onRefreshTable(rowId, index)}
+                        applying={refreshing}
+                        showPresets={Boolean(controls.onTablePresetApply)}
+                        onPresetApply={
+                          controls.onTablePresetApply
+                            ? (preset) => controls.onTablePresetApply!(rowId, preset)
+                            : undefined
+                        }
+                      />
+                      {!hasCustomFilters && controls.globalFilters.length > 0 && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Using default filters from the toolbar. Change filters here and apply to override for this
+                          table only.
+                        </p>
+                      )}
+                    </CollapsibleSection>
                   </div>
                 )}
                 {table.error ? (
@@ -534,7 +548,7 @@ function BannerTableGrid({
     const map = new Map<string, number>()
     let idx = 0
     for (const row of dataRows) {
-      if (!row.is_total) {
+      if (!row.is_total && !row.is_base && !row.is_summary) {
         map.set(row.code, idx)
         idx += 1
       }
@@ -600,12 +614,22 @@ function BannerTableGrid({
           </thead>
           <tbody>
             {result.rows!.map((row) => {
-              const rowClass = `border-b border-slate-100 ${row.is_total ? 'bg-slate-50 font-semibold' : ''}`
-              const labelBg = row.is_total ? 'bg-slate-50' : 'bg-white'
+              const isBaseRow = Boolean(row.is_base)
+              const isSummaryRow = Boolean(row.is_summary)
+              const rowMetrics = isSummaryRow
+                ? (['value'] as CellMetric[])
+                : isBaseRow
+                  ? (['count'] as CellMetric[])
+                  : cellMetrics
+              const rowClass = `border-b border-slate-100 ${
+                row.is_total || isBaseRow ? 'bg-slate-50 font-semibold' : isSummaryRow ? 'bg-slate-50/60' : ''
+              }`
+              const labelBg = row.is_total || isBaseRow || isSummaryRow ? 'bg-slate-50' : 'bg-white'
               const dataRowIndex = dataRowIndexByCode.get(row.code) ?? 0
+              const skipHeatmap = Boolean(row.is_total || isBaseRow || isSummaryRow)
 
-              if (cellMetrics.length <= 1) {
-                const metric = cellMetrics[0] ?? 'count'
+              if (rowMetrics.length <= 1) {
+                const metric = rowMetrics[0] ?? 'count'
                 return (
                   <tr key={row.code} className={rowClass}>
                     <td className={`sticky left-0 z-10 ${labelBg} px-3 py-2 font-medium text-slate-800`}>
@@ -616,16 +640,16 @@ function BannerTableGrid({
                         key={ci}
                         className="px-3 py-2 text-slate-700"
                         style={
-                          heatmapApplyMetric === metric
+                          !skipHeatmap && heatmapApplyMetric === metric
                             ? heatmapStyleForCell(cell, dataRowIndex, ci, Boolean(row.is_total))
                             : undefined
                         }
                       >
                         <CellDisplay
                           cell={cell}
-                          isMetric={isMetric}
+                          isMetric={isMetric || isSummaryRow}
                           metric={metric}
-                          showSig={metric === 'col_pct'}
+                          showSig={metric === 'col_pct' && !isBaseRow}
                         />
                       </td>
                     ))}
@@ -639,10 +663,10 @@ function BannerTableGrid({
                   row={row}
                   rowClass={rowClass}
                   labelBg={labelBg}
-                  metrics={cellMetrics}
+                  metrics={rowMetrics}
                   isMetric={isMetric}
                   dataRowIndex={dataRowIndex}
-                  heatmapStyleForCell={heatmapStyleForCell}
+                  heatmapStyleForCell={skipHeatmap ? undefined : heatmapStyleForCell}
                   heatmapApplyMetric={heatmapApplyMetric}
                 />
               )
@@ -762,7 +786,13 @@ function CellDisplay({
   showSig?: boolean
 }) {
   if (isMetric || metric === 'value') {
-    return <span className="font-medium">{cell.value ?? '—'}</span>
+    if (cell.value == null) return <span className="font-medium tabular-nums">—</span>
+    const isPctStat = cell.count != null && cell.col_pct != null && cell.col_pct === cell.value
+    return (
+      <span className="font-medium tabular-nums">
+        {isPctStat ? `${cell.value}%` : cell.value}
+      </span>
+    )
   }
 
   const sig = showSig ? cell.sig : undefined

@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { AuthProvider } from './auth/AuthContext'
 import { AppShell } from './components/AppShell'
+import { ModuleGate } from './components/ModuleGate'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LandingPage } from './pages/LandingPage'
 
@@ -15,15 +16,13 @@ const AdminSettingsPage = lazy(() =>
 const MyWorkPage = lazy(() =>
   import('./pages/MyWorkPage').then((m) => ({ default: m.MyWorkPage })),
 )
-const FieldworkTrackerPage = lazy(() =>
-  import('./pages/FieldworkTrackerPage').then((m) => ({ default: m.FieldworkTrackerPage })),
-)
 const OperationsHubPage = lazy(() =>
   import('./pages/OperationsHubPage').then((m) => ({ default: m.OperationsHubPage })),
 )
 const AccountingPage = lazy(() =>
   import('./pages/AccountingPage').then((m) => ({ default: m.AccountingPage })),
 )
+const TeamPage = lazy(() => import('./pages/TeamPage').then((m) => ({ default: m.TeamPage })))
 const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })))
 const SurveyWorkspace = lazy(() =>
   import('./pages/SurveyWorkspace').then((m) => ({ default: m.SurveyWorkspace })),
@@ -66,21 +65,23 @@ function App() {
                 </ProtectedRoute>
               }
             >
-              <Route path="home" element={<HomePage />} />
-              <Route path="quantitative" element={<QuantitativePage />} />
+              <Route path="home" element={<ModuleGate module="home"><HomePage /></ModuleGate>} />
+              <Route path="quantitative" element={<ModuleGate module="quantitative"><QuantitativePage /></ModuleGate>} />
               <Route path="dashboard" element={<Navigate to="/quantitative" replace />} />
-              <Route path="my-work" element={<MyWorkPage />} />
-              <Route path="operations" element={<OperationsHubPage />} />
-              <Route path="accounting" element={<AccountingPage />} />
-              <Route path="fieldwork" element={<FieldworkTrackerPage />} />
-              <Route path="settings" element={<AdminSettingsPage />} />
-              <Route path="studio" element={<SurveyStudioPage />} />
+              <Route path="my-work" element={<ModuleGate module="my_work"><MyWorkPage /></ModuleGate>} />
+              <Route path="operations" element={<ModuleGate module="operations"><OperationsHubPage /></ModuleGate>} />
+              <Route path="accounting" element={<ModuleGate module="accounting"><AccountingPage /></ModuleGate>} />
+              <Route path="team" element={<ModuleGate module="team"><TeamPage /></ModuleGate>} />
+              <Route path="settings" element={<ModuleGate module="settings"><AdminSettingsPage /></ModuleGate>} />
+              <Route path="studio" element={<ModuleGate module="quantitative"><SurveyStudioPage /></ModuleGate>} />
             </Route>
             <Route
               path="studio/:workspaceId"
               element={
                 <ProtectedRoute>
-                  <SurveyBuilderPage />
+                  <ModuleGate module="quantitative">
+                    <SurveyBuilderPage />
+                  </ModuleGate>
                 </ProtectedRoute>
               }
             />
@@ -88,7 +89,9 @@ function App() {
               path="projects/:id"
               element={
                 <ProtectedRoute>
-                  <SurveyWorkspace />
+                  <ModuleGate module="quantitative">
+                    <SurveyWorkspace />
+                  </ModuleGate>
                 </ProtectedRoute>
               }
             />

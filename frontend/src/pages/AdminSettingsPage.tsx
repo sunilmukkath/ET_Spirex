@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FileUp, Loader2, Mail, Save, Settings, Shield, Sparkles, SlidersHorizontal, Users, Wifi, WifiOff } from 'lucide-react'
-import { api, type AiHealth, type AiStatus, type GlobalRole, type TeamRegistry } from '../api/client'
+import { FileUp, LayoutGrid, Loader2, Mail, Save, Settings, Shield, Sparkles, SlidersHorizontal, Users, Wifi, WifiOff } from 'lucide-react'
+import { api, type AiHealth, type AiStatus, type AppModule, type GlobalRole, type TeamRegistry } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { TEAM_USERS } from '../auth/AuthContext'
 import { useUserPreferences } from '../hooks/useUserPreferences'
 import { AI_FEATURES } from '../lib/aiFeatures'
+import {
+  APP_MODULES,
+  APP_MODULE_HINTS,
+  APP_MODULE_LABELS,
+  defaultModulesForRole,
+  resolveUserModules,
+} from '../lib/appModules'
 import { AiStatusBadge } from '../components/ai/AiAssistPanel'
 import { ET_LIMESURVEY_LABEL, ET_SETTINGS_SUBTITLE } from '../lib/etCopy'
 
@@ -16,7 +23,7 @@ const ROLE_LABELS: Record<GlobalRole, string> = {
 }
 
 export function AdminSettingsPage() {
-  const { user, isAdmin } = useAuth()
+  const { user, isAdmin, refreshProfile } = useAuth()
   const { prefs, loading: prefsLoading, saving: prefsSaving, savePrefs } = useUserPreferences(user?.username)
   const [connection, setConnection] = useState<Awaited<ReturnType<typeof api.getConnection>> | null>(null)
   const [sessions, setSessions] = useState<{ username: string; last_seen: number }[]>([])
@@ -66,7 +73,47 @@ export function AdminSettingsPage() {
     const users = TEAM_USERS.map((name) => {
       const existing = registry.users.find((u) => u.username === name)
       const nextRole = name === username ? role : existing?.role ?? 'member'
-      return { username: name, role: nextRole }
+      return { username: name, role: nextRole, modules: existing?.modules ?? [] }
+    })
+    setRegistry({ users })
+  }
+
+  function effectiveModules(username: string): AppModule[] {
+    const entry = registry?.users.find((u) => u.username === username)
+    return resolveUserModules(entry?.modules, entry?.role ?? roleFor(username))
+  }
+
+  function toggleModule(username: string, module: AppModule) {
+    if (!registry || username === 'Sunil') return
+    const current = effectiveModules(username)
+    const next = current.includes(module) ? current.filter((m) => m !== module) : [...current, module]
+    const users = TEAM_USERS.map((name) => {
+      const existing = registry.users.find((u) => u.username === name)
+      if (name === username) {
+        return { username: name, role: existing?.role ?? 'member', modules: next }
+      }
+      return {
+        username: name,
+        role: existing?.role ?? 'member',
+        modules: existing?.modules ?? [],
+      }
+    })
+    setRegistry({ users })
+  }
+
+  function resetModulesToRoleDefaults(username: string) {
+    if (!registry || username === 'Sunil') return
+    const role = roleFor(username)
+    const users = TEAM_USERS.map((name) => {
+      const existing = registry.users.find((u) => u.username === name)
+      if (name === username) {
+        return { username: name, role, modules: [] }
+      }
+      return {
+        username: name,
+        role: existing?.role ?? 'member',
+        modules: existing?.modules ?? [],
+      }
     })
     setRegistry({ users })
   }
@@ -78,6 +125,7 @@ export function AdminSettingsPage() {
     try {
       const saved = await api.setTeamRegistry(registry)
       setRegistry(saved)
+      await refreshProfile()
     } catch (err) {
       setRoleError(err instanceof Error ? err.message : 'Failed to save team roles')
     } finally {
@@ -135,6 +183,11 @@ export function AdminSettingsPage() {
         </p>
         {user?.email && (
           <p className="mt-1 text-xs text-slate-500">Workspace: {user.email}</p>
+        )}
+        {user?.modules && user.modules.length > 0 && (
+          <p className="mt-2 text-xs text-slate-500">
+            Your modules: {user.modules.map((m) => APP_MODULE_LABELS[m]).join(', ')}
+          </p>
         )}
       </section>
 
@@ -325,6 +378,90 @@ export function AdminSettingsPage() {
         </ul>
         <p className="mt-3 text-[10px] text-slate-400">
           {ROLE_LABELS.admin} · {ROLE_LABELS.manager} · {ROLE_LABELS.member}
+        </p>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <LayoutGrid size={18} className="text-[var(--et-teal)]" />
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Module access</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Control which app areas each user can open. Empty checkboxes use role defaults until you customize.
+              </p>
+            </div>
+          </div>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => void saveRoles()}
+              disabled={savingRoles || !registry}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-navy)] px-3 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {savingRoles ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save access
+            </button>
+          )}
+        </div>
+        {!isAdmin && (
+          <p className="mt-3 text-sm text-amber-800">Only admins can change module access.</p>
+        )}
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-500">
+                <th className="py-2 pr-4 font-semibold">User</th>
+                {APP_MODULES.map((mod) => (
+                  <th key={mod} className="px-2 py-2 font-semibold" title={APP_MODULE_HINTS[mod]}>
+                    {APP_MODULE_LABELS[mod]}
+                  </th>
+                ))}
+                <th className="py-2 pl-2 font-semibold">Reset</th>
+              </tr>
+            </thead>
+            <tbody>
+              {TEAM_USERS.map((name) => {
+                const modules = effectiveModules(name)
+                const locked = name === 'Sunil'
+                return (
+                  <tr key={name} className="border-b border-slate-50">
+                    <td className="py-2.5 pr-4 font-medium text-slate-800">
+                      {name}
+                      {locked && <span className="ml-1 text-[10px] font-normal text-slate-400">(all)</span>}
+                    </td>
+                    {APP_MODULES.map((mod) => (
+                      <td key={mod} className="px-2 py-2.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={modules.includes(mod)}
+                          disabled={!isAdmin || locked || !registry}
+                          onChange={() => toggleModule(name, mod)}
+                          className="h-4 w-4 rounded border-slate-300 text-[var(--et-teal)]"
+                          aria-label={`${name} — ${APP_MODULE_LABELS[mod]}`}
+                        />
+                      </td>
+                    ))}
+                    <td className="py-2.5 pl-2">
+                      {isAdmin && !locked && registry && (
+                        <button
+                          type="button"
+                          onClick={() => resetModulesToRoleDefaults(name)}
+                          className="text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
+                        >
+                          Role defaults
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-[10px] text-slate-400">
+          Member default: {defaultModulesForRole('member').map((m) => APP_MODULE_LABELS[m]).join(', ')} · Manager
+          default: {defaultModulesForRole('manager').map((m) => APP_MODULE_LABELS[m]).join(', ')}
         </p>
       </section>
 

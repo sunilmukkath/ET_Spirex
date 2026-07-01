@@ -201,6 +201,8 @@ export function SurveyWorkspace() {
   const [showCounts, setShowCounts] = useState(true)
   const [showColPct, setShowColPct] = useState(true)
   const [showRowPct, setShowRowPct] = useState(false)
+  const [showBaseRow, setShowBaseRow] = useState(true)
+  const [summaryStats, setSummaryStats] = useState<string[]>([])
   const [heatmapEnabled, setHeatmapEnabled] = useState(false)
   const [heatmapMetric, setHeatmapMetric] = useState<CrosstabHeatmapMetric>('col_pct')
   const [confidenceLevel, setConfidenceLevel] = useState(0.95)
@@ -601,6 +603,8 @@ export function SurveyWorkspace() {
     if (typeof cfg.show_counts === 'boolean') setShowCounts(cfg.show_counts)
     if (typeof cfg.show_col_pct === 'boolean') setShowColPct(cfg.show_col_pct)
     if (typeof cfg.show_row_pct === 'boolean') setShowRowPct(cfg.show_row_pct)
+    if (typeof cfg.show_base_row === 'boolean') setShowBaseRow(cfg.show_base_row)
+    if (Array.isArray(cfg.summary_stats)) setSummaryStats(cfg.summary_stats as string[])
     if (typeof cfg.heatmap_enabled === 'boolean') setHeatmapEnabled(cfg.heatmap_enabled)
     if (
       cfg.heatmap_metric === 'col_pct' ||
@@ -666,6 +670,8 @@ export function SurveyWorkspace() {
       show_significance: sigEnabled,
       confidence_level: confidenceLevel,
       metric,
+      show_base_row: showBaseRow,
+      summary_stats: summaryStats.length > 0 ? summaryStats : undefined,
       ...filterPayload(filters, filterTree),
       ...(Object.keys(row_filters).length > 0 ? { row_filters } : {}),
     }
@@ -1519,6 +1525,10 @@ export function SurveyWorkspace() {
               onShowColPctChange={setShowColPct}
               showRowPct={showRowPct}
               onShowRowPctChange={setShowRowPct}
+              showBaseRow={showBaseRow}
+              onShowBaseRowChange={setShowBaseRow}
+              summaryStats={summaryStats}
+              onSummaryStatsChange={setSummaryStats}
               heatmapEnabled={heatmapEnabled}
               onHeatmapEnabledChange={setHeatmapEnabled}
               heatmapMetric={heatmapMetric}
@@ -1554,6 +1564,8 @@ export function SurveyWorkspace() {
                     show_counts: showCounts,
                     show_col_pct: showColPct,
                     show_row_pct: showRowPct,
+                    show_base_row: showBaseRow,
+                    summary_stats: summaryStats,
                     heatmap_enabled: heatmapEnabled,
                     heatmap_metric: heatmapMetric,
                     sig_enabled: sigEnabled,

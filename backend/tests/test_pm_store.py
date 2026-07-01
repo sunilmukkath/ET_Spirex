@@ -107,3 +107,37 @@ def test_same_day_fieldwork_upsert(pm_session):
 
     entries = pm_store.list_fieldwork_entries(pm_session, project_id)
     assert len(entries) == 1
+
+
+def test_list_live_fieldwork_projects_filters_stages(pm_session):
+    live = pm_store.create_project(
+        pm_session,
+        PmProjectCreate(
+            project_name="Live tracker",
+            project_type="quant",
+            engagement_type="tracking",
+            stage="Fieldwork/Data Collection",
+        ),
+    )
+    pm_store.create_project(
+        pm_session,
+        PmProjectCreate(
+            project_name="Old proposal",
+            project_type="quant",
+            engagement_type="ad-hoc",
+            stage="Proposal",
+        ),
+    )
+    pm_store.create_project(
+        pm_session,
+        PmProjectCreate(
+            project_name="Delivered study",
+            project_type="quant",
+            engagement_type="ad-hoc",
+            stage="Delivered",
+        ),
+    )
+
+    rows = pm_store.list_live_fieldwork_projects(pm_session)
+    assert [row.project_name for row in rows] == ["Live tracker"]
+    assert rows[0].project_id == live.project_id

@@ -10,6 +10,7 @@ import {
 import { api, setAuthToken, type GmailConnectionStatus } from '../api/client'
 
 import type { GlobalRole } from '../api/client'
+import { canAccessModule as checkModule, type AppModule } from '../lib/appModules'
 
 const STORAGE_KEY = 'et_scout_auth'
 const LEGACY_STORAGE_KEY = 'et_spirex_auth'
@@ -22,6 +23,7 @@ interface AuthState {
   role?: GlobalRole
   email?: string | null
   is_super_admin?: boolean
+  modules?: AppModule[]
 }
 
 interface AuthContextValue {
@@ -33,6 +35,8 @@ interface AuthContextValue {
   logout: () => Promise<void>
   refreshSessions: () => Promise<void>
   refreshGmailStatus: () => Promise<void>
+  refreshProfile: () => Promise<void>
+  canAccessModule: (module: AppModule) => boolean
   isAdmin: boolean
   isSuperAdmin: boolean
 }
@@ -131,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               role: me.role,
               email: me.email,
               is_super_admin: me.is_super_admin,
+              modules: me.modules,
             }
             localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
             setUser(state)
@@ -162,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             role: me.role,
             email: me.email,
             is_super_admin: me.is_super_admin,
+            modules: me.modules,
           })
         }
       } catch {
@@ -197,6 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: me.role,
       email: me.email,
       is_super_admin: me.is_super_admin,
+      modules: me.modules,
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     setUser(state)
@@ -214,6 +221,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setActiveSessions([])
   }, [])
 
+  const refreshProfile = useCallback(async () => {
+    if (!user) return
+    try {
+      const me = await api.getMe()
+      const next = {
+        ...user,
+        role: me.role,
+        email: me.email,
+        is_super_admin: me.is_super_admin,
+        modules: me.modules,
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      setUser(next)
+    } catch {
+      /* ignore */
+    }
+  }, [user])
+
+  const canAccessModuleFn = useCallback(
+    (module: AppModule) =>
+      checkModule(user?.modules, module, { isSuperAdmin: user?.is_super_admin === true }),
+    [user?.modules, user?.is_super_admin],
+  )
+
   const value = useMemo(
     () => ({
       user,
@@ -224,10 +255,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refreshSessions,
       refreshGmailStatus,
+      refreshProfile,
+      canAccessModule: canAccessModuleFn,
       isAdmin: user?.role === 'admin' || user?.is_super_admin === true,
       isSuperAdmin: user?.is_super_admin === true,
     }),
-    [user, loading, gmailStatus, activeSessions, login, logout, refreshSessions, refreshGmailStatus],
+    [
+      user,
+      loading,
+      gmailStatus,
+      activeSessions,
+      login,
+      logout,
+      refreshSessions,
+      refreshGmailStatus,
+      refreshProfile,
+      canAccessModuleFn,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

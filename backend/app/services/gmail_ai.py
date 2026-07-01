@@ -10,6 +10,7 @@ from app.models.gmail import GmailEmailBreakdown, GmailTaskDraft
 from app.models.project_workflow import TaskCategory, TaskPriority
 from app.services.ai_narrative import ai_configured, complete_json
 from app.services.auth import VALID_USERS
+from app.services.gmail_proposal import proposal_brief_hint
 from app.services.gmail_suggest import (
     suggest_assignee,
     suggest_category,
@@ -176,4 +177,5 @@ def break_down_email_message(message: dict[str, Any]) -> GmailEmailBreakdown:
         configured=configured,
         tasks=drafts,
         email_url=gmail_message_url(message_id),
+        proposal_brief=proposal_brief_hint(message),
     )

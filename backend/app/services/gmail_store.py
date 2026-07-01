@@ -177,6 +177,22 @@ def _normalize_link_entry(raw: Any) -> dict[str, Any]:
     return {"tasks": []}
 
 
+def link_message_to_pm_project(gmail_message_id: str, project_id: str | UUID, created_by: str) -> None:
+    links = _load_links()
+    entry = _normalize_link_entry(links.get(gmail_message_id))
+    entry["pm_project_id"] = str(project_id)
+    entry["pm_created_by"] = created_by
+    entry["pm_created_at"] = time.time()
+    links[gmail_message_id] = entry
+    _save_links(links)
+
+
+def get_message_pm_project_id(gmail_message_id: str) -> str | None:
+    entry = _normalize_link_entry(_load_links().get(gmail_message_id))
+    raw = entry.get("pm_project_id")
+    return str(raw) if raw else None
+
+
 def link_message_to_task(
     gmail_message_id: str,
     *,

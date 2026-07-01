@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.models.app_modules import APP_MODULES, AppModule
+
 GlobalRole = Literal["admin", "manager", "member"]
 
 PROJECT_MODULES = (
@@ -19,6 +21,7 @@ PROJECT_MODULES = (
 class TeamUser(BaseModel):
     username: str
     role: GlobalRole = "member"
+    modules: list[AppModule] = Field(default_factory=list)
 
 
 class TeamRegistry(BaseModel):

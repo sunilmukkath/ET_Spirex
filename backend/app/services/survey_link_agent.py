@@ -198,6 +198,50 @@ def _parse_ai_matches(text: str) -> list[dict[str, Any]]:
     return []
 
 
+def _filter_by_context(
+    projects: list[dict[str, Any]],
+    surveys: list[dict[str, Any]],
+    extra_context: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    text = (extra_context or "").strip()
+    if not text:
+        return projects, surveys
+
+    if re.fullmatch(r"\d+", text):
+        sid = int(text)
+        matched_surveys = [s for s in surveys if s.get("id") is not None and int(s["id"]) == sid]
+        matched_projects = [
+            p
+            for p in projects
+            if text in (p.get("project_name") or "")
+            or text in (p.get("project_code") or "")
+            or text in (p.get("client_name") or "")
+        ]
+        return (
+            matched_projects or projects,
+            matched_surveys or surveys,
+        )
+
+    q = text.lower()
+    matched_surveys = [
+        s
+        for s in surveys
+        if q in str(s.get("title") or "").lower()
+        or q in str(s.get("id") or "")
+    ]
+    matched_projects = [
+        p
+        for p in projects
+        if q in (p.get("project_name") or "").lower()
+        or q in (p.get("client_name") or "").lower()
+        or q in (p.get("project_code") or "").lower()
+    ]
+    return (
+        matched_projects or projects,
+        matched_surveys or surveys,
+    )
+
+
 def _ai_suggestions(
     projects: list[dict[str, Any]],
     surveys: list[dict[str, Any]],
@@ -312,6 +356,12 @@ def run_survey_link_agent(
         for s in surveys_raw
         if s.get("id") is not None and int(s["id"]) in unlinked_survey_ids
     ]
+
+    unlinked_projects, surveys_for_match = _filter_by_context(
+        unlinked_projects,
+        surveys_for_match,
+        extra_context,
+    )
 
     if not unlinked_projects:
         return SurveyLinkAgentResponse(

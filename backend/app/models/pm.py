@@ -369,6 +369,8 @@ class PipelineProjectOut(PmProjectOut):
     client_name: str | None = None
     proposal_status: str | None = None
     has_survey_link: bool = False
+    data_collection_status: str = ""
+    data_collection_pct: float | None = None
 
 
 class PipelineOverview(BaseModel):

@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { BarChart3, ClipboardList, Home, Landmark, LayoutGrid, LogOut, Menu, Settings, Users, X } from 'lucide-react'
 import type { CommandPaletteItem } from './workspace/CommandPalette'
 import { useAuth } from '../auth/AuthContext'
+import { APP_MODULE_PATHS, type AppModule } from '../lib/appModules'
 import { BrandLogo } from './BrandLogo'
 import { CommandPalette, useCommandPaletteHotkey } from './workspace/CommandPalette'
 
@@ -48,12 +49,12 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
     keywords: ['books', 'zoho', 'invoices', 'bills', 'ledger', 'gst'],
   },
   {
-    id: 'app-fieldwork',
-    label: 'Fieldwork',
-    description: 'PM fieldwork tracker — completes vs quota',
+    id: 'app-team',
+    label: 'Team',
+    description: 'Staff directory, emails, phones, and workload assessment',
     group: 'App',
-    href: '/fieldwork',
-    keywords: ['quota', 'pm', 'tracking'],
+    href: '/team',
+    keywords: ['hr', 'people', 'staff', 'employees', 'load', 'workload'],
   },
   {
     id: 'app-settings',
@@ -63,6 +64,28 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
     href: '/settings',
     keywords: ['admin', 'config'],
   },
+]
+
+type NavLinkDef = {
+  module: AppModule
+  label: string
+  icon: typeof Home
+  isActive: (pathname: string, isQuantitative: boolean) => boolean
+}
+
+const NAV_LINKS: NavLinkDef[] = [
+  { module: 'home', label: 'Home', icon: Home, isActive: (p) => p === '/home' },
+  {
+    module: 'quantitative',
+    label: 'Quantitative',
+    icon: BarChart3,
+    isActive: (_, isQuantitative) => isQuantitative,
+  },
+  { module: 'my_work', label: 'My work', icon: ClipboardList, isActive: (p) => p === '/my-work' },
+  { module: 'operations', label: 'Operations', icon: LayoutGrid, isActive: (p) => p === '/operations' },
+  { module: 'accounting', label: 'Accounting', icon: Landmark, isActive: (p) => p === '/accounting' },
+  { module: 'team', label: 'Team', icon: Users, isActive: (p) => p === '/team' },
+  { module: 'settings', label: 'Settings', icon: Settings, isActive: (p) => p === '/settings' },
 ]
 
 function formatTime(ts: number) {
@@ -75,13 +98,31 @@ function formatTime(ts: number) {
 export function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, logout, activeSessions, refreshSessions } = useAuth()
+  const { user, logout, activeSessions, refreshSessions, canAccessModule } = useAuth()
   const [showSessions, setShowSessions] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const isWorkspace = /^\/projects\/\d+/.test(location.pathname)
   const isQuantitative =
     location.pathname === '/quantitative' || location.pathname.startsWith('/quantitative/')
+
+  const visibleNavLinks = useMemo(
+    () => NAV_LINKS.filter((link) => canAccessModule(link.module)),
+    [canAccessModule],
+  )
+
+  const visibleCommandItems = useMemo(
+    () =>
+      APP_NAV_ITEMS.filter((item) => {
+        const mod = Object.entries(APP_MODULE_PATHS).find(([, path]) => path === item.href)?.[0] as
+          | AppModule
+          | undefined
+        return mod ? canAccessModule(mod) : true
+      }),
+    [canAccessModule],
+  )
+
+  const homePath = canAccessModule('home') ? '/home' : APP_MODULE_PATHS[visibleNavLinks[0]?.module ?? 'home']
 
   useCommandPaletteHotkey(() => {
     if (!isWorkspace) setCommandOpen(true)
@@ -109,61 +150,26 @@ export function AppShell() {
             >
               <Menu size={20} />
             </button>
-            <Link to="/home" className="rounded-lg transition hover:opacity-90">
+            <Link to={homePath} className="rounded-lg transition hover:opacity-90">
               <BrandLogo size="sm" />
             </Link>
           </div>
 
           <nav className="hidden items-center gap-1 sm:flex">
-            <Link
-              to="/home"
-              className={`et-chip ${location.pathname === '/home' ? 'et-chip-active' : 'et-chip-inactive'}`}
-            >
-              <Home size={14} />
-              Home
-            </Link>
-            <Link
-              to="/quantitative"
-              className={`et-chip ${isQuantitative ? 'et-chip-active' : 'et-chip-inactive'}`}
-            >
-              <BarChart3 size={14} />
-              Quantitative
-            </Link>
-            <Link
-              to="/my-work"
-              className={`et-chip ${location.pathname === '/my-work' ? 'et-chip-active' : 'et-chip-inactive'}`}
-            >
-              <ClipboardList size={14} />
-              My work
-            </Link>
-            <Link
-              to="/operations"
-              className={`et-chip ${location.pathname === '/operations' ? 'et-chip-active' : 'et-chip-inactive'}`}
-            >
-              <LayoutGrid size={14} />
-              Operations
-            </Link>
-            <Link
-              to="/accounting"
-              className={`et-chip ${location.pathname === '/accounting' ? 'et-chip-active' : 'et-chip-inactive'}`}
-            >
-              <Landmark size={14} />
-              Accounting
-            </Link>
-            <Link
-              to="/fieldwork"
-              className={`et-chip ${location.pathname === '/fieldwork' ? 'et-chip-active' : 'et-chip-inactive'}`}
-            >
-              <BarChart3 size={14} />
-              Fieldwork
-            </Link>
-            <Link
-              to="/settings"
-              className={`et-chip ${location.pathname === '/settings' ? 'et-chip-active' : 'et-chip-inactive'}`}
-            >
-              <Settings size={14} />
-              Settings
-            </Link>
+            {visibleNavLinks.map((link) => {
+              const Icon = link.icon
+              const active = link.isActive(location.pathname, isQuantitative)
+              return (
+                <Link
+                  key={link.module}
+                  to={APP_MODULE_PATHS[link.module]}
+                  className={`et-chip ${active ? 'et-chip-active' : 'et-chip-inactive'}`}
+                >
+                  <Icon size={14} />
+                  {link.label}
+                </Link>
+              )
+            })}
             <button
               type="button"
               onClick={() => setCommandOpen(true)}
@@ -237,76 +243,23 @@ export function AppShell() {
               </button>
             </div>
             <nav className="space-y-1">
-              <Link
-                to="/home"
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/home' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Home size={16} />
-                Home
-              </Link>
-              <Link
-                to="/quantitative"
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  isQuantitative ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <BarChart3 size={16} />
-                Quantitative
-              </Link>
-              <Link
-                to="/my-work"
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/my-work' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <ClipboardList size={16} />
-                My work
-              </Link>
-              <Link
-                to="/operations"
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/operations' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <LayoutGrid size={16} />
-                Operations
-              </Link>
-              <Link
-                to="/accounting"
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/accounting' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Landmark size={16} />
-                Accounting
-              </Link>
-              <Link
-                to="/fieldwork"
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/fieldwork' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <BarChart3 size={16} />
-                Fieldwork
-              </Link>
-              <Link
-                to="/settings"
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/settings' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Settings size={16} />
-                Settings
-              </Link>
+              {visibleNavLinks.map((link) => {
+                const Icon = link.icon
+                const active = link.isActive(location.pathname, isQuantitative)
+                return (
+                  <Link
+                    key={link.module}
+                    to={APP_MODULE_PATHS[link.module]}
+                    onClick={() => setMobileOpen(false)}
+                    className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
+                      active ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Icon size={16} />
+                    {link.label}
+                  </Link>
+                )
+              })}
               <button
                 type="button"
                 onClick={() => {
@@ -329,7 +282,7 @@ export function AppShell() {
       <CommandPalette
         open={commandOpen}
         onClose={() => setCommandOpen(false)}
-        extraItems={APP_NAV_ITEMS}
+        extraItems={visibleCommandItems}
       />
     </div>
   )

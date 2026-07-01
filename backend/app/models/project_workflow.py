@@ -116,6 +116,17 @@ class TaskCommentCreate(BaseModel):
     body: str
 
 
+class CreateTaskRequest(BaseModel):
+    title: str
+    description: str = ""
+    survey_id: int | None = None
+    assignee: str | None = None
+    category: TaskCategory = "general"
+    priority: TaskPriority = "medium"
+    due_date: str | None = None
+    billable: bool = False
+
+
 def normalize_module_ids(raw: list[str] | None) -> list[str]:
     if not raw:
         return []

@@ -3,7 +3,7 @@
 from uuid import uuid4
 
 from app.models.pm import SurveyLinkSuggestion
-from app.services.survey_link_agent import _heuristic_suggestions, _merge_suggestions
+from app.services.survey_link_agent import _filter_by_context, _heuristic_suggestions, _merge_suggestions
 
 
 def test_heuristic_exact_title_match():
@@ -60,3 +60,17 @@ def test_merge_prefers_higher_confidence():
     assert len(merged) == 1
     assert merged[0].confidence == "high"
     assert merged[0].limesurvey_survey_id == 2
+
+
+def test_filter_by_survey_id():
+    projects = [
+        {"project_id": "a", "project_name": "Other study", "client_name": "X"},
+        {"project_id": "b", "project_name": "Nestle tracker", "client_name": "Nestle"},
+    ]
+    surveys = [
+        {"id": 12345, "title": "Nestle Brand Tracker"},
+        {"id": 99999, "title": "Unrelated"},
+    ]
+    fp, fs = _filter_by_context(projects, surveys, "12345")
+    assert len(fs) == 1
+    assert fs[0]["id"] == 12345

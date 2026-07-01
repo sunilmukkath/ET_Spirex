@@ -56,11 +56,52 @@ class GmailTaskDraft(BaseModel):
     confidence: Literal["high", "medium", "low"] = "medium"
 
 
+class GmailProposalBriefHint(BaseModel):
+    detected: bool = False
+    project_name: str = ""
+    client_name: str = ""
+    assignee: str | None = None
+    confidence: Literal["high", "medium", "low"] = "medium"
+
+
 class GmailEmailBreakdown(BaseModel):
     gmail_message_id: str
     subject: str
     configured: bool
     tasks: list[GmailTaskDraft] = Field(default_factory=list)
+    email_url: str = ""
+    proposal_brief: GmailProposalBriefHint | None = None
+
+
+class CreateTaskFromEmailItem(BaseModel):
+    title: str
+    note: str | None = None
+    survey_id: int | None = None
+    category: TaskCategory | None = None
+    assignee: str | None = None
+    priority: TaskPriority | None = None
+    billable: bool = True
+
+
+class CreatePipelineFromEmailRequest(BaseModel):
+    project_name: str
+    client_name: str | None = None
+    owner_name: str | None = None
+    project_type: Literal["quant", "qual", "mixed"] = "quant"
+    engagement_type: Literal["tracking", "ad-hoc"] = "ad-hoc"
+    create_tasks: bool = True
+    tasks: list[CreateTaskFromEmailItem] = Field(default_factory=list)
+
+
+class CreatePipelineFromEmailResponse(BaseModel):
+    project_id: str
+    project_name: str
+    client_name: str | None = None
+    owner_name: str | None = None
+    assignee: str | None = None
+    proposal_id: str | None = None
+    tasks_created: int = 0
+    operations_url: str = "/operations?tab=pipeline"
     email_url: str = ""
 
 
@@ -74,16 +115,6 @@ class CreateTaskFromEmailRequest(BaseModel):
     priority: TaskPriority | None = None
     due_date: str | None = None
     billable: bool | None = None
-
-
-class CreateTaskFromEmailItem(BaseModel):
-    title: str
-    note: str | None = None
-    survey_id: int | None = None
-    category: TaskCategory | None = None
-    assignee: str | None = None
-    priority: TaskPriority | None = None
-    billable: bool = True
 
 
 class CreateTasksFromEmailBatchRequest(BaseModel):

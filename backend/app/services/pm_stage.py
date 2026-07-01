@@ -45,6 +45,18 @@ _STAGE_ALIASES: dict[str, str] = {
     "live": "Fieldwork/Data Collection",
 }
 
+LIVE_FIELDWORK_STAGES: frozenset[str] = frozenset(
+    {
+        "Deployment Prep",
+        "Fieldwork/Data Collection",
+        "QC",
+    }
+)
+
+
+def is_live_fieldwork_stage(stage: str | None) -> bool:
+    return (stage or "").strip() in LIVE_FIELDWORK_STAGES
+
 
 def normalize_stage(raw: str | None, *, default: str = "Proposal") -> str:
     if not raw:

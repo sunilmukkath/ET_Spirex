@@ -5,6 +5,7 @@ import {
   Briefcase,
   DollarSign,
   FileText,
+  Link2,
   Loader2,
   Megaphone,
   Plus,
@@ -20,6 +21,7 @@ import {
   type PmClient,
   type PmFinanceSummary,
   type PmPipelineOverview,
+  type PmSurveyLinkSuggestion,
   type ProjectRequirements,
 } from '../api/client'
 import { ProjectRequirementsEditor, emptyProjectRequirements } from '../components/ProjectRequirementsEditor'
@@ -162,6 +164,20 @@ export function OperationsHubPage() {
 
   const [newClientName, setNewClientName] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
+
+  const [linkQuery, setLinkQuery] = useState('')
+  const [linkAgentLoading, setLinkAgentLoading] = useState(false)
+  const [linkAgentSummary, setLinkAgentSummary] = useState<string | null>(null)
+  const [linkAgentError, setLinkAgentError] = useState<string | null>(null)
+  const [linkSuggestions, setLinkSuggestions] = useState<PmSurveyLinkSuggestion[]>([])
+  const [linkSelected, setLinkSelected] = useState<Set<string>>(new Set())
+  const [linkApplying, setLinkApplying] = useState(false)
+
+  const [fieldworkProjectId, setFieldworkProjectId] = useState<string | null>(null)
+  const [fieldworkProjectName, setFieldworkProjectName] = useState('')
+  const [fieldworkCompletes, setFieldworkCompletes] = useState('0')
+  const [fieldworkTarget, setFieldworkTarget] = useState('')
+  const [fieldworkSaving, setFieldworkSaving] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -315,6 +331,91 @@ export function OperationsHubPage() {
     }
   }
 
+  function linkConfidenceClass(conf: PmSurveyLinkSuggestion['confidence']) {
+    if (conf === 'high') return 'bg-emerald-100 text-emerald-800'
+    if (conf === 'medium') return 'bg-amber-100 text-amber-900'
+    return 'bg-slate-100 text-slate-600'
+  }
+
+  async function runSurveyLinkAgent(applyHighOnly = false) {
+    setLinkAgentLoading(true)
+    setLinkAgentError(null)
+    try {
+      const result = await api.runSurveyLinkAgent({
+        apply: applyHighOnly,
+        context: linkQuery.trim() || undefined,
+      })
+      setLinkAgentSummary(result.summary)
+      setLinkSuggestions(result.suggestions)
+      setLinkSelected(
+        new Set(result.suggestions.filter((s) => s.confidence === 'high').map((s) => s.project_id)),
+      )
+      if (applyHighOnly && result.applied_count > 0) {
+        await load()
+      }
+    } catch (e) {
+      setLinkAgentError(e instanceof Error ? e.message : 'Survey link agent failed')
+    } finally {
+      setLinkAgentLoading(false)
+    }
+  }
+
+  async function applySelectedLinks() {
+    const links = linkSuggestions
+      .filter((s) => linkSelected.has(s.project_id))
+      .map((s) => ({ project_id: s.project_id, limesurvey_survey_id: s.limesurvey_survey_id }))
+    if (links.length === 0) return
+    setLinkApplying(true)
+    setLinkAgentError(null)
+    try {
+      const result = await api.applySurveyLinks(links)
+      if (result.errors.length) setLinkAgentError(result.errors.join(' · '))
+      setLinkAgentSummary(`Applied ${result.applied_count} link(s).`)
+      setLinkSuggestions((prev) => prev.filter((s) => !linkSelected.has(s.project_id)))
+      setLinkSelected(new Set())
+      await load()
+    } catch (e) {
+      setLinkAgentError(e instanceof Error ? e.message : 'Apply failed')
+    } finally {
+      setLinkApplying(false)
+    }
+  }
+
+  function openFieldworkLog(projectId: string, projectName: string) {
+    setFieldworkProjectId(projectId)
+    setFieldworkProjectName(projectName)
+    setFieldworkCompletes('0')
+    setFieldworkTarget('')
+  }
+
+  async function saveFieldworkLog(e: FormEvent) {
+    e.preventDefault()
+    if (!fieldworkProjectId) return
+    setFieldworkSaving(true)
+    setError(null)
+    try {
+      await api.createPmFieldworkEntry(fieldworkProjectId, {
+        entry_date: new Date().toISOString().slice(0, 10),
+        completes_today: Number(fieldworkCompletes) || 0,
+        target_completes: fieldworkTarget ? Number(fieldworkTarget) : undefined,
+      })
+      setFieldworkProjectId(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to log fieldwork')
+    } finally {
+      setFieldworkSaving(false)
+    }
+  }
+
+  function dataCollectionTone(stage: string, pct: number | null | undefined) {
+    if (stage === 'Delivered') return 'text-slate-500'
+    if (pct != null && pct >= 100) return 'text-emerald-700'
+    if (pct != null && pct >= 70) return 'text-sky-700'
+    if (stage === 'Fieldwork/Data Collection' || stage === 'QC') return 'text-amber-800'
+    return 'text-slate-600'
+  }
+
   if (loading) return <LoadingState message="Loading operations hub…" />
   if (enabled === false) {
     return (
@@ -410,6 +511,7 @@ export function OperationsHubPage() {
                   <th className="px-4 py-3">FY / Month</th>
                   <th className="px-4 py-3">Value INR</th>
                   <th className="px-4 py-3">Stage</th>
+                  <th className="px-4 py-3">Data collection</th>
                   <th className="px-4 py-3">Survey</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
@@ -441,6 +543,30 @@ export function OperationsHubPage() {
                           </option>
                         ))}
                       </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="min-w-[8rem]">
+                        <p className={`text-xs font-medium ${dataCollectionTone(p.stage, p.data_collection_pct)}`}>
+                          {p.data_collection_status || '—'}
+                        </p>
+                        {p.data_collection_pct != null && (
+                          <div className="mt-1.5 h-1.5 w-full max-w-[120px] overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full bg-[var(--et-navy)]"
+                              style={{ width: `${Math.min(100, p.data_collection_pct)}%` }}
+                            />
+                          </div>
+                        )}
+                        {['Deployment Prep', 'Fieldwork/Data Collection', 'QC'].includes(p.stage) && (
+                          <button
+                            type="button"
+                            onClick={() => openFieldworkLog(p.project_id, p.project_name)}
+                            className="mt-1 text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
+                          >
+                            Log completes
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       {p.limesurvey_survey_id ? (
@@ -488,21 +614,97 @@ export function OperationsHubPage() {
             )}
           </div>
 
-          {(pipeline?.unlinked_survey_ids.length ?? 0) > 0 && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              <p className="font-medium">
-                {pipeline!.unlinked_survey_ids.length} LimeSurvey stud
-                {pipeline!.unlinked_survey_ids.length === 1 ? 'y' : 'ies'} not assigned to a PM project
-              </p>
-          <p className="mt-1 text-xs">
-            Open{' '}
-            <Link to="/quantitative?tab=links" className="font-semibold underline">
-              Quantitative → Survey links
-            </Link>{' '}
-            and run the <strong>Survey link agent</strong> to auto-match studies to projects.
-          </p>
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Link2 size={16} className="text-[var(--et-navy)]" />
+                  <h3 className="text-sm font-semibold text-slate-800">Survey link agent</h3>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Enter a project name, client, or LimeSurvey study ID — Scout recommends matching links.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void runSurveyLinkAgent(false)}
+                  disabled={linkAgentLoading}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/40 bg-white px-3 py-1.5 text-xs font-medium text-[var(--et-teal-dark)] disabled:opacity-50"
+                >
+                  {linkAgentLoading ? <Loader2 size={14} className="animate-spin" /> : <Bot size={14} />}
+                  Recommend links
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runSurveyLinkAgent(true)}
+                  disabled={linkAgentLoading}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-teal)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                >
+                  Apply high-confidence
+                </button>
+              </div>
             </div>
-          )}
+            <input
+              value={linkQuery}
+              onChange={(e) => setLinkQuery(e.target.value)}
+              placeholder="e.g. Brand tracker wave 3 · Nestle · 123456"
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+            />
+            {linkAgentSummary && <p className="text-xs text-slate-700">{linkAgentSummary}</p>}
+            {linkAgentError && <p className="text-xs text-rose-700">{linkAgentError}</p>}
+            {(pipeline?.unlinked_survey_ids.length ?? 0) > 0 && (
+              <p className="text-xs text-amber-800">
+                {pipeline!.unlinked_survey_ids.length} unlinked LimeSurvey stud
+                {pipeline!.unlinked_survey_ids.length === 1 ? 'y' : 'ies'} available to match.
+              </p>
+            )}
+            {linkSuggestions.length > 0 && (
+              <div className="space-y-2">
+                <ul className="max-h-56 space-y-2 overflow-y-auto et-scroll">
+                  {linkSuggestions.map((s) => (
+                    <li
+                      key={s.project_id}
+                      className="flex flex-wrap items-start gap-3 rounded-lg border border-white bg-white px-3 py-2 text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={linkSelected.has(s.project_id)}
+                        onChange={() => {
+                          setLinkSelected((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(s.project_id)) next.delete(s.project_id)
+                            else next.add(s.project_id)
+                            return next
+                          })
+                        }}
+                        className="mt-0.5"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-900">{s.project_name}</p>
+                        <p className="text-slate-600">
+                          → #{s.limesurvey_survey_id} {s.survey_title}
+                        </p>
+                        <p className="text-slate-500">{s.reason}</p>
+                      </div>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${linkConfidenceClass(s.confidence)}`}>
+                        {s.confidence}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => void applySelectedLinks()}
+                  disabled={linkApplying || linkSelected.size === 0}
+                  className="rounded-lg bg-[var(--et-navy)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                >
+                  {linkApplying ? <Loader2 size={14} className="animate-spin inline" /> : null}
+                  Apply {linkSelected.size} selected
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
             <div>
@@ -643,10 +845,55 @@ export function OperationsHubPage() {
       )}
 
       <p className="text-xs text-slate-400">
-        Fieldwork daily tracking: <Link to="/fieldwork" className="text-[var(--et-teal-dark)] hover:underline">Fieldwork tracker</Link>
-        {' · '}
         LimeSurvey &amp; programming: <Link to="/quantitative" className="text-[var(--et-teal-dark)] hover:underline">Quantitative</Link>
       </p>
+
+      {fieldworkProjectId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
+          <form
+            onSubmit={(e) => void saveFieldworkLog(e)}
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+          >
+            <h3 className="text-lg font-semibold text-slate-900">Log data collection</h3>
+            <p className="mt-1 text-sm text-slate-500">{fieldworkProjectName}</p>
+            <p className="mt-2 text-xs text-slate-500">
+              Updates today&apos;s entry if one already exists for this date.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm sm:col-span-2">
+                <span className="mb-1 block text-slate-600">Completes today</span>
+                <input
+                  type="number"
+                  min={0}
+                  className="et-input w-full"
+                  value={fieldworkCompletes}
+                  onChange={(e) => setFieldworkCompletes(e.target.value)}
+                />
+              </label>
+              <label className="block text-sm sm:col-span-2">
+                <span className="mb-1 block text-slate-600">Target completes (optional)</span>
+                <input
+                  type="number"
+                  min={0}
+                  className="et-input w-full"
+                  value={fieldworkTarget}
+                  onChange={(e) => setFieldworkTarget(e.target.value)}
+                  placeholder="Overall quota target"
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" className="et-btn-secondary" onClick={() => setFieldworkProjectId(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="et-btn-primary" disabled={fieldworkSaving}>
+                {fieldworkSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {requirementsProjectId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
