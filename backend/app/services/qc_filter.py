@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from app.services.data_quality import response_id_column, safe_response_id
-from app.services.qc_config_store import ALL_CHECK_IDS
+from app.services.qc_config_store import ALL_CHECK_IDS, enabled_check_ids
 
 QC_APPROVED_STATUS = "qc_approved"
 LIMESURVEY_EXPORT_STATUSES = frozenset({"complete", "all", "incomplete"})
@@ -72,27 +72,43 @@ def get_flagged_response_ids(survey_id: int) -> set[str]:
     return flagged
 
 
-def get_qc_excluded_response_ids(survey_id: int) -> set[str]:
-    """Response IDs removed from the QC Approved analysis sample."""
+def _qc_excluded_ids(
+    survey_id: int,
+    quality_result: dict[str, Any] | None = None,
+) -> set[str]:
+    """Response IDs excluded from the QC Approved analysis sample."""
+    from app.services.data_quality import run_data_quality
     from app.services.qc_config_store import get_qc_config
 
-    auto_flagged = get_flagged_response_ids(survey_id)
     cfg = get_qc_config(survey_id)
-    kept = {str(x) for x in cfg.kept_response_ids}
-    extra_excluded = {str(x) for x in cfg.excluded_response_ids}
+    result = (
+        quality_result
+        if quality_result is not None
+        else run_data_quality(survey_id, completion_status="complete")
+    )
+    disabled = frozenset(ALL_CHECK_IDS) - enabled_check_ids(survey_id)
+    auto_flagged = collect_flagged_ids(result, disabled_checks=disabled)
+    kept = {str(x) for x in (cfg.kept_response_ids or [])}
+    extra_excluded = {str(x) for x in (cfg.excluded_response_ids or [])}
     return (auto_flagged - kept) | extra_excluded
 
 
+def get_qc_excluded_response_ids(survey_id: int) -> set[str]:
+    """Response IDs removed from the QC Approved analysis sample."""
+    return _qc_excluded_ids(survey_id)
+
+
 def get_qc_summary(survey_id: int) -> dict[str, Any]:
+    from app.services.data_quality import run_data_quality
     from app.services.qc_config_store import get_qc_config
-    from app.services.response_store import get_responses
 
     cfg = get_qc_config(survey_id)
-    dataset = get_responses(survey_id, completion_status="complete")
-    df = dataset.dataframe
-    total = int(len(df))
-    auto_flagged = get_flagged_response_ids(survey_id)
-    qc_approved = qc_approved_response_count(survey_id)
+    result = run_data_quality(survey_id, completion_status="complete")
+    total = int(result.get("total_responses") or 0)
+    disabled = frozenset(ALL_CHECK_IDS) - enabled_check_ids(survey_id)
+    auto_flagged = collect_flagged_ids(result, disabled_checks=disabled)
+    excluded = _qc_excluded_ids(survey_id, quality_result=result)
+    qc_approved = max(0, total - len(excluded))
     kept = {str(x) for x in cfg.kept_response_ids}
     manual_excluded = {str(x) for x in cfg.excluded_response_ids} - auto_flagged
     return {
@@ -107,26 +123,14 @@ def get_qc_summary(survey_id: int) -> dict[str, Any]:
 
 
 def qc_approved_response_count(survey_id: int) -> int:
-    from app.services.response_store import get_responses
+    from app.services.data_quality import run_data_quality
 
-    dataset = get_responses(survey_id, completion_status="complete")
-    df = dataset.dataframe
-    if df.empty:
+    result = run_data_quality(survey_id, completion_status="complete")
+    total = int(result.get("total_responses") or 0)
+    if total == 0:
         return 0
-
-    excluded = get_qc_excluded_response_ids(survey_id)
-    if not excluded:
-        return int(len(df))
-
-    id_col = response_id_column(df)
-    if not id_col:
-        return max(0, int(len(df)) - len(excluded))
-
-    ids = pd.Series(
-        (str(safe_response_id(df.at[idx, id_col], idx)) for idx in df.index),
-        index=df.index,
-    )
-    return int((~ids.isin(excluded)).sum())
+    excluded = _qc_excluded_ids(survey_id, quality_result=result)
+    return max(0, total - len(excluded))
 
 
 def exclude_flagged_responses(df: pd.DataFrame, flagged_ids: set[str]) -> pd.DataFrame:

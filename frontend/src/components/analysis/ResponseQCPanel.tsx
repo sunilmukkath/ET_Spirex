@@ -13,6 +13,7 @@ import { api, type DataQualityResult, type QcConfig, type SurveyVariable } from 
 import {
   aggregateFlaggedRows,
   checkCount,
+  computeQcApprovedSample,
   computeQcMetrics,
   CUSTOM_RULES_CHECK,
   checkUnavailableMessage,
@@ -111,7 +112,7 @@ export function ResponseQCPanel({ surveyId, variables = [], onUseQcApproved, onR
   )
 }
 
-function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onReviewChanged, qcApprovedCount, embedded }: Props) {
+function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onReviewChanged, embedded }: Props) {
   const { user } = useAuth()
   const qcDefaultsSynced = useRef(false)
   const [result, setResult] = useState<DataQualityResult | null>(() => loadCached(surveyId)?.result ?? null)
@@ -358,6 +359,21 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
     return exportRows.filter((row) => !isIncludedInQcSample(row.response_id, flaggedIdSet, review)).length
   }, [exportRows, flaggedIdSet, review])
 
+  const qcApprovedSample = useMemo(() => {
+    if (!metrics) return null
+    return computeQcApprovedSample(
+      metrics.total,
+      flaggedIdSet,
+      review,
+      excludedFromSampleCount,
+    )
+  }, [metrics, flaggedIdSet, review, excludedFromSampleCount])
+
+  const qcPassRate = useMemo(() => {
+    if (!metrics || qcApprovedSample == null) return metrics?.passRate ?? 100
+    return metrics.total > 0 ? (qcApprovedSample / metrics.total) * 100 : 100
+  }, [metrics, qcApprovedSample])
+
   const setInclusion = useCallback(
     (responseId: string, include: boolean) => {
       const next = setQcSampleInclusion(responseId, include, flaggedIdSet, review)
@@ -525,9 +541,9 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
               >
                 <CheckCircle2 size={14} />
                 Use QC Approved sample
-                {qcApprovedCount != null && (
+                {qcApprovedSample != null && (
                   <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] tabular-nums">
-                    {qcApprovedCount}
+                    {qcApprovedSample}
                   </span>
                 )}
               </button>
@@ -612,17 +628,16 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="text-sm font-semibold text-slate-800">Overview</h3>
-          <p className="mt-0.5 text-xs text-slate-500">Sample pass rate and QC Approved counts.</p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <p className="mt-0.5 text-xs text-slate-500">Sample size, QC approved (passed), and pass rate.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryTile label="Sample size" value={metrics.total} />
-            <SummaryTile label="Passed QC" value={metrics.clean} tone="pass" />
-            <SummaryTile label="Failed QC" value={metrics.flagged} tone="fail" />
             <SummaryTile
-              label="QC Approved sample"
-              value={qcApprovedCount ?? '—'}
+              label="QC approved"
+              value={qcApprovedSample ?? metrics.clean}
               tone="pass"
             />
-            <SummaryTile label="Pass rate" value={`${metrics.passRate.toFixed(1)}%`} />
+            <SummaryTile label="Failed QC" value={metrics.flagged} tone="fail" />
+            <SummaryTile label="Pass rate" value={`${qcPassRate.toFixed(1)}%`} />
           </div>
           {(review.kept.size > 0 || review.excluded.size > 0) && (
             <p className="mt-3 text-xs text-slate-500">

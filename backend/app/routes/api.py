@@ -330,6 +330,10 @@ def survey_warmup(survey_id: int, completion_status: str = "complete"):
 @router.get("/projects/{survey_id}/analysis/quality")
 def data_quality(survey_id: int, completion_status: str = "complete", refresh: bool = False):
     try:
+        if refresh:
+            from app.services.qc_filter import invalidate_flagged_cache
+
+            invalidate_flagged_cache(survey_id)
         # Quality checks always run on completed responses.
         return run_data_quality(
             survey_id,

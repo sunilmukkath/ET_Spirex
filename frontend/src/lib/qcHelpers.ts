@@ -247,6 +247,16 @@ export function normalizeQcResult(result: DataQualityResult): DataQualityResult 
   }
 }
 
+export function computeQcApprovedSample(
+  total: number,
+  flaggedIdSet: Set<string>,
+  review: QcReviewState,
+  excludedFromSampleCount: number,
+): number {
+  const manualCleanExcluded = [...review.excluded].filter((id) => !flaggedIdSet.has(id)).length
+  return Math.max(0, total - excludedFromSampleCount - manualCleanExcluded)
+}
+
 export function computeQcMetrics(
   result: DataQualityResult,
   enabledChecks: Set<QcCheckId>,
