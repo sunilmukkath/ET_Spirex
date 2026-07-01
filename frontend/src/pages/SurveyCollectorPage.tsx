@@ -6,28 +6,11 @@ import { api, type EtCollectorSurvey, type EtQuestion } from '../api/client'
 import { BrandLogo } from '../components/BrandLogo'
 import { EtQuestionField } from '../components/survey/EtQuestionField'
 import { ErrorState, LoadingState } from '../components/States'
-
-function matchesShowIf(
-  rule: EtQuestion['show_if'],
-  answers: Record<string, unknown>,
-): boolean {
-  if (!rule) return true
-  const raw = answers[rule.question_id]
-  const values = Array.isArray(raw) ? raw.map(String) : [String(raw ?? '')]
-  const target = rule.values.map(String)
-  switch (rule.operator) {
-    case 'equals':
-      return target.some((t) => values.includes(t))
-    case 'not_equals':
-      return !target.some((t) => values.includes(t))
-    case 'includes':
-      return target.every((t) => values.includes(t))
-    case 'not_includes':
-      return !target.every((t) => values.includes(t))
-    default:
-      return true
-  }
-}
+import {
+  getNextPage,
+  visibleQuestionsOnBlock,
+  type ParticipantSession,
+} from '../lib/surveyLogic'
 
 export function SurveyCollectorPage() {
   const { slug } = useParams<{ slug: string }>()
@@ -36,6 +19,7 @@ export function SurveyCollectorPage() {
   const [error, setError] = useState<string | null>(null)
   const [answers, setAnswers] = useState<Record<string, unknown>>({})
   const [blockIndex, setBlockIndex] = useState(0)
+  const [quotaFull, setQuotaFull] = useState(false)
   const [done, setDone] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -60,10 +44,35 @@ export function SurveyCollectorPage() {
   const currentBlock = blocks[blockIndex]
   const singlePage = settings?.single_page ?? false
 
+  const session: ParticipantSession | null = useMemo(() => {
+    if (!survey) return null
+    return {
+      session_id: slug ?? 'local',
+      survey_id: slug ?? '',
+      current_block_index: blockIndex,
+      answers,
+      quota_counts: {},
+      terminated: quotaFull,
+      termination_reason: quotaFull ? 'quota_full' : null,
+      started_at: Date.now(),
+      updated_at: Date.now(),
+    }
+  }, [survey, slug, blockIndex, answers, quotaFull])
+
   const visibleQuestions = useMemo(() => {
-    if (!currentBlock) return []
-    return currentBlock.questions.filter((q) => matchesShowIf(q.show_if, answers))
-  }, [currentBlock, answers])
+    if (!currentBlock || !survey || !session) return [] as EtQuestion[]
+    if (singlePage) {
+      return blocks.flatMap((b) =>
+        visibleQuestionsOnBlock(b, survey.definition, session),
+      )
+    }
+    return visibleQuestionsOnBlock(currentBlock, survey.definition, session)
+  }, [currentBlock, survey, session, singlePage, blocks])
+
+  const routed = useMemo(() => {
+    if (!survey || !session) return null
+    return getNextPage(survey.definition, session, blockIndex)
+  }, [survey, session, blockIndex])
 
   function setAnswer(questionId: string, value: unknown) {
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
@@ -87,6 +96,22 @@ export function SurveyCollectorPage() {
   if (error && !survey) return <ErrorState message={error} />
   if (!survey) return <ErrorState message="Survey not found" />
 
+  if (quotaFull) {
+    return (
+      <div className="et-canvas-dots flex min-h-screen items-center justify-center p-6">
+        <div className="max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-lg">
+          <BrandLogo size="sm" />
+          <h1 className="text-xl font-semibold text-slate-900">
+            {settings?.quota_full_title ?? 'Quota full'}
+          </h1>
+          <p className="mt-2 text-sm text-slate-600">
+            {settings?.quota_full_message ?? 'Thank you for your interest. This survey has reached its target.'}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   if (done) {
     return (
       <div className="et-canvas-dots flex min-h-screen items-center justify-center p-6">
@@ -99,7 +124,21 @@ export function SurveyCollectorPage() {
     )
   }
 
-  const isLast = blockIndex >= blocks.length - 1
+  const isLast = singlePage || (routed?.type === 'page' ? routed.routed.is_last : true)
+
+  function goNext() {
+    if (!survey || !session) return
+    const next = getNextPage(survey.definition, session, blockIndex + 1)
+    if (next.type === 'quota_full') {
+      setQuotaFull(true)
+      return
+    }
+    if (next.type === 'page') {
+      setBlockIndex(next.routed.block_index)
+      return
+    }
+    void submit(true)
+  }
 
   return (
     <div className="et-canvas-dots min-h-screen py-8">
@@ -122,24 +161,22 @@ export function SurveyCollectorPage() {
             </header>
           )}
 
-          {currentBlock && (
-            <>
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--et-teal)]">
-                {currentBlock.title}
-              </h2>
-              <div className="space-y-6">
-                {visibleQuestions.map((q) => (
-                  <EtQuestionField
-                    key={q.id}
-                    slug={slug}
-                    question={q}
-                    value={answers[q.id]}
-                    onChange={(v) => setAnswer(q.id, v)}
-                  />
-                ))}
-              </div>
-            </>
+          {!singlePage && currentBlock && (
+            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--et-teal)]">
+              {currentBlock.title}
+            </h2>
           )}
+          <div className="space-y-6">
+            {visibleQuestions.map((q) => (
+              <EtQuestionField
+                key={q.id}
+                slug={slug}
+                question={q}
+                value={answers[q.id]}
+                onChange={(v) => setAnswer(q.id, v)}
+              />
+            ))}
+          </div>
 
           {error && <p className="mt-4 text-sm text-rose-700">{error}</p>}
 
@@ -166,7 +203,7 @@ export function SurveyCollectorPage() {
               <button
                 type="button"
                 disabled={submitting}
-                onClick={() => setBlockIndex((i) => i + 1)}
+                onClick={goNext}
                 className="rounded-lg bg-[var(--et-teal)] px-5 py-2 text-sm font-medium text-white hover:opacity-90"
               >
                 Continue

@@ -58,6 +58,12 @@ from app.models.pm import (
     TeamMemberOut,
 )
 from app.models.project_requirements import ProjectRequirements
+from app.models.project_workflow import (
+    ProjectActivityCreate,
+    ProjectWorkflow,
+    TaskCommentCreate,
+)
+from app.models.team_registry import PROJECT_MODULES
 from app.services import pm_ops_store, pm_store
 from app.services.pm_import import (
     configure_import_from_master,
@@ -78,6 +84,14 @@ from app.services.proposal_agent import run_proposal_writing_agent
 from app.services.survey_link_agent import apply_survey_links, run_survey_link_agent
 from app.services.auth import get_session
 from app.services.team_registry_store import is_global_admin
+from app.services.project_workflow_store import (
+    add_pm_manual_activity,
+    add_pm_task_comment,
+    can_manage_pm_project_team,
+    get_pm_project_workflow,
+    set_pm_project_workflow,
+    workflow_access_summary_for_pm,
+)
 from app.db.models import TeamMember
 from sqlalchemy import select
 
@@ -616,6 +630,115 @@ def pm_survey_link_apply(
 ):
     applied, errors = apply_survey_links(session, body.links)
     return {"applied_count": applied, "errors": errors}
+
+
+# --- Project workflow (PM-scoped) ---
+
+
+@router.get("/projects/{project_id}/workflow")
+def pm_project_workflow_get(
+    project_id: UUID,
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_pm_db),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not pm_store.get_project(session, project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    pid = str(project_id)
+    workflow = get_pm_project_workflow(pid)
+    return {
+        "workflow": workflow,
+        "access": workflow_access_summary_for_pm(record.username, pid),
+        "modules": list(PROJECT_MODULES),
+        "project_id": pid,
+    }
+
+
+@router.put("/projects/{project_id}/workflow")
+def pm_project_workflow_update(
+    project_id: UUID,
+    body: ProjectWorkflow,
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_pm_db),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not pm_store.get_project(session, project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    pid = str(project_id)
+    if not can_manage_pm_project_team(record.username, pid):
+        raise HTTPException(status_code=403, detail="You do not have permission to edit project workflow")
+    saved = set_pm_project_workflow(pid, body, editor=record.username)
+    return {
+        "workflow": saved,
+        "access": workflow_access_summary_for_pm(record.username, pid),
+        "project_id": pid,
+    }
+
+
+@router.post("/projects/{project_id}/workflow/activities")
+def pm_project_workflow_add_activity(
+    project_id: UUID,
+    body: ProjectActivityCreate,
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_pm_db),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not pm_store.get_project(session, project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    message = (body.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message required")
+    pid = str(project_id)
+    if not can_manage_pm_project_team(record.username, pid):
+        raise HTTPException(status_code=403, detail="You do not have permission to post project updates")
+    saved = add_pm_manual_activity(pid, actor=record.username, message=message)
+    return {
+        "workflow": saved,
+        "access": workflow_access_summary_for_pm(record.username, pid),
+        "project_id": pid,
+    }
+
+
+@router.post("/projects/{project_id}/workflow/tasks/{task_id}/comments")
+def pm_project_workflow_add_task_comment(
+    project_id: UUID,
+    task_id: str,
+    body: TaskCommentCreate,
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_pm_db),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not pm_store.get_project(session, project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    pid = str(project_id)
+    workflow = get_pm_project_workflow(pid)
+    if not workflow.members and not can_manage_pm_project_team(record.username, pid):
+        raise HTTPException(status_code=403, detail="Not a project member")
+    is_member = any(m.username == record.username for m in workflow.members)
+    if not is_member and not can_manage_pm_project_team(record.username, pid):
+        raise HTTPException(status_code=403, detail="Not a project member")
+    try:
+        saved = add_pm_task_comment(
+            pid,
+            task_id,
+            author=record.username,
+            body=body.body,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "workflow": saved,
+        "access": workflow_access_summary_for_pm(record.username, pid),
+        "project_id": pid,
+    }
 
 
 # --- Survey programming ---

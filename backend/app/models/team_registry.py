@@ -26,3 +26,4 @@ class TeamUser(BaseModel):
 
 class TeamRegistry(BaseModel):
     users: list[TeamUser] = Field(default_factory=list)
+    super_admins: list[str] = Field(default_factory=list)

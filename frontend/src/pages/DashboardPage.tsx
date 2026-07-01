@@ -30,6 +30,7 @@ import {
 import { PROJECT_PHASE_LABELS } from '../lib/workflowPhases'
 import { ET_DASHBOARD_SUBTITLE, ET_DASHBOARD_TITLE } from '../lib/etCopy'
 import { TASK_CATEGORY_LABELS, TASK_STATUS_LABELS } from '../lib/workflowAccess'
+import { taskWorkflowHref } from '../lib/pmWorkflowLinks'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState, ErrorState, LoadingState, SkeletonBlock } from '../components/States'
 
@@ -544,7 +545,7 @@ export function DashboardPage({ embedded = false }: { embedded?: boolean }) {
                   </div>
                   {!row.personal && row.survey_id != null && (
                   <Link
-                    to={`/projects/${row.survey_id}?mode=workflow`}
+                    to={taskWorkflowHref(row) ?? '#'}
                     state={{ title: row.survey_title }}
                     className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)]/30"
                   >

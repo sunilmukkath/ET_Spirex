@@ -26,6 +26,7 @@ _ET_TYPE_MAP: dict[str, str] = {
     "gps": "S",
     "photo": "S",
     "audio": "S",
+    "equation": "X",
 }
 
 
@@ -142,7 +143,7 @@ def build_et_survey_schema(workspace_id: int, *, response_count: int = 0) -> dic
         group_id = abs(hash(block.id)) % 1_000_000 or 1
         variable_ids: list[str] = []
         for question in sorted(block.questions, key=lambda q: q.sort_order):
-            if question.type == "display":
+            if question.type in ("display", "equation"):
                 qid += 1
                 continue
             var = _question_to_variable(

@@ -8,7 +8,7 @@ from app.models.app_modules import AppModule
 from app.models.team_registry import GlobalRole, TeamRegistry, TeamUser
 from app.services.app_module_access import get_user_app_modules, resolve_user_modules
 from app.services.auth import VALID_USERS
-from app.services.super_admin import is_super_admin, super_admin_username
+from app.services.super_admin import is_primary_super_admin, is_super_admin, super_admin_username
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "team"
 _REGISTRY_PATH = _DATA_DIR / "registry.json"
@@ -17,11 +17,12 @@ _DEFAULT_ADMINS = frozenset({super_admin_username()})
 
 
 def _default_registry() -> TeamRegistry:
+    owner = super_admin_username()
     users = [
         TeamUser(username=name, role="admin" if name in _DEFAULT_ADMINS else "member")
         for name in sorted(VALID_USERS)
     ]
-    return TeamRegistry(users=users)
+    return TeamRegistry(users=users, super_admins=[owner] if owner else [])
 
 
 def _normalize_registry(raw: dict[str, Any] | None) -> TeamRegistry:
@@ -59,14 +60,31 @@ def _normalize_registry(raw: dict[str, Any] | None) -> TeamRegistry:
                     modules.append(key)  # type: ignore[arg-type]
         merged[username] = TeamUser(username=username, role=role, modules=modules)  # type: ignore[arg-type]
 
-    return _enforce_super_admin(TeamRegistry(users=sorted(merged.values(), key=lambda u: u.username.lower())))
+    super_admins_raw = raw.get("super_admins") if raw else None
+    super_admins: list[str] = []
+    if isinstance(super_admins_raw, list):
+        for name in super_admins_raw:
+            clean = str(name or "").strip()
+            if clean in VALID_USERS and clean not in super_admins:
+                super_admins.append(clean)
+
+    return _enforce_super_admin(
+        TeamRegistry(
+            users=sorted(merged.values(), key=lambda u: u.username.lower()),
+            super_admins=super_admins,
+        )
+    )
 
 
 def _enforce_super_admin(registry: TeamRegistry) -> TeamRegistry:
     owner = super_admin_username()
+    super_names = {owner} if owner else set()
+    for name in registry.super_admins or []:
+        if name in VALID_USERS:
+            super_names.add(name)
     users: list[TeamUser] = []
     for user in registry.users:
-        if user.username == owner:
+        if user.username in super_names:
             users.append(
                 TeamUser(
                     username=user.username,
@@ -76,7 +94,10 @@ def _enforce_super_admin(registry: TeamRegistry) -> TeamRegistry:
             )
         else:
             users.append(user)
-    return TeamRegistry(users=users)
+    return TeamRegistry(
+        users=users,
+        super_admins=sorted(super_names, key=str.lower),
+    )
 
 
 def get_user_modules(username: str | None) -> list[AppModule]:

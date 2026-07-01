@@ -226,6 +226,7 @@ export function SurveyWorkspace() {
   } | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [workflowAccess, setWorkflowAccess] = useState<WorkflowAccess | null>(null)
+  const [workflowProjectId, setWorkflowProjectId] = useState<string | null>(null)
   const [studyType, setStudyType] = useState<StudyType>('quant')
   const [workflowAccessLoaded, setWorkflowAccessLoaded] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -308,6 +309,7 @@ export function SurveyWorkspace() {
       .then((res) => {
         if (!cancelled) {
           setWorkflowAccess(res.access)
+          setWorkflowProjectId(res.project_id ?? null)
           setStudyType(res.workflow.study_type ?? 'quant')
           setWorkflowAccessLoaded(true)
         }
@@ -1333,6 +1335,7 @@ export function SurveyWorkspace() {
 
           {mode === 'workflow' && user && (
             <ProjectWorkflowPanel
+              projectId={workflowProjectId ?? undefined}
               surveyId={surveyId}
               currentUser={user.username}
               globalRole={user.role}

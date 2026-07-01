@@ -8,12 +8,11 @@ import {
   FileText,
   Link2,
   Loader2,
-  Megaphone,
+  Kanban,
   Pencil,
   Plus,
   RefreshCw,
   Save,
-  Users,
   X,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
@@ -29,14 +28,15 @@ import {
   type ProjectRequirements,
 } from '../api/client'
 import { SurveyHomePanel } from '../components/analysis/SurveyHomePanel'
+import { ProjectWorkflowPanel } from '../components/analysis/ProjectWorkflowPanel'
 import { ProjectRequirementsEditor, emptyProjectRequirements } from '../components/ProjectRequirementsEditor'
 import { useUserPreferences } from '../hooks/useUserPreferences'
 import { buildSurveyWorkspaceHref } from '../lib/workspaceNav'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
-type Tab = 'pipeline' | 'clients' | 'finance'
+type Tab = 'pipeline' | 'finance'
 
-const TAB_IDS = new Set<Tab>(['pipeline', 'clients', 'finance'])
+const TAB_IDS = new Set<Tab>(['pipeline', 'finance'])
 
 function parseTab(value: string | null): Tab {
   if (value && TAB_IDS.has(value as Tab)) return value as Tab
@@ -212,7 +212,6 @@ export function OperationsHubPage() {
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [finance, setFinance] = useState<PmFinanceSummary | null>(null)
   const [financeAgent, setFinanceAgent] = useState<PmAgentBrief | null>(null)
-  const [crmAgent, setCrmAgent] = useState<PmAgentBrief | null>(null)
   const [proposalDraft, setProposalDraft] = useState<PmAgentDraft | null>(null)
   const [proposalProjectId, setProposalProjectId] = useState('')
   const [proposalBrief, setProposalBrief] = useState('')
@@ -223,7 +222,6 @@ export function OperationsHubPage() {
   const [requirementsDraft, setRequirementsDraft] = useState<ProjectRequirements>(emptyProjectRequirements())
   const [requirementsSaving, setRequirementsSaving] = useState(false)
 
-  const [newClientName, setNewClientName] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
 
   const [editProjectId, setEditProjectId] = useState<string | null>(null)
@@ -250,6 +248,7 @@ export function OperationsHubPage() {
   const [manualLinkSaving, setManualLinkSaving] = useState(false)
 
   const overviewProjectId = searchParams.get('project') ?? ''
+  const overviewView = searchParams.get('view') === 'workflow' ? 'workflow' : 'overview'
 
   const selectOverviewProject = useCallback(
     (projectId: string) => {
@@ -257,7 +256,39 @@ export function OperationsHubPage() {
         (prev) => {
           prev.set('tab', 'pipeline')
           if (projectId) prev.set('project', projectId)
-          else prev.delete('project')
+          else {
+            prev.delete('project')
+            prev.delete('view')
+          }
+          return prev
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  const openProjectWorkflow = useCallback(
+    (projectId: string) => {
+      setSearchParams(
+        (prev) => {
+          prev.set('tab', 'pipeline')
+          prev.set('project', projectId)
+          prev.set('view', 'workflow')
+          return prev
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  const setOverviewPanelView = useCallback(
+    (view: 'overview' | 'workflow') => {
+      setSearchParams(
+        (prev) => {
+          if (view === 'workflow') prev.set('view', 'workflow')
+          else prev.delete('view')
           return prev
         },
         { replace: true },
@@ -330,14 +361,6 @@ export function OperationsHubPage() {
       }
     })()
   }, [selectedProjectId, tab])
-
-  async function handleCreateClient(e: FormEvent) {
-    e.preventDefault()
-    if (!newClientName.trim()) return
-    await api.createPmClient({ client_name: newClientName.trim() })
-    setNewClientName('')
-    await load()
-  }
 
   async function handleCreateProject(e: FormEvent) {
     e.preventDefault()
@@ -417,16 +440,6 @@ export function OperationsHubPage() {
     setAgentLoading(true)
     try {
       setFinanceAgent(await api.runFinanceAgent(selectedProjectId))
-    } finally {
-      setAgentLoading(false)
-    }
-  }
-
-  async function runCrmAgentForProject(projectId: string) {
-    setAgentLoading(true)
-    try {
-      setCrmAgent(await api.runCrmAgent({ project_id: projectId }))
-      setTab('clients')
     } finally {
       setAgentLoading(false)
     }
@@ -627,7 +640,7 @@ export function OperationsHubPage() {
         <div>
           <h1 className="font-display text-2xl font-semibold text-slate-900">Operations hub</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            End-to-end from proposal to closure — clients, finance, and marketing in one place.
+            End-to-end from proposal to closure — pipeline, finance, and survey linking.
           </p>
         </div>
         <button
@@ -644,7 +657,6 @@ export function OperationsHubPage() {
         {(
           [
             ['pipeline', 'Pipeline', Briefcase],
-            ['clients', 'CRM & marketing', Users],
             ['finance', 'Finance', DollarSign],
           ] as const
         ).map(([id, label, Icon]) => (
@@ -759,7 +771,7 @@ export function OperationsHubPage() {
                       {p.open_task_count > 0 ? (
                         <button
                           type="button"
-                          onClick={() => selectOverviewProject(p.project_id)}
+                          onClick={() => openProjectWorkflow(p.project_id)}
                           title={`${p.open_task_count} pending task${p.open_task_count === 1 ? '' : 's'}`}
                           className="inline-flex min-w-[1.75rem] items-center justify-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 hover:bg-amber-200"
                         >
@@ -852,18 +864,24 @@ export function OperationsHubPage() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => openProjectWorkflow(p.project_id)}
+                          className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+                        >
+                          Workflow
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => void runProposalAgentForProject(p.project_id)}
                           className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
                         >
                           Proposal agent
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => void runCrmAgentForProject(p.project_id)}
+                        <Link
+                          to={`/crm-marketing?tab=agent&project=${p.project_id}`}
                           className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
                         >
                           CRM agent
-                        </button>
+                        </Link>
                       </div>
                     </td>
                   </tr>
@@ -880,7 +898,9 @@ export function OperationsHubPage() {
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Study overview</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {overviewView === 'workflow' ? 'Project workflow' : 'Study overview'}
+                  </p>
                   <p className="text-sm font-semibold text-slate-900">{overviewProject.project_name}</p>
                   <p className="text-xs text-slate-500">
                     {overviewProject.client_name ?? 'No client'}
@@ -890,7 +910,7 @@ export function OperationsHubPage() {
                       ? ` · ${overviewProject.linked_survey_ids.length} survey link${overviewProject.linked_survey_ids.length === 1 ? '' : 's'}`
                       : ' · No survey linked'}
                   </p>
-                  {overviewProject.linked_survey_ids?.length > 1 && (
+                  {overviewProject.linked_survey_ids?.length > 1 && overviewView === 'overview' && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {overviewProject.linked_survey_ids.map((sid, idx) => (
                         <Link
@@ -904,7 +924,32 @@ export function OperationsHubPage() {
                     </div>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex rounded-lg border border-slate-200 bg-white p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setOverviewPanelView('overview')}
+                      className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                        overviewView === 'overview'
+                          ? 'bg-[var(--et-teal-light)]/40 text-[var(--et-teal-dark)]'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Overview
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOverviewPanelView('workflow')}
+                      className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${
+                        overviewView === 'workflow'
+                          ? 'bg-[var(--et-teal-light)]/40 text-[var(--et-teal-dark)]'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Kanban size={12} />
+                      Workflow
+                    </button>
+                  </div>
                   {overviewProject.limesurvey_survey_id && (
                     <Link
                       to={`/projects/${overviewProject.limesurvey_survey_id}`}
@@ -923,7 +968,14 @@ export function OperationsHubPage() {
                   </button>
                 </div>
               </div>
-              {overviewProject.limesurvey_survey_id ? (
+              {overviewView === 'workflow' && user ? (
+                <ProjectWorkflowPanel
+                  projectId={overviewProject.project_id}
+                  surveyId={overviewProject.limesurvey_survey_id ?? undefined}
+                  currentUser={user.username}
+                  globalRole={user.role}
+                />
+              ) : overviewProject.limesurvey_survey_id ? (
                 <SurveyHomePanel
                   surveyId={overviewProject.limesurvey_survey_id}
                   onNavigate={() => {}}
@@ -1088,47 +1140,6 @@ export function OperationsHubPage() {
         </div>
       )}
 
-      {tab === 'clients' && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="space-y-4">
-            <form onSubmit={(e) => void handleCreateClient(e)} className="flex gap-2">
-              <input
-                value={newClientName}
-                onChange={(e) => setNewClientName(e.target.value)}
-                placeholder="Client organisation name"
-                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
-              <button type="submit" className="rounded-lg bg-[var(--et-teal)] px-4 py-2 text-sm text-white">
-                Add client
-              </button>
-            </form>
-            <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-              {clients.map((c) => (
-                <li key={c.client_id} className="px-4 py-3">
-                  <p className="font-medium text-slate-900">{c.client_name}</p>
-                  <p className="text-xs text-slate-500">
-                    {c.contact_person ?? 'No contact'} · {c.project_count ?? 0} projects
-                    {c.repeat_client && ' · Repeat'}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="space-y-4">
-            <AgentPanel brief={crmAgent} loading={agentLoading} />
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                <Megaphone size={16} className="text-[var(--et-teal)]" />
-                Marketing follow-ups
-              </div>
-              <p className="mt-2 text-xs text-slate-500">
-                Log nurture, campaign, and proposal follow-up activities from the pipeline CRM agent suggestions, or create via API.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
       {tab === 'finance' && (
         <div className="space-y-4">
           <label className="block text-sm">
@@ -1183,7 +1194,18 @@ export function OperationsHubPage() {
       )}
 
       <p className="text-xs text-slate-400">
-        LimeSurvey &amp; programming: <Link to="/quantitative" className="text-[var(--et-teal-dark)] hover:underline">Quantitative</Link>
+        LimeSurvey &amp; programming:{' '}
+        <Link to="/quantitative" className="text-[var(--et-teal-dark)] hover:underline">
+          Quantitative
+        </Link>
+        {' · '}
+        <Link to="/crm-marketing" className="text-[var(--et-teal-dark)] hover:underline">
+          CRM &amp; marketing
+        </Link>
+        {' · '}
+        <Link to="/qualitative" className="text-[var(--et-teal-dark)] hover:underline">
+          Qualitative
+        </Link>
       </p>
 
       {fieldworkProjectId && (

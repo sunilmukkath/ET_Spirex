@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FileUp, LayoutGrid, Loader2, Mail, Save, Settings, Shield, Sparkles, SlidersHorizontal, Users, Wifi, WifiOff } from 'lucide-react'
+import { FileUp, Loader2, Mail, Save, Settings, Shield, Sparkles, SlidersHorizontal, Wifi, WifiOff } from 'lucide-react'
 import { api, type AiHealth, type AiStatus, type AppModule, type GlobalRole, type TeamRegistry } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { TEAM_USERS } from '../auth/AuthContext'
@@ -23,7 +23,7 @@ const ROLE_LABELS: Record<GlobalRole, string> = {
 }
 
 export function AdminSettingsPage() {
-  const { user, isAdmin, refreshProfile } = useAuth()
+  const { user, isAdmin, isSuperAdmin, refreshProfile } = useAuth()
   const { prefs, loading: prefsLoading, saving: prefsSaving, savePrefs } = useUserPreferences(user?.username)
   const [connection, setConnection] = useState<Awaited<ReturnType<typeof api.getConnection>> | null>(null)
   const [sessions, setSessions] = useState<{ username: string; last_seen: number }[]>([])
@@ -64,6 +64,16 @@ export function AdminSettingsPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  function primarySuperAdmin(): string {
+    return registry?.primary_super_admin ?? 'Sunil'
+  }
+
+  function isUserSuperAdmin(username: string): boolean {
+    const primary = primarySuperAdmin()
+    if (username === primary) return true
+    return (registry?.super_admins ?? []).includes(username)
+  }
+
   function roleFor(username: string): GlobalRole {
     return registry?.users.find((u) => u.username === username)?.role ?? 'member'
   }
@@ -75,7 +85,7 @@ export function AdminSettingsPage() {
       const nextRole = name === username ? role : existing?.role ?? 'member'
       return { username: name, role: nextRole, modules: existing?.modules ?? [] }
     })
-    setRegistry({ users })
+    setRegistry({ ...registry, users })
   }
 
   function effectiveModules(username: string): AppModule[] {
@@ -84,7 +94,7 @@ export function AdminSettingsPage() {
   }
 
   function toggleModule(username: string, module: AppModule) {
-    if (!registry || username === 'Sunil') return
+    if (!registry || isUserSuperAdmin(username)) return
     const current = effectiveModules(username)
     const next = current.includes(module) ? current.filter((m) => m !== module) : [...current, module]
     const users = TEAM_USERS.map((name) => {
@@ -98,11 +108,11 @@ export function AdminSettingsPage() {
         modules: existing?.modules ?? [],
       }
     })
-    setRegistry({ users })
+    setRegistry({ ...registry, users })
   }
 
   function resetModulesToRoleDefaults(username: string) {
-    if (!registry || username === 'Sunil') return
+    if (!registry || isUserSuperAdmin(username)) return
     const role = roleFor(username)
     const users = TEAM_USERS.map((name) => {
       const existing = registry.users.find((u) => u.username === name)
@@ -115,11 +125,20 @@ export function AdminSettingsPage() {
         modules: existing?.modules ?? [],
       }
     })
-    setRegistry({ users })
+    setRegistry({ ...registry, users })
+  }
+
+  function toggleSuperAdmin(username: string) {
+    if (!registry || username === primarySuperAdmin()) return
+    const primary = primarySuperAdmin()
+    const current = new Set((registry.super_admins ?? []).filter((n) => n !== primary))
+    if (current.has(username)) current.delete(username)
+    else current.add(username)
+    setRegistry({ ...registry, super_admins: [primary, ...current] })
   }
 
   async function saveRoles() {
-    if (!registry || !isAdmin) return
+    if (!registry || !isSuperAdmin) return
     setSavingRoles(true)
     setRoleError(null)
     try {
@@ -277,7 +296,6 @@ export function AdminSettingsPage() {
                 onChange={(e) => void savePrefs({ operations_default_tab: e.target.value })}
               >
                 <option value="pipeline">Pipeline</option>
-                <option value="clients">CRM & marketing</option>
                 <option value="finance">Finance</option>
                 <option value="programming">Programming</option>
                 <option value="links">Survey links</option>
@@ -316,19 +334,18 @@ export function AdminSettingsPage() {
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Users size={18} className="text-[var(--et-teal)]" />
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900">Team roles</h2>
-              <p className="mt-1 text-xs text-slate-500">
-                Global access level for each team member. Project-specific assignments are set per study
-                under Workflow.
-              </p>
+      {isSuperAdmin && (
+        <section className="rounded-xl border border-[var(--et-navy)]/20 bg-white p-5 shadow-sm ring-1 ring-[var(--et-navy)]/10">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Shield size={18} className="text-[var(--et-navy)]" />
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Team access control</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Super admin only — set global roles, grant super admin, and control which app modules each user can open.
+                </p>
+              </div>
             </div>
-          </div>
-          {isAdmin && (
             <button
               type="button"
               onClick={() => void saveRoles()}
@@ -336,134 +353,108 @@ export function AdminSettingsPage() {
               className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-teal)] px-3 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               {savingRoles ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save roles
+              Save changes
             </button>
-          )}
-        </div>
-        {roleError && <p className="mt-3 text-sm text-rose-700">{roleError}</p>}
-        {!isAdmin && (
-          <p className="mt-3 text-sm text-amber-800">Only admins can change team roles.</p>
-        )}
-        <ul className="mt-4 space-y-3">
-          {TEAM_USERS.map((name) => (
-            <li
-              key={name}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2.5"
-            >
-              <span className="text-sm font-medium text-slate-800">
-                {name}
-                {name === 'Sunil' && (
-                  <span className="ml-2 text-[10px] font-normal text-[var(--et-teal)]">Owner</span>
-                )}
-              </span>
-              {name === 'Sunil' ? (
-                <span className="text-xs font-medium text-[var(--et-navy)]">Super admin (locked)</span>
-              ) : isAdmin && registry ? (
-                <select
-                  value={roleFor(name)}
-                  onChange={(e) => setRole(name, e.target.value as GlobalRole)}
-                  className="et-select text-xs"
-                >
-                  {(Object.keys(ROLE_LABELS) as GlobalRole[]).map((role) => (
-                    <option key={role} value={role}>
-                      {role}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-xs text-slate-500">{roleFor(name)}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-3 text-[10px] text-slate-400">
-          {ROLE_LABELS.admin} · {ROLE_LABELS.manager} · {ROLE_LABELS.member}
-        </p>
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <LayoutGrid size={18} className="text-[var(--et-teal)]" />
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900">Module access</h2>
-              <p className="mt-1 text-xs text-slate-500">
-                Control which app areas each user can open. Empty checkboxes use role defaults until you customize.
-              </p>
-            </div>
           </div>
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => void saveRoles()}
-              disabled={savingRoles || !registry}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-navy)] px-3 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {savingRoles ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save access
-            </button>
-          )}
-        </div>
-        {!isAdmin && (
-          <p className="mt-3 text-sm text-amber-800">Only admins can change module access.</p>
-        )}
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-500">
-                <th className="py-2 pr-4 font-semibold">User</th>
-                {APP_MODULES.map((mod) => (
-                  <th key={mod} className="px-2 py-2 font-semibold" title={APP_MODULE_HINTS[mod]}>
-                    {APP_MODULE_LABELS[mod]}
+          {roleError && <p className="mt-3 text-sm text-rose-700">{roleError}</p>}
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-500">
+                  <th className="py-2 pr-4 font-semibold">User</th>
+                  <th className="px-2 py-2 font-semibold">Role</th>
+                  <th className="px-2 py-2 font-semibold" title="Super admins can manage team access and have all modules">
+                    Super admin
                   </th>
-                ))}
-                <th className="py-2 pl-2 font-semibold">Reset</th>
-              </tr>
-            </thead>
-            <tbody>
-              {TEAM_USERS.map((name) => {
-                const modules = effectiveModules(name)
-                const locked = name === 'Sunil'
-                return (
-                  <tr key={name} className="border-b border-slate-50">
-                    <td className="py-2.5 pr-4 font-medium text-slate-800">
-                      {name}
-                      {locked && <span className="ml-1 text-[10px] font-normal text-slate-400">(all)</span>}
-                    </td>
-                    {APP_MODULES.map((mod) => (
-                      <td key={mod} className="px-2 py-2.5 text-center">
+                  {APP_MODULES.map((mod) => (
+                    <th key={mod} className="px-2 py-2 font-semibold" title={APP_MODULE_HINTS[mod]}>
+                      {APP_MODULE_LABELS[mod]}
+                    </th>
+                  ))}
+                  <th className="py-2 pl-2 font-semibold">Reset</th>
+                </tr>
+              </thead>
+              <tbody>
+                {TEAM_USERS.map((name) => {
+                  const modules = effectiveModules(name)
+                  const locked = isUserSuperAdmin(name)
+                  const isPrimary = name === primarySuperAdmin()
+                  return (
+                    <tr key={name} className="border-b border-slate-50">
+                      <td className="py-2.5 pr-4 font-medium text-slate-800">
+                        {name}
+                        {isPrimary && (
+                          <span className="ml-1 text-[10px] font-normal text-[var(--et-teal)]">Owner</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2.5">
+                        {isPrimary ? (
+                          <span className="text-slate-500">admin</span>
+                        ) : registry ? (
+                          <select
+                            value={roleFor(name)}
+                            onChange={(e) => setRole(name, e.target.value as GlobalRole)}
+                            className="et-select text-xs"
+                          >
+                            {(Object.keys(ROLE_LABELS) as GlobalRole[]).map((role) => (
+                              <option key={role} value={role}>
+                                {role}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-slate-500">{roleFor(name)}</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2.5 text-center">
                         <input
                           type="checkbox"
-                          checked={modules.includes(mod)}
-                          disabled={!isAdmin || locked || !registry}
-                          onChange={() => toggleModule(name, mod)}
-                          className="h-4 w-4 rounded border-slate-300 text-[var(--et-teal)]"
-                          aria-label={`${name} — ${APP_MODULE_LABELS[mod]}`}
+                          checked={locked}
+                          disabled={isPrimary || !registry}
+                          onChange={() => toggleSuperAdmin(name)}
+                          className="h-4 w-4 rounded border-slate-300 text-[var(--et-navy)]"
+                          aria-label={`${name} — super admin`}
+                          title={isPrimary ? 'Primary owner — cannot be revoked' : 'Grant super admin access'}
                         />
                       </td>
-                    ))}
-                    <td className="py-2.5 pl-2">
-                      {isAdmin && !locked && registry && (
-                        <button
-                          type="button"
-                          onClick={() => resetModulesToRoleDefaults(name)}
-                          className="text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
-                        >
-                          Role defaults
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-3 text-[10px] text-slate-400">
-          Member default: {defaultModulesForRole('member').map((m) => APP_MODULE_LABELS[m]).join(', ')} · Manager
-          default: {defaultModulesForRole('manager').map((m) => APP_MODULE_LABELS[m]).join(', ')}
-        </p>
-      </section>
+                      {APP_MODULES.map((mod) => (
+                        <td key={mod} className="px-2 py-2.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={modules.includes(mod)}
+                            disabled={locked || !registry}
+                            onChange={() => toggleModule(name, mod)}
+                            className="h-4 w-4 rounded border-slate-300 text-[var(--et-teal)]"
+                            aria-label={`${name} — ${APP_MODULE_LABELS[mod]}`}
+                          />
+                        </td>
+                      ))}
+                      <td className="py-2.5 pl-2">
+                        {!locked && registry && (
+                          <button
+                            type="button"
+                            onClick={() => resetModulesToRoleDefaults(name)}
+                            className="text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
+                          >
+                            Role defaults
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-[10px] text-slate-400">
+            {ROLE_LABELS.admin} · {ROLE_LABELS.manager} · {ROLE_LABELS.member}
+          </p>
+          <p className="mt-1 text-[10px] text-slate-400">
+            Member default: {defaultModulesForRole('member').map((m) => APP_MODULE_LABELS[m]).join(', ')} · Manager
+            default: {defaultModulesForRole('manager').map((m) => APP_MODULE_LABELS[m]).join(', ')}
+          </p>
+        </section>
+      )}
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">

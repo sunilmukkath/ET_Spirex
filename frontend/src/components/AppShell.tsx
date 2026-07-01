@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { BarChart3, ClipboardList, Home, Landmark, LayoutGrid, LogOut, Menu, Settings, Users, X } from 'lucide-react'
+import { BarChart3, ClipboardList, Home, Landmark, LayoutGrid, LogOut, Menu, Megaphone, Mic, Settings, Users, X } from 'lucide-react'
 import type { CommandPaletteItem } from './workspace/CommandPalette'
 import { useAuth } from '../auth/AuthContext'
 import { APP_MODULE_PATHS, type AppModule } from '../lib/appModules'
@@ -27,10 +27,18 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
   {
     id: 'app-operations',
     label: 'Operations',
-    description: 'Proposal-to-closure pipeline, finance, and CRM',
+    description: 'Proposal-to-closure pipeline, finance, and survey linking',
     group: 'App',
     href: '/operations',
-    keywords: ['pm', 'pipeline', 'finance', 'crm', 'marketing', 'proposal', 'clients'],
+    keywords: ['pm', 'pipeline', 'finance', 'proposal', 'fieldwork'],
+  },
+  {
+    id: 'app-crm-marketing',
+    label: 'CRM & marketing',
+    description: 'Clients, nurture follow-ups, campaigns, and CRM agent',
+    group: 'App',
+    href: '/crm-marketing',
+    keywords: ['crm', 'marketing', 'clients', 'outreach', 'nurture'],
   },
   {
     id: 'app-quantitative',
@@ -39,6 +47,14 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
     group: 'App',
     href: '/quantitative',
     keywords: ['home', 'surveys', 'limesurvey', 'quant', 'studio', 'programming'],
+  },
+  {
+    id: 'app-qualitative',
+    label: 'Qualitative',
+    description: 'Transcript upload, qual library, search, and thematic reporting',
+    group: 'App',
+    href: '/qualitative',
+    keywords: ['qual', 'transcript', 'fgd', 'idi', 'thematic', 'coding'],
   },
   {
     id: 'app-accounting',
@@ -77,12 +93,14 @@ const NAV_LINKS: NavLinkDef[] = [
   { module: 'home', label: 'Home', icon: Home, isActive: (p) => p === '/home' },
   { module: 'my_work', label: 'My work', icon: ClipboardList, isActive: (p) => p === '/my-work' },
   { module: 'operations', label: 'Operations', icon: LayoutGrid, isActive: (p) => p === '/operations' },
+  { module: 'crm_marketing', label: 'CRM & marketing', icon: Megaphone, isActive: (p) => p === '/crm-marketing' },
   {
     module: 'quantitative',
     label: 'Quantitative',
     icon: BarChart3,
     isActive: (_, isQuantitative) => isQuantitative,
   },
+  { module: 'qualitative', label: 'Qualitative', icon: Mic, isActive: (p) => p === '/qualitative' },
   { module: 'accounting', label: 'Accounting', icon: Landmark, isActive: (p) => p === '/accounting' },
   { module: 'team', label: 'Team', icon: Users, isActive: (p) => p === '/team' },
   { module: 'settings', label: 'Settings', icon: Settings, isActive: (p) => p === '/settings' },

@@ -24,6 +24,7 @@ EtQuestionType = Literal[
     "gps",
     "photo",
     "audio",
+    "equation",
 ]
 
 EtSurveyStatus = Literal["draft", "active", "closed"]
@@ -53,6 +54,16 @@ class EtShowIfRule(BaseModel):
     values: list[str] = Field(default_factory=list)
 
 
+class EtQuotaRule(BaseModel):
+    """Live quota cell — evaluated against participant responses."""
+
+    id: str
+    label: str = ""
+    expression: str
+    target: int
+    action: Literal["terminate", "warn"] = "terminate"
+
+
 class EtQuestion(BaseModel):
     id: str
     code: str
@@ -72,6 +83,9 @@ class EtQuestion(BaseModel):
     randomize_options: bool = False
     randomize_code: str = ""
     show_if: EtShowIfRule | None = None
+    relevance_equation: str | None = None
+    validation_equation: str | None = None
+    equation: str | None = None
     max_recording_seconds: int = 120
     camera_only: bool = False
 
@@ -82,6 +96,7 @@ class EtBlock(BaseModel):
     description: str = ""
     sort_order: int = 0
     randomize_code: str = ""
+    relevance_equation: str | None = None
     questions: list[EtQuestion] = Field(default_factory=list)
 
 
@@ -90,6 +105,8 @@ class EtSurveySettings(BaseModel):
     welcome_message: str = "Thank you for taking part in this research."
     thank_you_title: str = "Thank you"
     thank_you_message: str = "Your responses have been recorded."
+    quota_full_title: str = "Quota full"
+    quota_full_message: str = "Thank you for your interest. This survey has reached its target."
     single_page: bool = False
     show_progress: bool = True
     language: str = "en"
@@ -98,6 +115,7 @@ class EtSurveySettings(BaseModel):
 class EtSurveyDefinition(BaseModel):
     version: int = 1
     blocks: list[EtBlock] = Field(default_factory=list)
+    quotas: list[EtQuotaRule] = Field(default_factory=list)
     settings: EtSurveySettings = Field(default_factory=EtSurveySettings)
 
 

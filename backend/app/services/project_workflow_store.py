@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,11 +20,105 @@ from app.models.project_requirements import requirements_from_raw
 from app.services.team_registry_store import get_global_role, is_global_admin, is_global_manager_or_above
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "project_workflow"
+_PM_FILE_PREFIX = "pm_"
+
+
+@dataclass(frozen=True)
+class WorkflowRef:
+    project_id: str | None = None
+    survey_id: int | None = None
+
+    def storage_path(self) -> Path:
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if self.project_id:
+            return _DATA_DIR / f"{_PM_FILE_PREFIX}{self.project_id}.json"
+        if self.survey_id is not None:
+            return _DATA_DIR / f"{self.survey_id}.json"
+        raise ValueError("WorkflowRef requires project_id or survey_id")
 
 
 def _path(survey_id: int) -> Path:
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return _DATA_DIR / f"{survey_id}.json"
+    return WorkflowRef(survey_id=survey_id).storage_path()
+
+
+def _pm_path(project_id: str) -> Path:
+    return WorkflowRef(project_id=str(project_id).strip()).storage_path()
+
+
+def _load_workflow_file(path: Path) -> ProjectWorkflow:
+    if not path.is_file():
+        return ProjectWorkflow()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ProjectWorkflow()
+    return _normalize_workflow(raw)
+
+
+def _write_workflow_file(path: Path, workflow: ProjectWorkflow) -> None:
+    path.write_text(json.dumps(workflow.model_dump(), indent=2), encoding="utf-8")
+
+
+def _migrate_survey_workflow_to_pm(survey_id: int, project_id: str) -> None:
+    pm_path = _pm_path(project_id)
+    if pm_path.is_file():
+        return
+    survey_path = _path(survey_id)
+    if not survey_path.is_file():
+        return
+    pm_path.write_bytes(survey_path.read_bytes())
+
+
+def resolve_workflow_ref(
+    *,
+    survey_id: int | None = None,
+    project_id: str | None = None,
+) -> WorkflowRef:
+    from app.services.task_pm_resolve import resolve_pm_project_id_for_survey
+
+    if project_id:
+        pid = str(project_id).strip()
+        if pid:
+            return WorkflowRef(project_id=pid)
+    if survey_id is not None:
+        pm_id = resolve_pm_project_id_for_survey(survey_id)
+        if pm_id:
+            _migrate_survey_workflow_to_pm(survey_id, pm_id)
+            return WorkflowRef(project_id=pm_id)
+        return WorkflowRef(survey_id=survey_id)
+    raise ValueError("project_id or survey_id required")
+
+
+def _primary_survey_for_pm(project_id: str) -> int | None:
+    from app.services.task_pm_resolve import resolve_pm_project_for_task
+
+    _, survey_id = resolve_pm_project_for_task(project_id)
+    return survey_id
+
+
+def _iter_workflow_refs() -> list[tuple[WorkflowRef, int | None]]:
+    """Unique workflow stores: (ref, survey_id for display links)."""
+    out: list[tuple[WorkflowRef, int | None]] = []
+    if not _DATA_DIR.is_dir():
+        return out
+
+    for path in sorted(_DATA_DIR.glob(f"{_PM_FILE_PREFIX}*.json")):
+        pid = path.stem[len(_PM_FILE_PREFIX) :]
+        out.append((WorkflowRef(project_id=pid), _primary_survey_for_pm(pid)))
+
+    for path in sorted(_DATA_DIR.glob("*.json")):
+        if path.name.startswith(_PM_FILE_PREFIX):
+            continue
+        try:
+            sid = int(path.stem)
+        except ValueError:
+            continue
+        from app.services.task_pm_resolve import resolve_pm_project_id_for_survey
+
+        if resolve_pm_project_id_for_survey(sid):
+            continue
+        out.append((WorkflowRef(survey_id=sid), sid))
+    return out
 
 
 def _normalize_comment(raw: dict[str, Any]) -> TaskComment | None:
@@ -226,15 +321,23 @@ def _normalize_workflow(raw: dict[str, Any] | None) -> ProjectWorkflow:
     )
 
 
+def get_pm_project_workflow(project_id: str) -> ProjectWorkflow:
+    ref = resolve_workflow_ref(project_id=project_id)
+    return _load_workflow_file(ref.storage_path())
+
+
 def get_project_workflow(survey_id: int) -> ProjectWorkflow:
-    path = _path(survey_id)
-    if not path.is_file():
-        return ProjectWorkflow()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return ProjectWorkflow()
-    return _normalize_workflow(raw)
+    ref = resolve_workflow_ref(survey_id=survey_id)
+    return _load_workflow_file(ref.storage_path())
+
+
+def set_pm_project_workflow(
+    project_id: str,
+    workflow: ProjectWorkflow,
+    *,
+    editor: str | None = None,
+) -> ProjectWorkflow:
+    return _set_workflow_ref(resolve_workflow_ref(project_id=project_id), workflow, editor=editor)
 
 
 def set_project_workflow(
@@ -243,39 +346,57 @@ def set_project_workflow(
     *,
     editor: str | None = None,
 ) -> ProjectWorkflow:
+    ref = resolve_workflow_ref(survey_id=survey_id)
+    return _set_workflow_ref(ref, workflow, editor=editor)
+
+
+def _set_workflow_ref(
+    ref: WorkflowRef,
+    workflow: ProjectWorkflow,
+    *,
+    editor: str | None = None,
+) -> ProjectWorkflow:
     from app.services.pilot_checklist import seed_pilot_tasks
     from app.services.workflow_activity import append_activities, diff_workflow_activities
 
-    previous = get_project_workflow(survey_id)
+    previous = _load_workflow_file(ref.storage_path())
     normalized = _normalize_workflow(workflow.model_dump())
     normalized = seed_pilot_tasks(normalized, editor=editor)
     events = diff_workflow_activities(previous, normalized, editor=editor)
     if events:
         normalized = append_activities(normalized, events)
-    _path(survey_id).write_text(
-        json.dumps(normalized.model_dump(), indent=2),
-        encoding="utf-8",
-    )
+    _write_workflow_file(ref.storage_path(), normalized)
     return normalized
 
 
 def add_manual_activity(survey_id: int, *, actor: str, message: str) -> ProjectWorkflow:
     from app.services.workflow_activity import _new_activity, append_activities
 
-    workflow = get_project_workflow(survey_id)
+    ref = resolve_workflow_ref(survey_id=survey_id)
+    workflow = _load_workflow_file(ref.storage_path())
     updated = append_activities(
         workflow,
         [_new_activity("note", message, actor=actor)],
     )
-    _path(survey_id).write_text(
-        json.dumps(updated.model_dump(), indent=2),
-        encoding="utf-8",
-    )
+    _write_workflow_file(ref.storage_path(), updated)
     return updated
 
 
-def add_task_comment(
-    survey_id: int,
+def add_pm_manual_activity(project_id: str, *, actor: str, message: str) -> ProjectWorkflow:
+    from app.services.workflow_activity import _new_activity, append_activities
+
+    ref = resolve_workflow_ref(project_id=project_id)
+    workflow = _load_workflow_file(ref.storage_path())
+    updated = append_activities(
+        workflow,
+        [_new_activity("note", message, actor=actor)],
+    )
+    _write_workflow_file(ref.storage_path(), updated)
+    return updated
+
+
+def add_pm_task_comment(
+    project_id: str,
     task_id: str,
     *,
     author: str,
@@ -283,7 +404,8 @@ def add_task_comment(
 ) -> ProjectWorkflow:
     from app.services.workflow_activity import _new_activity, append_activities
 
-    workflow = get_project_workflow(survey_id)
+    ref = resolve_workflow_ref(project_id=project_id)
+    workflow = _load_workflow_file(ref.storage_path())
     text = body.strip()
     if not text:
         raise ValueError("Comment body required")
@@ -329,22 +451,79 @@ def add_task_comment(
             )
         ],
     )
-    _path(survey_id).write_text(
-        json.dumps(updated.model_dump(), indent=2),
-        encoding="utf-8",
-    )
+    _write_workflow_file(ref.storage_path(), updated)
     return updated
 
 
-def add_task_to_workflow(
+def add_task_comment(
     survey_id: int,
+    task_id: str,
+    *,
+    author: str,
+    body: str,
+) -> ProjectWorkflow:
+    from app.services.workflow_activity import _new_activity, append_activities
+
+    ref = resolve_workflow_ref(survey_id=survey_id)
+    workflow = _load_workflow_file(ref.storage_path())
+    text = body.strip()
+    if not text:
+        raise ValueError("Comment body required")
+
+    found = False
+    tasks: list[ProjectTask] = []
+    for task in workflow.tasks:
+        if task.id != task_id:
+            tasks.append(task)
+            continue
+        found = True
+        comment = TaskComment(
+            id=uuid.uuid4().hex[:12],
+            author=author,
+            body=text,
+            created_at=time.time(),
+        )
+        tasks.append(
+            ProjectTask(
+                **{
+                    **task.model_dump(),
+                    "comments": [*task.comments, comment],
+                    "updated_at": time.time(),
+                }
+            )
+        )
+    if not found:
+        raise ValueError("Task not found")
+
+    data = workflow.model_dump()
+    data["tasks"] = [t.model_dump() for t in tasks]
+    interim = ProjectWorkflow(**data)
+    task_title = next(t.title for t in interim.tasks if t.id == task_id)
+    preview = text[:80] + ("…" if len(text) > 80 else "")
+    updated = append_activities(
+        interim,
+        [
+            _new_activity(
+                "task_comment",
+                f"Comment on “{task_title}”: {preview}",
+                actor=author,
+                task_id=task_id,
+            )
+        ],
+    )
+    _write_workflow_file(ref.storage_path(), updated)
+    return updated
+
+
+def _append_task_to_ref(
+    ref: WorkflowRef,
     task: ProjectTask,
     *,
     editor: str,
 ) -> tuple[ProjectWorkflow, ProjectTask]:
     from app.services.workflow_activity import _new_activity, append_activities
 
-    workflow = get_project_workflow(survey_id)
+    workflow = _load_workflow_file(ref.storage_path())
     if task.gmail_message_id:
         for existing in workflow.tasks:
             if existing.gmail_message_id == task.gmail_message_id:
@@ -367,12 +546,29 @@ def add_task_to_workflow(
             )
         ],
     )
-    _path(survey_id).write_text(
-        json.dumps(updated.model_dump(), indent=2),
-        encoding="utf-8",
-    )
+    _write_workflow_file(ref.storage_path(), updated)
     saved_task = next(t for t in updated.tasks if t.id == created.id)
     return updated, saved_task
+
+
+def add_task_to_workflow(
+    survey_id: int,
+    task: ProjectTask,
+    *,
+    editor: str,
+) -> tuple[ProjectWorkflow, ProjectTask]:
+    ref = resolve_workflow_ref(survey_id=survey_id)
+    return _append_task_to_ref(ref, task, editor=editor)
+
+
+def add_task_to_pm_workflow(
+    project_id: str,
+    task: ProjectTask,
+    *,
+    editor: str,
+) -> tuple[ProjectWorkflow, ProjectTask]:
+    ref = resolve_workflow_ref(project_id=project_id)
+    return _append_task_to_ref(ref, task, editor=editor)
 
 
 def create_manual_task(username: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -388,30 +584,35 @@ def create_manual_task(username: str, body: dict[str, Any]) -> dict[str, Any]:
     project_id = body.get("project_id")
     description = str(body.get("description") or "").strip()
 
-    if project_id and survey_id is None:
+    task = ProjectTask(
+        id=uuid.uuid4().hex[:12],
+        title=title,
+        description=description or str(body.get("description") or "").strip(),
+        category=body.get("category") or "general",
+        assignee=assignee,
+        status="todo",
+        priority=body.get("priority") or "medium",
+        due_date=body.get("due_date"),
+        created_by=username,
+        source="manual",
+        billable=bool(body.get("billable", False)),
+    )
+
+    if project_id:
         project_name, resolved_survey = resolve_pm_project_for_task(project_id)
-        if resolved_survey is not None:
-            survey_id = resolved_survey
-        elif project_name:
-            prefix = f"[{project_name}]"
-            description = f"{prefix} {description}".strip() if description else prefix
+        pid = str(project_id).strip()
+        workflow, created = add_task_to_pm_workflow(pid, task, editor=username)
+        return _task_row_from_ref(
+            WorkflowRef(project_id=pid),
+            workflow,
+            created,
+            survey_id=resolved_survey,
+        )
 
     if survey_id is not None:
-        task = ProjectTask(
-            id=uuid.uuid4().hex[:12],
-            title=title,
-            description=str(body.get("description") or "").strip(),
-            category=body.get("category") or "general",
-            assignee=assignee,
-            status="todo",
-            priority=body.get("priority") or "medium",
-            due_date=body.get("due_date"),
-            created_by=username,
-            source="manual",
-            billable=bool(body.get("billable", False)),
-        )
         workflow, created = add_task_to_workflow(int(survey_id), task, editor=username)
-        return _task_row(int(survey_id), workflow, created)
+        ref = resolve_workflow_ref(survey_id=int(survey_id))
+        return _task_row_from_ref(ref, workflow, created, survey_id=int(survey_id))
 
     created = create_personal_task(
         username,
@@ -441,7 +642,29 @@ def patch_project_task(
     editor: str,
     **fields: Any,
 ) -> ProjectWorkflow:
-    workflow = get_project_workflow(survey_id)
+    return patch_workflow_task(survey_id=survey_id, task_id=task_id, editor=editor, **fields)
+
+
+def patch_pm_project_task(
+    project_id: str,
+    task_id: str,
+    *,
+    editor: str,
+    **fields: Any,
+) -> ProjectWorkflow:
+    return patch_workflow_task(project_id=project_id, task_id=task_id, editor=editor, **fields)
+
+
+def patch_workflow_task(
+    task_id: str,
+    *,
+    editor: str,
+    survey_id: int | None = None,
+    project_id: str | None = None,
+    **fields: Any,
+) -> ProjectWorkflow:
+    ref = resolve_workflow_ref(survey_id=survey_id, project_id=project_id)
+    workflow = _load_workflow_file(ref.storage_path())
     tasks: list[ProjectTask] = []
     found = False
     for task in workflow.tasks:
@@ -459,7 +682,7 @@ def patch_project_task(
         raise ValueError("Task not found")
     data = workflow.model_dump()
     data["tasks"] = [t.model_dump() for t in tasks]
-    return set_project_workflow(survey_id, ProjectWorkflow(**data), editor=editor)
+    return _set_workflow_ref(ref, ProjectWorkflow(**data), editor=editor)
 
 
 def assign_unassigned_task(task_id: str, assignee: str, *, editor: str) -> dict[str, Any]:
@@ -489,18 +712,17 @@ def assign_unassigned_task(task_id: str, assignee: str, *, editor: str) -> dict[
 
     if not _DATA_DIR.is_dir():
         raise ValueError("Task not found or already assigned")
-    for path in sorted(_DATA_DIR.glob("*.json")):
-        try:
-            survey_id = int(path.stem)
-        except ValueError:
-            continue
-        workflow = get_project_workflow(survey_id)
+    for ref, survey_id in _iter_workflow_refs():
+        workflow = _load_workflow_file(ref.storage_path())
         for task in workflow.tasks:
             if task.id != tid or task.status == "done" or (task.assignee or "").strip():
                 continue
-            saved = patch_project_task(survey_id, tid, editor=editor, assignee=name)
+            if ref.project_id:
+                saved = patch_pm_project_task(ref.project_id, tid, editor=editor, assignee=name)
+            else:
+                saved = patch_project_task(int(survey_id), tid, editor=editor, assignee=name)
             saved_task = next(t for t in saved.tasks if t.id == tid)
-            return _task_row(survey_id, saved, saved_task)
+            return _task_row_from_ref(ref, saved, saved_task, survey_id=survey_id)
 
     raise ValueError("Task not found or already assigned")
 
@@ -509,17 +731,12 @@ def list_my_tasks(username: str) -> list[dict[str, Any]]:
     if not username:
         return []
     out: list[dict[str, Any]] = []
-    if _DATA_DIR.is_dir():
-        for path in sorted(_DATA_DIR.glob("*.json")):
-            try:
-                survey_id = int(path.stem)
-            except ValueError:
+    for ref, survey_id in _iter_workflow_refs():
+        workflow = _load_workflow_file(ref.storage_path())
+        for task in workflow.tasks:
+            if task.assignee != username or task.status == "done":
                 continue
-            workflow = get_project_workflow(survey_id)
-            for task in workflow.tasks:
-                if task.assignee != username or task.status == "done":
-                    continue
-                out.append(_task_row(survey_id, workflow, task))
+            out.append(_task_row_from_ref(ref, workflow, task, survey_id=survey_id))
     from app.services.personal_tasks_store import list_assigned_personal_task_rows
 
     out.extend(list_assigned_personal_task_rows(username))
@@ -535,19 +752,12 @@ def list_my_tasks(username: str) -> list[dict[str, Any]]:
 def list_unassigned_tasks() -> list[dict[str, Any]]:
     """Open tasks with no assignee — team inbox for new work."""
     out: list[dict[str, Any]] = []
-    if not _DATA_DIR.is_dir():
-        pass
-    else:
-        for path in sorted(_DATA_DIR.glob("*.json")):
-            try:
-                survey_id = int(path.stem)
-            except ValueError:
+    for ref, survey_id in _iter_workflow_refs():
+        workflow = _load_workflow_file(ref.storage_path())
+        for task in workflow.tasks:
+            if task.assignee or task.status == "done":
                 continue
-            workflow = get_project_workflow(survey_id)
-            for task in workflow.tasks:
-                if task.assignee or task.status == "done":
-                    continue
-                out.append(_task_row(survey_id, workflow, task))
+            out.append(_task_row_from_ref(ref, workflow, task, survey_id=survey_id))
     from app.services.personal_tasks_store import list_unassigned_personal_task_rows
 
     out.extend(list_unassigned_personal_task_rows())
@@ -575,23 +785,29 @@ def count_open_tasks_for_surveys(survey_ids: list[int]) -> dict[int, int]:
     return counts
 
 
+def count_open_tasks_for_pm_projects(project_ids: list[str]) -> dict[str, int]:
+    """Count open workflow tasks keyed by PM project id."""
+    counts: dict[str, int] = {}
+    for raw in project_ids:
+        pid = str(raw).strip()
+        if not pid or pid in counts:
+            continue
+        workflow = get_pm_project_workflow(pid)
+        counts[pid] = sum(1 for task in workflow.tasks if task.status != "done")
+    return counts
+
+
 def list_team_assigned_tasks(viewer_username: str | None) -> list[dict[str, Any]]:
     """Open tasks assigned to a teammate (not the viewer)."""
     viewer = (viewer_username or "").strip()
     out: list[dict[str, Any]] = []
-    if not _DATA_DIR.is_dir():
-        return []
-    for path in sorted(_DATA_DIR.glob("*.json")):
-        try:
-            survey_id = int(path.stem)
-        except ValueError:
-            continue
-        workflow = get_project_workflow(survey_id)
+    for ref, survey_id in _iter_workflow_refs():
+        workflow = _load_workflow_file(ref.storage_path())
         for task in workflow.tasks:
             assignee = (task.assignee or "").strip()
             if not assignee or assignee == viewer or task.status == "done":
                 continue
-            out.append(_task_row(survey_id, workflow, task))
+            out.append(_task_row_from_ref(ref, workflow, task, survey_id=survey_id))
     out.sort(
         key=lambda row: (
             (row["task"].get("assignee") or "").lower(),
@@ -603,8 +819,19 @@ def list_team_assigned_tasks(viewer_username: str | None) -> list[dict[str, Any]
 
 
 def _task_row(survey_id: int, workflow: ProjectWorkflow, task: ProjectTask) -> dict[str, Any]:
+    return _task_row_from_ref(WorkflowRef(survey_id=survey_id), workflow, task, survey_id=survey_id)
+
+
+def _task_row_from_ref(
+    ref: WorkflowRef,
+    workflow: ProjectWorkflow,
+    task: ProjectTask,
+    *,
+    survey_id: int | None,
+) -> dict[str, Any]:
     return {
         "survey_id": survey_id,
+        "project_id": ref.project_id,
         "task": task.model_dump(),
         "phase": workflow.phase,
         "client_name": workflow.client_name,
@@ -628,10 +855,23 @@ def is_project_manager(username: str | None, survey_id: int) -> bool:
     return bool(member and member.is_project_manager)
 
 
+def is_pm_project_manager(username: str | None, project_id: str) -> bool:
+    if is_global_admin(username):
+        return True
+    member = _find_member(get_pm_project_workflow(project_id), username)
+    return bool(member and member.is_project_manager)
+
+
 def can_manage_project_team(username: str | None, survey_id: int) -> bool:
     if is_global_admin(username) or is_global_manager_or_above(username):
         return True
     return is_project_manager(username, survey_id)
+
+
+def can_manage_pm_project_team(username: str | None, project_id: str) -> bool:
+    if is_global_admin(username) or is_global_manager_or_above(username):
+        return True
+    return is_pm_project_manager(username, project_id)
 
 
 def can_access_module(username: str | None, survey_id: int, module: str) -> bool:
@@ -652,10 +892,40 @@ def can_access_module(username: str | None, survey_id: int, module: str) -> bool
 
 
 def workflow_access_summary(username: str | None, survey_id: int) -> dict[str, Any]:
-    workflow = get_project_workflow(survey_id)
+    from app.services.task_pm_resolve import resolve_pm_project_id_for_survey
+
+    project_id = resolve_pm_project_id_for_survey(survey_id)
+    return _workflow_access_summary(
+        username,
+        get_project_workflow(survey_id),
+        survey_id=survey_id,
+        project_id=project_id,
+    )
+
+
+def workflow_access_summary_for_pm(username: str | None, project_id: str) -> dict[str, Any]:
+    return _workflow_access_summary(
+        username,
+        get_pm_project_workflow(project_id),
+        project_id=project_id,
+    )
+
+
+def _workflow_access_summary(
+    username: str | None,
+    workflow: ProjectWorkflow,
+    *,
+    survey_id: int | None = None,
+    project_id: str | None = None,
+) -> dict[str, Any]:
     member = _find_member(workflow, username)
     global_role = get_global_role(username)
-    manage_team = can_manage_project_team(username, survey_id)
+    if project_id:
+        manage_team = can_manage_pm_project_team(username, project_id)
+        is_pm = is_pm_project_manager(username, project_id)
+    else:
+        manage_team = can_manage_project_team(username, int(survey_id or 0))
+        is_pm = is_project_manager(username, int(survey_id or 0))
     modules = (
         list(PROJECT_MODULES)
         if is_global_admin(username)
@@ -668,12 +938,14 @@ def workflow_access_summary(username: str | None, survey_id: int) -> dict[str, A
     return {
         "username": username,
         "global_role": global_role,
-        "is_project_manager": is_project_manager(username, survey_id),
+        "is_project_manager": is_pm,
         "can_manage_team": manage_team,
         "project_role": member.project_role if member else None,
         "modules": modules,
         "assigned_tasks": sum(1 for t in workflow.tasks if t.assignee == username and t.status != "done"),
         "open_tasks": sum(1 for t in workflow.tasks if t.status != "done"),
+        "project_id": project_id,
+        "survey_id": survey_id,
     }
 
 

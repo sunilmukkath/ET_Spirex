@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,9 @@ from app.services.et_survey_store import (
 from app.services.et_survey_media import media_file_path, save_collector_media
 
 from app.services.questionnaire_agent import run_questionnaire_agent
+from app.services.survey_logic.questionnaire_markdown import questionnaire_spec_markdown
+from app.services.survey_logic.spss_export import export_to_spss_syntax
+from app.services.survey_logic.validator import validate_survey_logic
 
 router = APIRouter(tags=["et-surveys"])
 collector_router = APIRouter(tags=["collector"])
@@ -138,6 +141,57 @@ def studio_ai_questionnaire(
         brief=body.brief,
         language=body.language or survey.language,
     )
+
+
+@router.post("/studio/surveys/{workspace_id}/validate-logic")
+def studio_validate_logic(workspace_id: int, _: str = Depends(require_auth)):
+    _require_studio()
+    survey = get_et_survey(workspace_id)
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    return validate_survey_logic(survey.definition)
+
+
+@router.get("/studio/surveys/{workspace_id}/export/spss")
+def studio_export_spss(workspace_id: int, _: str = Depends(require_auth)):
+    _require_studio()
+    survey = get_et_survey(workspace_id)
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    return export_to_spss_syntax(survey.definition)
+
+
+@router.get("/studio/surveys/{workspace_id}/export/questionnaire.md")
+def studio_export_questionnaire_md(workspace_id: int, _: str = Depends(require_auth)):
+    _require_studio()
+    survey = get_et_survey(workspace_id)
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    md = questionnaire_spec_markdown(survey.definition, title=survey.title)
+    return PlainTextResponse(md, media_type="text/markdown; charset=utf-8")
+
+
+class SaveAssetRequest(BaseModel):
+    kind: str
+    name: str
+    payload: dict
+
+
+@router.get("/studio/assets")
+def studio_list_assets(_: str = Depends(require_auth)):
+    from app.services.survey_asset_store import list_assets
+
+    return {"assets": [a.model_dump() for a in list_assets()]}
+
+
+@router.post("/studio/assets", status_code=201)
+def studio_save_asset(body: SaveAssetRequest, username: str = Depends(require_auth)):
+    from app.services.survey_asset_store import save_asset
+
+    if body.kind not in ("question", "block", "label_set"):
+        raise HTTPException(status_code=400, detail="Invalid asset kind")
+    rec = save_asset(kind=body.kind, name=body.name, payload=body.payload, created_by=username)  # type: ignore[arg-type]
+    return rec.model_dump()
 
 
 @collector_router.get("/collector/{slug}", response_model=EtCollectorSurvey)

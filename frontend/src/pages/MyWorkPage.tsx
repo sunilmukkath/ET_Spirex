@@ -16,6 +16,7 @@ import { TEAM_USERS } from '../auth/AuthContext'
 import { MyWorkEmailPanel } from '../components/mywork/MyWorkEmailPanel'
 import { activePmProjects, pmProjectOptionLabel } from '../lib/pmProjectOptions'
 import { TASK_CATEGORY_LABELS, TASK_STATUS_LABELS } from '../lib/workflowAccess'
+import { taskWorkflowHref } from '../lib/pmWorkflowLinks'
 import { ErrorState, LoadingState } from '../components/States'
 
 type EditableDraft = Omit<GmailTaskDraft, 'survey_id'> & {
@@ -75,7 +76,7 @@ function TaskCard({
             <p className="text-sm font-medium text-[var(--et-navy)]">{row.task.title}</p>
           ) : (
             <Link
-              to={`/projects/${row.survey_id}?mode=workflow`}
+              to={taskWorkflowHref(row) ?? '#'}
               className="text-sm font-medium text-[var(--et-navy)] hover:underline"
             >
               {row.task.title}

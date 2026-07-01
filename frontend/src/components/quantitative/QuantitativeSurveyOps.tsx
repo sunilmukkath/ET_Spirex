@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bot, Code2, Link2, Loader2 } from 'lucide-react'
 import { api, type PmPipelineOverview, type PmSurveyLinkSuggestion, type Project } from '../../api/client'
+import { pmWorkflowHref } from '../../lib/pmWorkflowLinks'
 
 type OpsTab = 'programming' | 'links'
 
@@ -135,7 +136,7 @@ export function QuantitativeSurveyOps({
                       Data setup
                     </Link>
                     <Link
-                      to={`/projects/${p.limesurvey_survey_id}?mode=workflow`}
+                      to={pmWorkflowHref(p.project_id)}
                       className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
                     >
                       Workflow

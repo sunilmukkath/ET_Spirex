@@ -13,7 +13,32 @@ def super_admin_email() -> str:
     return settings.super_admin_email.strip().lower()
 
 
+def _registry_super_admins() -> list[str]:
+    from app.services.team_registry_store import get_team_registry
+
+    reg = get_team_registry()
+    return [str(n).strip() for n in (reg.super_admins or []) if str(n).strip()]
+
+
+def all_super_admins() -> list[str]:
+    """Primary owner plus any additional super admins from team registry."""
+    names: list[str] = []
+    primary = super_admin_username()
+    if primary:
+        names.append(primary)
+    for name in _registry_super_admins():
+        if name not in names:
+            names.append(name)
+    return names
+
+
 def is_super_admin(username: str | None) -> bool:
+    if not username:
+        return False
+    return username.strip() in all_super_admins()
+
+
+def is_primary_super_admin(username: str | None) -> bool:
     if not username:
         return False
     return username.strip() == super_admin_username()

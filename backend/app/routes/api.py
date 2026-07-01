@@ -151,7 +151,7 @@ from app.services.team_hr_store import (
     get_team_directory,
     update_staff_profile,
 )
-from app.services.super_admin import is_super_admin, super_admin_email, super_admin_username, email_for_username
+from app.services.super_admin import all_super_admins, is_super_admin, super_admin_email, super_admin_username, email_for_username
 
 router = APIRouter(prefix="/api")
 
@@ -288,7 +288,12 @@ def team_registry(authorization: str | None = Header(default=None)):
     record = get_session(_extract_token(authorization))
     if not record:
         raise HTTPException(status_code=401, detail="Not signed in")
-    return get_team_registry()
+    reg = get_team_registry()
+    return {
+        **reg.model_dump(),
+        "primary_super_admin": super_admin_username(),
+        "super_admins": all_super_admins(),
+    }
 
 
 @router.put("/team/registry")
@@ -299,8 +304,8 @@ def team_registry_update(
     record = get_session(_extract_token(authorization))
     if not record:
         raise HTTPException(status_code=401, detail="Not signed in")
-    if not is_global_admin(record.username):
-        raise HTTPException(status_code=403, detail="Only admins can update team roles")
+    if not is_super_admin(record.username):
+        raise HTTPException(status_code=403, detail="Only super admins can update team roles and module access")
     return set_team_registry(body)
 
 
@@ -348,14 +353,18 @@ def project_workflow_get(
     survey_id: int,
     authorization: str | None = Header(default=None),
 ):
+    from app.services.task_pm_resolve import resolve_pm_project_id_for_survey
+
     record = get_session(_extract_token(authorization))
     if not record:
         raise HTTPException(status_code=401, detail="Not signed in")
     workflow = get_project_workflow(survey_id)
+    project_id = resolve_pm_project_id_for_survey(survey_id)
     return {
         "workflow": workflow,
         "access": workflow_access_summary(record.username, survey_id),
         "modules": list(PROJECT_MODULES),
+        "project_id": project_id,
     }
 
 
@@ -535,6 +544,7 @@ def _format_task_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         tasks.append(
             {
                 "survey_id": sid,
+                "project_id": row.get("project_id"),
                 "survey_title": survey_title,
                 "phase": row.get("phase"),
                 "client_name": client,

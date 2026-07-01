@@ -27,6 +27,7 @@ import {
 import { ET_HOME_SUBTITLE, ET_HOME_TAGLINE, ET_PRODUCT_NAME } from '../lib/etCopy'
 import { activePmProjects, pmProjectOptionLabel } from '../lib/pmProjectOptions'
 import { TASK_CATEGORY_LABELS, TASK_STATUS_LABELS } from '../lib/workflowAccess'
+import { taskWorkflowHref } from '../lib/pmWorkflowLinks'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
 const PROJECT_PREVIEW = 6
@@ -211,7 +212,7 @@ function TaskList({ rows, empty }: { rows: MyTaskRow[]; empty: string }) {
             </div>
           ) : (
           <Link
-            to={`/projects/${row.survey_id}?mode=workflow`}
+            to={taskWorkflowHref(row) ?? '#'}
             className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 transition hover:border-[var(--et-teal)]/30 hover:bg-[var(--et-teal-light)]/10"
           >
             <Circle size={14} className="mt-0.5 shrink-0 text-slate-400" />

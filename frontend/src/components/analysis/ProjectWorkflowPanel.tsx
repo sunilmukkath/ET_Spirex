@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   CheckCircle2,
   Circle,
@@ -43,6 +44,7 @@ import {
   TASK_STATUS_LABELS,
   canManageTeam,
 } from '../../lib/workflowAccess'
+import { pmWorkflowHref } from '../../lib/pmWorkflowLinks'
 import { ET_WORKFLOW_TAGLINE } from '../../lib/etCopy'
 import { ProjectRequirementsEditor, emptyProjectRequirements } from '../ProjectRequirementsEditor'
 
@@ -121,12 +123,14 @@ function statusIcon(status: TaskStatus) {
 }
 
 interface Props {
-  surveyId: number
+  projectId?: string
+  surveyId?: number
   currentUser: string
   globalRole?: GlobalRole
 }
 
-export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Props) {
+export function ProjectWorkflowPanel({ projectId, surveyId, currentUser, globalRole }: Props) {
+  const [resolvedProjectId, setResolvedProjectId] = useState<string | null>(projectId ?? null)
   const [workflow, setWorkflow] = useState<ProjectWorkflow>({ members: [], tasks: [], notes: '' })
   const [access, setAccess] = useState<WorkflowAccess | null>(null)
   const [loading, setLoading] = useState(true)
@@ -151,15 +155,24 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
     setLoading(true)
     setError(null)
     try {
-      const data = await api.getProjectWorkflow(surveyId)
+      const data = projectId
+        ? await api.getPmProjectWorkflow(projectId)
+        : surveyId != null
+          ? await api.getProjectWorkflow(surveyId)
+          : null
+      if (!data) {
+        setError('No project selected for workflow')
+        return
+      }
       setWorkflow(data.workflow)
       setAccess(data.access)
+      setResolvedProjectId(projectId ?? data.project_id ?? null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load workflow')
     } finally {
       setLoading(false)
     }
-  }, [surveyId])
+  }, [projectId, surveyId])
 
   useEffect(() => {
     void load()
@@ -196,6 +209,8 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
     return counts
   }, [workflow.tasks])
 
+  const pmScopeId = projectId ?? resolvedProjectId
+
   async function persist(next: ProjectWorkflow) {
     setSaving(true)
     setError(null)
@@ -204,9 +219,12 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
       translations: (next.translations ?? []).filter((row) => row.language.trim()),
     }
     try {
-      const data = await api.setProjectWorkflow(surveyId, payload)
+      const data = pmScopeId
+        ? await api.setPmProjectWorkflow(pmScopeId, payload)
+        : await api.setProjectWorkflow(surveyId!, payload)
       setWorkflow(data.workflow)
       setAccess(data.access)
+      if (data.project_id) setResolvedProjectId(data.project_id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -293,7 +311,9 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
     setPostingActivity(true)
     setError(null)
     try {
-      const data = await api.addProjectActivity(surveyId, message)
+      const data = pmScopeId
+        ? await api.addPmProjectActivity(pmScopeId, message)
+        : await api.addProjectActivity(surveyId!, message)
       setWorkflow(data.workflow)
       setAccess(data.access)
       setActivityDraft('')
@@ -305,6 +325,10 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
   }
 
   async function exportSpec(format: 'xlsx' | 'docx') {
+    if (surveyId == null) {
+      setError('Link a survey to this project to export questionnaire specs.')
+      return
+    }
     setExportingSpec(format)
     setError(null)
     try {
@@ -347,7 +371,9 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
     setPostingCommentId(taskId)
     setError(null)
     try {
-      const data = await api.addTaskComment(surveyId, taskId, body)
+      const data = pmScopeId
+        ? await api.addPmTaskComment(pmScopeId, taskId, body)
+        : await api.addTaskComment(surveyId!, taskId, body)
       setWorkflow(data.workflow)
       setAccess(data.access)
       setCommentDrafts((prev) => ({ ...prev, [taskId]: '' }))
@@ -376,6 +402,17 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
           <div>
             <h2 className="font-display text-xl font-semibold text-slate-900">Project workflow</h2>
             <p className="mt-1 text-sm text-slate-500">{ET_WORKFLOW_TAGLINE}</p>
+            {pmScopeId && surveyId != null && !projectId && (
+              <p className="mt-2 text-xs text-slate-600">
+                Managed at Operations Hub project level.{' '}
+                <Link
+                  to={pmWorkflowHref(pmScopeId)}
+                  className="font-medium text-[var(--et-teal-dark)] hover:underline"
+                >
+                  Open in Operations Hub
+                </Link>
+              </p>
+            )}
           </div>
           {canEdit && (
             <button

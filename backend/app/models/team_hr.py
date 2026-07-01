@@ -50,6 +50,7 @@ class StaffTaskPreview(BaseModel):
     due_date: str | None = None
     personal: bool = False
     survey_id: int | None = None
+    project_id: str | None = None
     survey_title: str = ""
 
 

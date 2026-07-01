@@ -498,8 +498,10 @@ export type GlobalRole = 'admin' | 'manager' | 'member'
 export type AppModule =
   | 'home'
   | 'quantitative'
+  | 'qualitative'
   | 'my_work'
   | 'operations'
+  | 'crm_marketing'
   | 'accounting'
   | 'team'
   | 'settings'
@@ -530,6 +532,8 @@ export interface TeamUser {
 
 export interface TeamRegistry {
   users: TeamUser[]
+  super_admins?: string[]
+  primary_super_admin?: string
 }
 
 export type StaffStatus = 'active' | 'away' | 'inactive'
@@ -559,6 +563,7 @@ export interface StaffTaskPreview {
   due_date: string | null
   personal: boolean
   survey_id: number | null
+  project_id?: string | null
   survey_title: string
 }
 
@@ -757,6 +762,7 @@ export interface UserPreferences {
 
 export interface MyTaskRow {
   survey_id: number | null
+  project_id?: string | null
   survey_title: string
   phase?: ProjectPhase
   client_name?: string
@@ -780,6 +786,7 @@ export interface ProjectWorkflowResponse {
   workflow: ProjectWorkflow
   access: WorkflowAccess
   modules: ProjectModule[]
+  project_id?: string | null
 }
 
 export interface InterviewerQcRow {
@@ -1059,6 +1066,15 @@ export type EtQuestionType =
   | 'gps'
   | 'photo'
   | 'audio'
+  | 'equation'
+
+export interface EtQuotaRule {
+  id: string
+  label?: string
+  expression: string
+  target: number
+  action?: 'terminate' | 'warn'
+}
 
 export interface EtAnswerOption {
   code: string
@@ -1099,6 +1115,9 @@ export interface EtQuestion {
   randomize_options?: boolean
   randomize_code?: string
   show_if?: EtShowIfRule | null
+  relevance_equation?: string | null
+  validation_equation?: string | null
+  equation?: string | null
   max_recording_seconds?: number
   camera_only?: boolean
 }
@@ -1109,17 +1128,21 @@ export interface EtBlock {
   description?: string
   sort_order: number
   randomize_code?: string
+  relevance_equation?: string | null
   questions: EtQuestion[]
 }
 
 export interface EtSurveyDefinition {
   version: number
   blocks: EtBlock[]
+  quotas?: EtQuotaRule[]
   settings: {
     welcome_title: string
     welcome_message: string
     thank_you_title: string
     thank_you_message: string
+    quota_full_title?: string
+    quota_full_message?: string
     single_page: boolean
     show_progress: boolean
     language: string
@@ -1934,8 +1957,16 @@ export const api = {
       body: JSON.stringify(body),
     }),
   getProjectWorkflow: (id: number) => fetchJson<ProjectWorkflowResponse>(`/api/projects/${id}/workflow`),
+  getPmProjectWorkflow: (projectId: string) =>
+    fetchJson<ProjectWorkflowResponse>(`/api/pm/projects/${encodeURIComponent(projectId)}/workflow`),
   setProjectWorkflow: (id: number, workflow: ProjectWorkflow) =>
     fetchJson<ProjectWorkflowResponse>(`/api/projects/${id}/workflow`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(workflow),
+    }),
+  setPmProjectWorkflow: (projectId: string, workflow: ProjectWorkflow) =>
+    fetchJson<ProjectWorkflowResponse>(`/api/pm/projects/${encodeURIComponent(projectId)}/workflow`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(workflow),
@@ -1946,12 +1977,30 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message }),
     }),
+  addPmProjectActivity: (projectId: string, message: string) =>
+    fetchJson<ProjectWorkflowResponse>(
+      `/api/pm/projects/${encodeURIComponent(projectId)}/workflow/activities`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      },
+    ),
   addTaskComment: (surveyId: number, taskId: string, body: string) =>
     fetchJson<ProjectWorkflowResponse>(`/api/projects/${surveyId}/workflow/tasks/${taskId}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),
     }),
+  addPmTaskComment: (projectId: string, taskId: string, body: string) =>
+    fetchJson<ProjectWorkflowResponse>(
+      `/api/pm/projects/${encodeURIComponent(projectId)}/workflow/tasks/${taskId}/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      },
+    ),
   getMyTasks: () =>
     fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/me/tasks', undefined, BOOTSTRAP_TIMEOUT_MS),
   createTask: (body: {
@@ -3131,6 +3180,40 @@ export const api = {
         body: JSON.stringify(body),
       },
     ),
+  validateStudioSurveyLogic: (workspaceId: number) =>
+    fetchJson<{
+      diagnostics: Array<{
+        severity: 'valid' | 'future_ref' | 'error'
+        qcode: string
+        field: string
+        message: string
+        expression?: string
+      }>
+      has_errors: boolean
+      has_future_refs: boolean
+    }>(`/api/studio/surveys/${workspaceId}/validate-logic`, { method: 'POST' }),
+  exportStudioSpss: (workspaceId: number) =>
+    fetchJson<{ csv_data: string; spss_syntax: string }>(
+      `/api/studio/surveys/${workspaceId}/export/spss`,
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  exportStudioQuestionnaireMd: async (workspaceId: number) => {
+    const token = localStorage.getItem('et_scout_auth')
+    let auth = ''
+    if (token) {
+      try {
+        auth = JSON.parse(token).token ?? ''
+      } catch {
+        auth = ''
+      }
+    }
+    const res = await fetch(`/api/studio/surveys/${workspaceId}/export/questionnaire.md`, {
+      headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+    })
+    if (!res.ok) throw new Error('Export failed')
+    return res.text()
+  },
   runToplineAgent: (
     surveyId: number,
     body: { deck_title?: string; client_context?: string; sections: ReportSectionPayload[] },

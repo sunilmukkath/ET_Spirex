@@ -436,16 +436,16 @@ def pipeline_overview(session: Session, linked_survey_ids: list[int] | None = No
         survey_ids_by_project[row.project_id] = sids
         all_survey_ids.extend(sids)
 
-    from app.services.project_workflow_store import count_open_tasks_for_surveys
+    from app.services.project_workflow_store import count_open_tasks_for_pm_projects
 
-    open_task_counts = count_open_tasks_for_surveys(all_survey_ids)
+    open_task_counts = count_open_tasks_for_pm_projects([str(pid) for pid in project_ids])
 
     for row in rows:
         base = project_to_out(row)
         survey_ids = survey_ids_by_project[row.project_id]
         fw = fieldwork_latest.get(row.project_id)
         dc_status, dc_pct = _data_collection_status(row.stage, fw)
-        open_tasks = sum(open_task_counts.get(sid, 0) for sid in survey_ids)
+        open_tasks = open_task_counts.get(str(row.project_id), 0)
         p = PipelineProjectOut(
             **base.model_dump(),
             client_name=row.client.client_name if row.client else None,

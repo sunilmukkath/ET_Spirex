@@ -133,12 +133,10 @@ def _collect_open_tasks(username: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
     if _WORKFLOW_DIR.is_dir():
-        for path in sorted(_WORKFLOW_DIR.glob("*.json")):
-            try:
-                survey_id = int(path.stem)
-            except ValueError:
-                continue
-            workflow = get_project_workflow(survey_id)
+        from app.services.project_workflow_store import _iter_workflow_refs, _load_workflow_file
+
+        for ref, survey_id in _iter_workflow_refs():
+            workflow = _load_workflow_file(ref.storage_path())
             for task in workflow.tasks:
                 if (task.assignee or "").strip() != assignee or task.status == "done":
                     continue
@@ -152,7 +150,8 @@ def _collect_open_tasks(username: str) -> list[dict[str, Any]]:
                         "due_date": task.due_date,
                         "personal": False,
                         "survey_id": survey_id,
-                        "survey_title": _survey_title(survey_id, workflow),
+                        "project_id": ref.project_id,
+                        "survey_title": _survey_title(survey_id or 0, workflow),
                     }
                 )
 

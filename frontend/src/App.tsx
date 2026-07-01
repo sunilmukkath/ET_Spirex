@@ -19,6 +19,12 @@ const MyWorkPage = lazy(() =>
 const OperationsHubPage = lazy(() =>
   import('./pages/OperationsHubPage').then((m) => ({ default: m.OperationsHubPage })),
 )
+const CrmMarketingPage = lazy(() =>
+  import('./pages/CrmMarketingPage').then((m) => ({ default: m.CrmMarketingPage })),
+)
+const QualitativePage = lazy(() =>
+  import('./pages/QualitativePage').then((m) => ({ default: m.QualitativePage })),
+)
 const AccountingPage = lazy(() =>
   import('./pages/AccountingPage').then((m) => ({ default: m.AccountingPage })),
 )
@@ -70,6 +76,8 @@ function App() {
               <Route path="dashboard" element={<Navigate to="/quantitative" replace />} />
               <Route path="my-work" element={<ModuleGate module="my_work"><MyWorkPage /></ModuleGate>} />
               <Route path="operations" element={<ModuleGate module="operations"><OperationsHubPage /></ModuleGate>} />
+              <Route path="crm-marketing" element={<ModuleGate module="crm_marketing"><CrmMarketingPage /></ModuleGate>} />
+              <Route path="qualitative" element={<ModuleGate module="qualitative"><QualitativePage /></ModuleGate>} />
               <Route path="accounting" element={<ModuleGate module="accounting"><AccountingPage /></ModuleGate>} />
               <Route path="team" element={<ModuleGate module="team"><TeamPage /></ModuleGate>} />
               <Route path="settings" element={<ModuleGate module="settings"><AdminSettingsPage /></ModuleGate>} />

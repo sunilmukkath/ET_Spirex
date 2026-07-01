@@ -19,6 +19,7 @@ import { useAuth } from '../auth/AuthContext'
 import { avatarColors, avatarInitials } from '../components/mywork/emailPanelUtils'
 import { ErrorState, LoadingState } from '../components/States'
 import { TASK_CATEGORY_LABELS } from '../lib/workflowAccess'
+import { taskWorkflowHref } from '../lib/pmWorkflowLinks'
 
 const LOAD_STYLES: Record<LoadLevel, { pill: string; bar: string }> = {
   light: { pill: 'bg-emerald-50 text-emerald-800 ring-emerald-200', bar: 'bg-emerald-500' },
@@ -432,7 +433,12 @@ export function TeamPage() {
                         <li key={task.task_id} className="rounded-lg border border-slate-100 bg-white px-3 py-2">
                           {task.survey_id ? (
                             <Link
-                              to={`/projects/${task.survey_id}?mode=workflow`}
+                              to={
+                                taskWorkflowHref({
+                                  survey_id: task.survey_id,
+                                  project_id: task.project_id,
+                                }) ?? '#'
+                              }
                               className="text-sm font-medium text-[var(--et-navy)] hover:underline"
                             >
                               {task.title}
