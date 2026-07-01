@@ -31,13 +31,13 @@ def _client_config() -> dict[str, Any]:
             "client_secret": settings.google_client_secret.strip(),
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [settings.google_auth_redirect_uri.strip()],
+            "redirect_uris": [settings.resolved_google_auth_redirect_uri],
         }
     }
 
 
 def _auth_redirect_uri() -> str:
-    uri = settings.google_auth_redirect_uri.strip()
+    uri = settings.resolved_google_auth_redirect_uri
     if not uri:
         raise GmailNotConfiguredError("GOOGLE_AUTH_REDIRECT_URI is not set.")
     return uri

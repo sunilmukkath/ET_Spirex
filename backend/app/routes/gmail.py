@@ -71,7 +71,7 @@ def gmail_oauth_url(authorization: str | None = Header(default=None)):
 @router.get("/oauth/callback", include_in_schema=False)
 def gmail_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
-        return RedirectResponse(f"{settings.google_oauth_success_url}&gmail=error&reason={error}")
+        return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=error&reason={error}")
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing OAuth code or state")
     token = decode_oauth_state(state)
@@ -84,8 +84,8 @@ def gmail_oauth_callback(code: str | None = None, state: str | None = None, erro
         tokens = exchange_code_for_tokens(code)
         gmail_store.save_tokens(record.username, tokens)
     except Exception as exc:
-        return RedirectResponse(f"{settings.google_oauth_success_url}&gmail=error&reason=token_exchange")
-    return RedirectResponse(f"{settings.google_oauth_success_url}&gmail=connected")
+        return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=error&reason=token_exchange")
+    return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=connected")
 
 
 @router.post("/disconnect")

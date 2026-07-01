@@ -38,7 +38,7 @@ def google_auth_callback(
     state: str | None = None,
     error: str | None = None,
 ):
-    success_base = settings.google_auth_success_url.strip() or settings.app_public_url.strip()
+    success_base = settings.resolved_google_auth_success_url
     if error:
         return RedirectResponse(f"{success_base}?auth=error&reason={error}")
     if not code or not state or not decode_login_state(state):

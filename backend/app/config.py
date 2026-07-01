@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +45,65 @@ class Settings(BaseSettings):
     super_admin_username: str = "Sunil"
     super_admin_email: str = "sunilmukkath@elastictree.com"
     workspace_domain: str = "elastictree.com"
+
+    @staticmethod
+    def _is_local_url(url: str) -> bool:
+        lowered = url.strip().lower()
+        return lowered.startswith("http://localhost") or lowered.startswith("http://127.0.0.1")
+
+    @property
+    def resolved_app_public_url(self) -> str:
+        """Public app URL — explicit env, Railway domain, or Render URL."""
+        explicit = self.app_public_url.strip().rstrip("/")
+        if explicit and not self._is_local_url(explicit):
+            return explicit
+        railway = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+        if railway:
+            return f"https://{railway}".rstrip("/")
+        render = os.environ.get("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+        if render:
+            return render
+        return explicit or "http://localhost:5173"
+
+    @property
+    def resolved_google_auth_redirect_uri(self) -> str:
+        explicit = self.google_auth_redirect_uri.strip()
+        if explicit and not self._is_local_url(explicit):
+            return explicit
+        base = self.resolved_app_public_url.rstrip("/")
+        if not self._is_local_url(base):
+            return f"{base}/api/auth/google/callback"
+        return explicit or "http://localhost:8000/api/auth/google/callback"
+
+    @property
+    def resolved_google_redirect_uri(self) -> str:
+        explicit = self.google_redirect_uri.strip()
+        if explicit and not self._is_local_url(explicit):
+            return explicit
+        base = self.resolved_app_public_url.rstrip("/")
+        if not self._is_local_url(base):
+            return f"{base}/api/gmail/oauth/callback"
+        return explicit or "http://localhost:8000/api/gmail/oauth/callback"
+
+    @property
+    def resolved_google_auth_success_url(self) -> str:
+        explicit = self.google_auth_success_url.strip().rstrip("/")
+        if explicit and not self._is_local_url(explicit):
+            return explicit
+        base = self.resolved_app_public_url.rstrip("/")
+        if not self._is_local_url(base):
+            return f"{base}/dashboard"
+        return explicit or "http://localhost:5173/"
+
+    @property
+    def resolved_google_oauth_success_url(self) -> str:
+        explicit = self.google_oauth_success_url.strip()
+        if explicit and not self._is_local_url(explicit):
+            return explicit
+        base = self.resolved_app_public_url.rstrip("/")
+        if not self._is_local_url(base):
+            return f"{base}/my-work?gmail=connected"
+        return explicit or "http://localhost:5173/my-work?gmail=connected"
 
     @property
     def resolved_gmail_team_email_map(self) -> str:
