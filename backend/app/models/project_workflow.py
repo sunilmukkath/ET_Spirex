@@ -5,6 +5,16 @@ from pydantic import BaseModel, Field
 from app.models.team_registry import PROJECT_MODULES
 
 ProjectRole = Literal["lead", "contributor"]
+ProjectPhase = Literal[
+    "proposal",
+    "design",
+    "pilot",
+    "field",
+    "analysis",
+    "delivery",
+    "closed",
+]
+StudyType = Literal["quant", "qual", "mixed"]
 TaskCategory = Literal[
     "programming",
     "field",
@@ -39,6 +49,12 @@ class ProjectTask(BaseModel):
 
 
 class ProjectWorkflow(BaseModel):
+    phase: ProjectPhase = "field"
+    study_type: StudyType = "quant"
+    client_name: str = ""
+    project_code: str = ""
+    target_field_start: str | None = None
+    target_delivery: str | None = None
     members: list[ProjectMember] = Field(default_factory=list)
     tasks: list[ProjectTask] = Field(default_factory=list)
     notes: str = ""

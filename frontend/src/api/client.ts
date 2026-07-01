@@ -500,6 +500,17 @@ export interface TeamRegistry {
   users: TeamUser[]
 }
 
+export type ProjectPhase =
+  | 'proposal'
+  | 'design'
+  | 'pilot'
+  | 'field'
+  | 'analysis'
+  | 'delivery'
+  | 'closed'
+
+export type StudyType = 'quant' | 'qual' | 'mixed'
+
 export interface ProjectMember {
   username: string
   project_role: 'lead' | 'contributor'
@@ -522,6 +533,12 @@ export interface ProjectTask {
 }
 
 export interface ProjectWorkflow {
+  phase?: ProjectPhase
+  study_type?: StudyType
+  client_name?: string
+  project_code?: string
+  target_field_start?: string | null
+  target_delivery?: string | null
   members: ProjectMember[]
   tasks: ProjectTask[]
   notes?: string

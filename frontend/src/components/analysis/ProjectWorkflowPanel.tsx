@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   CheckCircle2,
   Circle,
+  Flag,
   Loader2,
   Plus,
   Save,
@@ -16,11 +17,17 @@ import {
   type ProjectModule,
   type ProjectTask,
   type ProjectWorkflow,
+  type StudyType,
   type TaskCategory,
   type TaskStatus,
   type WorkflowAccess,
 } from '../../api/client'
 import { TEAM_USERS } from '../../auth/AuthContext'
+import {
+  PROJECT_PHASE_LABELS,
+  PROJECT_PHASES,
+  STUDY_TYPE_LABELS,
+} from '../../lib/workflowPhases'
 import {
   PROJECT_MODULE_LABELS,
   TASK_CATEGORY_LABELS,
@@ -213,6 +220,9 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
     )
   }
 
+  const phase = workflow.phase ?? 'field'
+  const studyType = workflow.study_type ?? 'quant'
+
   return (
     <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -277,6 +287,109 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
             </p>
           </div>
         </div>
+
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
+            <Flag size={18} className="text-[var(--et-teal)]" />
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Project status</h3>
+              <p className="text-xs text-slate-500">
+                Study phase and client details for this project. Save workflow to persist changes.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-4 p-5">
+            <div>
+              <p className="mb-2 text-xs font-medium text-slate-600">Lifecycle phase</p>
+              <div className="flex flex-wrap gap-1.5">
+                {PROJECT_PHASES.map((p) => {
+                  const active = phase === p
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      disabled={!canEdit}
+                      onClick={() => canEdit && updateWorkflow({ phase: p })}
+                      className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                        active
+                          ? 'bg-[var(--et-teal)] text-white shadow-sm'
+                          : canEdit
+                            ? 'border border-slate-200 bg-white text-slate-600 hover:border-[var(--et-teal)]/40'
+                            : 'border border-slate-100 bg-slate-50 text-slate-400'
+                      }`}
+                    >
+                      {PROJECT_PHASE_LABELS[p]}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-xs">
+                <span className="mb-1 block font-medium text-slate-600">Study type</span>
+                <select
+                  value={studyType}
+                  disabled={!canEdit}
+                  onChange={(e) => updateWorkflow({ study_type: e.target.value as StudyType })}
+                  className="et-select w-full"
+                >
+                  {(Object.keys(STUDY_TYPE_LABELS) as StudyType[]).map((key) => (
+                    <option key={key} value={key}>
+                      {STUDY_TYPE_LABELS[key]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs">
+                <span className="mb-1 block font-medium text-slate-600">Client</span>
+                <input
+                  type="text"
+                  value={workflow.client_name ?? ''}
+                  disabled={!canEdit}
+                  onChange={(e) => updateWorkflow({ client_name: e.target.value })}
+                  placeholder="Client name"
+                  className="et-input w-full"
+                />
+              </label>
+              <label className="text-xs">
+                <span className="mb-1 block font-medium text-slate-600">Project code</span>
+                <input
+                  type="text"
+                  value={workflow.project_code ?? ''}
+                  disabled={!canEdit}
+                  onChange={(e) => updateWorkflow({ project_code: e.target.value })}
+                  placeholder="e.g. ET-2026-014"
+                  className="et-input w-full"
+                />
+              </label>
+              <label className="text-xs">
+                <span className="mb-1 block font-medium text-slate-600">Target field start</span>
+                <input
+                  type="date"
+                  value={workflow.target_field_start ?? ''}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    updateWorkflow({ target_field_start: e.target.value || null })
+                  }
+                  className="et-input w-full"
+                />
+              </label>
+              <label className="text-xs sm:col-span-2 lg:col-span-1">
+                <span className="mb-1 block font-medium text-slate-600">Target delivery</span>
+                <input
+                  type="date"
+                  value={workflow.target_delivery ?? ''}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    updateWorkflow({ target_delivery: e.target.value || null })
+                  }
+                  className="et-input w-full"
+                />
+              </label>
+            </div>
+          </div>
+        </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">

@@ -96,7 +96,30 @@ def _normalize_workflow(raw: dict[str, Any] | None) -> ProjectWorkflow:
 
     tasks.sort(key=lambda t: (t.status != "done", t.due_date or "9999", t.title.lower()))
 
+    phase = str(raw.get("phase") or "field").strip().lower()
+    if phase not in {
+        "proposal",
+        "design",
+        "pilot",
+        "field",
+        "analysis",
+        "delivery",
+        "closed",
+    }:
+        phase = "field"
+    study_type = str(raw.get("study_type") or "quant").strip().lower()
+    if study_type not in {"quant", "qual", "mixed"}:
+        study_type = "quant"
+    target_field_start = str(raw.get("target_field_start") or "").strip() or None
+    target_delivery = str(raw.get("target_delivery") or "").strip() or None
+
     return ProjectWorkflow(
+        phase=phase,  # type: ignore[arg-type]
+        study_type=study_type,  # type: ignore[arg-type]
+        client_name=str(raw.get("client_name") or "").strip(),
+        project_code=str(raw.get("project_code") or "").strip(),
+        target_field_start=target_field_start,
+        target_delivery=target_delivery,
         members=members,
         tasks=tasks,
         notes=str(raw.get("notes") or "").strip(),
