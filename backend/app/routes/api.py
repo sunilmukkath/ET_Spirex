@@ -30,7 +30,15 @@ from app.models.project_workflow import (
 )
 from app.models.team_registry import TeamRegistry, PROJECT_MODULES
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
-from app.services.auth import VALID_USERS, authenticate, get_session, list_active_sessions, logout
+from app.services.auth import (
+    VALID_USERS,
+    authenticate,
+    exchange_google_code,
+    get_google_login_url,
+    get_session,
+    list_active_sessions,
+    logout,
+)
 from app.services.banner_analysis import run_banner_table, run_chart_data, run_question_profile, get_filter_options
 from app.services.advanced_analysis import run_advanced_analysis
 from app.services.custom_variable_store import (
@@ -200,6 +208,36 @@ def auth_sessions(authorization: str | None = Header(default=None)):
     if not get_session(_extract_token(authorization)):
         raise HTTPException(status_code=401, detail="Not signed in")
     return {"sessions": list_active_sessions()}
+
+
+@router.post("/auth/google/login")
+def auth_google_login():
+    """Return the Google OAuth authorization URL the frontend should redirect to."""
+    try:
+        url = get_google_login_url()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"url": url}
+
+
+@router.get("/auth/google/callback")
+def auth_google_callback(code: str):
+    """Handle the Google OAuth callback, exchange the code, and return a session token."""
+    try:
+        token = exchange_google_code(code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Google OAuth error: {exc}")
+    if token is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Your Google account is not authorised to access this application.",
+        )
+    # Retrieve the session to get the username (email) that was stored
+    record = get_session(token)
+    username = record.username if record else ""
+    return LoginResponse(token=token, username=username)
 
 
 def _extract_token(authorization: str | None) -> str | None:

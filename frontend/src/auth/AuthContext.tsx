@@ -27,6 +27,7 @@ interface AuthContextValue {
   loading: boolean
   activeSessions: { username: string; login_at: number; last_seen: number }[]
   login: (username: string, password: string) => Promise<void>
+  loginWithToken: (token: string, username: string) => Promise<void>
   logout: () => Promise<void>
   refreshSessions: () => Promise<void>
   isAdmin: boolean
@@ -115,6 +116,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(state)
   }, [])
 
+  const loginWithToken = useCallback(async (token: string, username: string) => {
+    setAuthToken(token)
+    const me = await api.getMe()
+    const state = { token, username: me.username || username, role: me.role }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    setUser(state)
+  }, [])
+
   const logout = useCallback(async () => {
     try {
       await api.logout()
@@ -133,11 +142,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       activeSessions,
       login,
+      loginWithToken,
       logout,
       refreshSessions,
       isAdmin: user?.role === 'admin',
     }),
-    [user, loading, activeSessions, login, logout, refreshSessions],
+    [user, loading, activeSessions, login, loginWithToken, logout, refreshSessions],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

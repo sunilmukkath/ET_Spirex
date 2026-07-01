@@ -1085,6 +1085,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }),
+  googleLogin: () =>
+    fetchJson<{ url: string }>('/api/auth/google/login', { method: 'POST' }),
   logout: () =>
     fetchJson<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   getMe: () => fetchJson<{ username: string; login_at: number; role?: GlobalRole }>('/api/auth/me'),
