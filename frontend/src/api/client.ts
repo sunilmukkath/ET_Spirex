@@ -952,6 +952,16 @@ export interface AiStatus {
   hints: Record<string, string>
 }
 
+export interface AssistantChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AssistantChatResponse {
+  reply: string
+  configured: boolean
+}
+
 export interface ReportSectionPayload {
   section_id: string
   label: string
@@ -1458,6 +1468,16 @@ export const api = {
     }),
   getConnection: () => fetchJson<ConnectionStatus>('/api/connection', undefined, LIMESURVEY_TIMEOUT_MS),
   getAiStatus: () => fetchJson<AiStatus>('/api/ai/status'),
+  assistantChat: (body: {
+    message: string
+    history?: AssistantChatMessage[]
+    context?: Record<string, unknown>
+  }) =>
+    fetchJson<AssistantChatResponse>('/api/assistant/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   previewReportNarrative: (
     id: number,
     body: {

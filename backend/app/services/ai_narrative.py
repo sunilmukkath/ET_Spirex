@@ -120,14 +120,34 @@ def complete_custom(
     system: str,
     max_tokens: int = 1024,
 ) -> str | None:
+    return complete_chat(
+        [{"role": "user", "content": user_prompt}],
+        system=system,
+        max_tokens=max_tokens,
+    )
+
+
+def complete_chat(
+    messages: list[dict[str, str]],
+    *,
+    system: str,
+    max_tokens: int = 1024,
+) -> str | None:
     provider = settings.resolved_ai_provider
     if not provider:
         return None
+    cleaned = [
+        {"role": m["role"], "content": m["content"]}
+        for m in messages
+        if m.get("role") in {"user", "assistant"} and str(m.get("content") or "").strip()
+    ]
+    if not cleaned:
+        return None
     try:
         if provider == "anthropic":
-            return _anthropic_complete(user_prompt, system=system, max_tokens=max_tokens)
+            return _anthropic_chat(cleaned, system=system, max_tokens=max_tokens)
         if provider == "azure":
-            return _azure_complete(user_prompt, system=system, max_tokens=max_tokens)
+            return _azure_chat(cleaned, system=system, max_tokens=max_tokens)
     except Exception as exc:
         logger.warning("AI completion failed: %s", exc)
         raise
@@ -208,6 +228,15 @@ def _fallback_slide_plan(sections: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _anthropic_complete(user_prompt: str, *, system: str = SYSTEM_PROMPT, max_tokens: int = 512) -> str:
+    return _anthropic_chat([{"role": "user", "content": user_prompt}], system=system, max_tokens=max_tokens)
+
+
+def _anthropic_chat(
+    messages: list[dict[str, str]],
+    *,
+    system: str = SYSTEM_PROMPT,
+    max_tokens: int = 512,
+) -> str:
     key = settings.anthropic_api_key
     model = settings.anthropic_model
     with httpx.Client(timeout=90.0) as client:
@@ -222,7 +251,7 @@ def _anthropic_complete(user_prompt: str, *, system: str = SYSTEM_PROMPT, max_to
                 "model": model,
                 "max_tokens": max_tokens,
                 "system": system,
-                "messages": [{"role": "user", "content": user_prompt}],
+                "messages": messages,
             },
         )
         res.raise_for_status()
@@ -233,6 +262,15 @@ def _anthropic_complete(user_prompt: str, *, system: str = SYSTEM_PROMPT, max_to
 
 
 def _azure_complete(user_prompt: str, *, system: str = SYSTEM_PROMPT, max_tokens: int = 512) -> str:
+    return _azure_chat([{"role": "user", "content": user_prompt}], system=system, max_tokens=max_tokens)
+
+
+def _azure_chat(
+    messages: list[dict[str, str]],
+    *,
+    system: str = SYSTEM_PROMPT,
+    max_tokens: int = 512,
+) -> str:
     endpoint = settings.azure_openai_endpoint.rstrip("/")
     deployment = settings.azure_openai_deployment
     version = settings.azure_openai_api_version
@@ -242,10 +280,7 @@ def _azure_complete(user_prompt: str, *, system: str = SYSTEM_PROMPT, max_tokens
             url,
             headers={"api-key": settings.azure_openai_api_key, "content-type": "application/json"},
             json={
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_prompt},
-                ],
+                "messages": [{"role": "system", "content": system}, *messages],
                 "max_tokens": max_tokens,
                 "temperature": 0.3,
             },

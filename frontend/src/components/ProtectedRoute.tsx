@@ -1,5 +1,6 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { FloatingAssistantChat } from './FloatingAssistantChat'
 import { LoadingState } from './States'
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -17,5 +18,10 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/" replace />
   }
 
-  return children
+  return (
+    <>
+      {children}
+      <FloatingAssistantChat />
+    </>
+  )
 }

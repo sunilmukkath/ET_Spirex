@@ -6,40 +6,91 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.hyperlink import Hyperlink
+
+DATA_SHEET_NAME = "Crosstab"
+INDEX_SHEET_NAME = "Index"
+TABLE_GAP_ROWS = 3
 
 
 def banner_result_to_excel(result: dict[str, Any]) -> bytes:
     wb = Workbook()
-    wb.remove(wb.active)
+    index_ws = wb.active
+    index_ws.title = INDEX_SHEET_NAME
+    data_ws = wb.create_sheet(title=DATA_SHEET_NAME)
 
-    if result.get("table_type") == "multi" and result.get("tables"):
-        for i, table in enumerate(result["tables"], start=1):
-            if table.get("error"):
-                continue
-            title = _sheet_title(table, i)
-            ws = wb.create_sheet(title=title[:31])
-            _write_table(ws, table, result)
-    else:
-        ws = wb.create_sheet(title="Crosstab")
-        _write_table(ws, result, result)
+    tables = _tables_from_result(result)
+    if not tables:
+        data_ws["A1"] = result.get("error", "No data")
+        _write_index_header(index_ws)
+        index_ws.cell(2, 1, "No tables exported")
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
 
-    if not wb.sheetnames:
-        ws = wb.create_sheet(title="Crosstab")
-        ws["A1"] = result.get("error", "No data")
+    _write_index_header(index_ws)
+    row = 1
+    index_row = 2
+
+    for i, table in enumerate(tables, start=1):
+        title = _table_display_title(table, i)
+        anchor_row = row
+
+        index_cell = index_ws.cell(index_row, 1, title)
+        index_cell.hyperlink = Hyperlink(
+            ref=index_cell.coordinate,
+            location=f"'{DATA_SHEET_NAME}'!A{anchor_row}",
+            display=title,
+        )
+        index_cell.font = Font(color="0563C1", underline="single")
+        index_ws.cell(index_row, 2, f"A{anchor_row}")
+        index_row += 1
+
+        row = _write_table(data_ws, table, result, start_row=row)
+        row += TABLE_GAP_ROWS
+
+    index_ws.column_dimensions["A"].width = 56
+    index_ws.column_dimensions["B"].width = 10
 
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
 
 
-def _sheet_title(table: dict[str, Any], index: int) -> str:
+def _tables_from_result(result: dict[str, Any]) -> list[dict[str, Any]]:
+    if result.get("table_type") == "multi" and result.get("tables"):
+        return [t for t in result["tables"] if not t.get("error")]
+    if result.get("error"):
+        return []
+    return [result]
+
+
+def _write_index_header(ws) -> None:
+    ws.cell(1, 1, "Table of contents").font = Font(bold=True, size=14)
+    ws.cell(1, 2, "Go to").font = Font(bold=True, size=14)
+
+
+def _table_display_title(table: dict[str, Any], index: int) -> str:
     row = table.get("row_variable") or {}
-    code = row.get("code") or f"Table{index}"
-    return str(code)[:31]
+    text = str(row.get("text") or table.get("row_header") or "").strip()
+    code = str(row.get("code") or "").strip()
+    if text and code:
+        return f"{code}: {text}"[:120]
+    if text:
+        return text[:120]
+    if code:
+        return code[:120]
+    return f"Table {index}"
 
 
-def _write_table(ws, table: dict[str, Any], meta: dict[str, Any]) -> None:
-    row = 1
+def _write_table(
+    ws,
+    table: dict[str, Any],
+    meta: dict[str, Any],
+    *,
+    start_row: int = 1,
+) -> int:
+    row = start_row
     row_var = table.get("row_variable") or {}
     ws.cell(row, 1, row_var.get("text") or table.get("row_header") or "Crosstab").font = Font(bold=True)
     row += 1
@@ -60,9 +111,9 @@ def _write_table(ws, table: dict[str, Any], meta: dict[str, Any]) -> None:
         for section in table["sections"]:
             row = _write_distribution_sheet_section(ws, section, meta, start_row=row)
             row += 2
-        return
+        return row
 
-    row = _write_distribution_sheet_section(ws, table, meta, start_row=row)
+    return _write_distribution_sheet_section(ws, table, meta, start_row=row)
 
 
 def _write_distribution_sheet_section(
