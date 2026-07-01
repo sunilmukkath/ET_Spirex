@@ -27,7 +27,7 @@ Rules:
 - billable=true for client work, proposals, fieldwork, analysis, invoicing tied to a study.
 - billable=false for internal admin, HR, training, IT, general FYI, or non-client ops.
 - project_related=true only when clearly about a specific client study or survey.
-- assignee: one of Sunil, Ambika, Shilaja, Ravikumar, Tony, Ravi, Aneena, Shilaja, Palani, Bagya — or null.
+- assignee: one of Sunil, Tony, Ravi, Aneena, Shilaja, Palani, Bagya, Ambika, Venisha, Samara — or null.
 - category: programming | field | research | finance | client_request | general
 
 Return ONLY valid JSON:

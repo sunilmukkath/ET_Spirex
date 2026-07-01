@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     super_admin_email: str = "sunilmukkath@elastictree.com"
     workspace_domain: str = "elastictree.com"
 
+    # Scout task manager — auto-review tasks on an interval
+    task_manager_enabled: bool = True
+    task_manager_interval_hours: float = 3.0
+
     @staticmethod
     def _is_local_url(url: str) -> bool:
         lowered = url.strip().lower()

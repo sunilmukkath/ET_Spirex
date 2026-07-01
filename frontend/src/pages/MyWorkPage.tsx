@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Circle, Briefcase, Loader2, Plus, RefreshCw, Sparkles, User, Users, type LucideIcon } from 'lucide-react'
+import { Circle, Briefcase, Loader2, Plus, RefreshCw, Sparkles, User, Users, Bot, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import {
   api,
@@ -9,15 +9,17 @@ import {
   type GmailProposalBriefHint,
   type GmailTaskDraft,
   type MyTaskRow,
-  type Project,
+  type PmPipelineProject,
+  type TaskManagerAgentBrief,
 } from '../api/client'
 import { TEAM_USERS } from '../auth/AuthContext'
 import { MyWorkEmailPanel } from '../components/mywork/MyWorkEmailPanel'
+import { activePmProjects, pmProjectOptionLabel } from '../lib/pmProjectOptions'
 import { TASK_CATEGORY_LABELS, TASK_STATUS_LABELS } from '../lib/workflowAccess'
 import { ErrorState, LoadingState } from '../components/States'
 
 type EditableDraft = Omit<GmailTaskDraft, 'survey_id'> & {
-  survey_id: number | ''
+  project_id: string | ''
 }
 
 function gmailUrl(messageId: string | null | undefined) {
@@ -25,13 +27,50 @@ function gmailUrl(messageId: string | null | undefined) {
   return `https://mail.google.com/mail/u/0/#inbox/${messageId}`
 }
 
-function TaskCard({ row, showAssignee }: { row: MyTaskRow; showAssignee?: boolean }) {
+function TaskCard({
+  row,
+  showAssignee,
+  reviewable,
+  onAssigned,
+}: {
+  row: MyTaskRow
+  showAssignee?: boolean
+  reviewable?: boolean
+  onAssigned?: () => void
+}) {
   const emailLink = gmailUrl(row.task.gmail_message_id)
+  const isEmail = row.task.source === 'email' || !!row.task.gmail_message_id
+  const [assignee, setAssignee] = useState('')
+  const [assigning, setAssigning] = useState(false)
+
+  async function handleAssign(e: React.FormEvent) {
+    e.preventDefault()
+    if (!assignee.trim()) return
+    setAssigning(true)
+    try {
+      await api.assignUnassignedTask(row.task.id, assignee.trim())
+      onAssigned?.()
+    } finally {
+      setAssigning(false)
+    }
+  }
+
   return (
-    <li className="rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2.5">
+    <li
+      className={`rounded-xl border px-3 py-2.5 ${
+        reviewable && isEmail
+          ? 'border-[var(--et-yellow)]/50 bg-[var(--et-yellow-light)]/30'
+          : 'border-slate-100 bg-slate-50/50'
+      }`}
+    >
       <div className="flex items-start gap-2">
         <Circle size={14} className="mt-0.5 shrink-0 text-slate-400" />
         <div className="min-w-0 flex-1">
+          {reviewable && isEmail && (
+            <span className="mb-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-900">
+              From email — review & assign
+            </span>
+          )}
           {row.personal || row.survey_id == null ? (
             <p className="text-sm font-medium text-[var(--et-navy)]">{row.task.title}</p>
           ) : (
@@ -64,6 +103,26 @@ function TaskCard({ row, showAssignee }: { row: MyTaskRow; showAssignee?: boolea
               Source email
             </a>
           )}
+          {reviewable && isEmail && (
+            <form onSubmit={(e) => void handleAssign(e)} className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                className="et-input min-w-[8rem] py-1 text-xs"
+                value={assignee}
+                onChange={(e) => setAssignee(e.target.value)}
+                required
+              >
+                <option value="">Assign to…</option>
+                {TEAM_USERS.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <button type="submit" className="et-btn-primary py-1 px-2 text-xs" disabled={assigning}>
+                {assigning ? <Loader2 size={12} className="animate-spin" /> : 'Assign'}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </li>
@@ -77,6 +136,8 @@ function TaskBox({
   empty,
   rows,
   showAssignee,
+  reviewable,
+  onAssigned,
   action,
 }: {
   title: string
@@ -85,6 +146,8 @@ function TaskBox({
   empty: string
   rows: MyTaskRow[]
   showAssignee?: boolean
+  reviewable?: boolean
+  onAssigned?: () => void
   action?: ReactNode
 }) {
   return (
@@ -103,7 +166,13 @@ function TaskBox({
         ) : (
           <ul className="space-y-2">
             {rows.map((row) => (
-              <TaskCard key={`${row.personal ? 'p' : row.survey_id}-${row.task.id}`} row={row} showAssignee={showAssignee} />
+              <TaskCard
+                key={`${row.personal ? 'p' : row.survey_id}-${row.task.id}`}
+                row={row}
+                showAssignee={showAssignee}
+                reviewable={reviewable}
+                onAssigned={onAssigned}
+              />
             ))}
           </ul>
         )}
@@ -120,7 +189,8 @@ export function MyWorkPage() {
   const [myTasks, setMyTasks] = useState<MyTaskRow[]>([])
   const [newTasks, setNewTasks] = useState<MyTaskRow[]>([])
   const [teamAssignedTasks, setTeamAssignedTasks] = useState<MyTaskRow[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
+  const [pmProjects, setPmProjects] = useState<PmPipelineProject[]>([])
+  const [pmEnabled, setPmEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [connecting, setConnecting] = useState(false)
@@ -136,22 +206,25 @@ export function MyWorkPage() {
   const [pipelineOwner, setPipelineOwner] = useState('')
   const [banner, setBanner] = useState<string | null>(null)
   const [showNewTask, setShowNewTask] = useState(false)
-  const [taskSurveyId, setTaskSurveyId] = useState<number | ''>('')
+  const [taskProjectId, setTaskProjectId] = useState('')
   const [taskTitle, setTaskTitle] = useState('')
   const [taskAssignee, setTaskAssignee] = useState('')
   const [creatingTask, setCreatingTask] = useState(false)
+  const [taskAgent, setTaskAgent] = useState<TaskManagerAgentBrief | null>(null)
+  const [taskAgentLoading, setTaskAgentLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [statusResult, myTasksResult, newTasksResult, teamTasksResult, projectsResult] =
+      const [statusResult, myTasksResult, newTasksResult, teamTasksResult, pmStatusResult, agentResult] =
         await Promise.allSettled([
           api.getGmailStatus(),
           api.getMyTasks(),
           api.getUnassignedTasks(),
           api.getTeamAssignedTasks(),
-          api.getProjects(),
+          api.getPmStatus(),
+          api.getTaskManagerLastRun(),
         ])
 
       const status =
@@ -163,7 +236,22 @@ export function MyWorkPage() {
       setMyTasks(myTasksResult.status === 'fulfilled' ? myTasksResult.value.tasks : [])
       setNewTasks(newTasksResult.status === 'fulfilled' ? newTasksResult.value.tasks : [])
       setTeamAssignedTasks(teamTasksResult.status === 'fulfilled' ? teamTasksResult.value.tasks : [])
-      setProjects(projectsResult.status === 'fulfilled' ? projectsResult.value.projects : [])
+      const pmOn =
+        pmStatusResult.status === 'fulfilled' &&
+        pmStatusResult.value.enabled &&
+        pmStatusResult.value.ready
+      setPmEnabled(pmOn)
+      if (pmOn) {
+        try {
+          const pipe = await api.getPmPipeline()
+          setPmProjects(pipe.projects)
+        } catch {
+          setPmProjects([])
+        }
+      } else {
+        setPmProjects([])
+      }
+      setTaskAgent(agentResult.status === 'fulfilled' ? agentResult.value : null)
 
       if (status.connected) {
         try {
@@ -252,7 +340,7 @@ export function MyWorkPage() {
       setDrafts(
         result.tasks.map((task) => ({
           ...task,
-          survey_id: task.project_related ? '' : '',
+          project_id: '' as const,
           assignee: task.assignee ?? user?.username ?? null,
         })),
       )
@@ -281,7 +369,7 @@ export function MyWorkPage() {
         tasks: drafts.map((draft) => ({
           title: draft.title.trim(),
           note: draft.note.trim(),
-          survey_id: draft.survey_id === '' ? null : Number(draft.survey_id),
+          project_id: draft.project_id === '' ? null : draft.project_id,
           category: draft.category,
           assignee: draft.assignee ?? (pipelineOwner.trim() || null),
           priority: draft.priority,
@@ -312,7 +400,7 @@ export function MyWorkPage() {
         tasks: drafts.map((draft) => ({
           title: draft.title.trim(),
           note: draft.note.trim(),
-          survey_id: draft.survey_id === '' ? null : Number(draft.survey_id),
+          project_id: draft.project_id === '' ? null : draft.project_id,
           category: draft.category,
           assignee: draft.assignee,
           priority: draft.priority,
@@ -349,12 +437,12 @@ export function MyWorkPage() {
     try {
       await api.createTask({
         title: taskTitle.trim(),
-        survey_id: taskSurveyId === '' ? null : Number(taskSurveyId),
+        project_id: taskProjectId || null,
         assignee: taskAssignee || null,
       })
       setShowNewTask(false)
       setTaskTitle('')
-      setTaskSurveyId('')
+      setTaskProjectId('')
       setBanner('Task created')
       await load()
     } catch (err) {
@@ -363,6 +451,27 @@ export function MyWorkPage() {
       setCreatingTask(false)
     }
   }
+
+  async function handleRunTaskAgent() {
+    setTaskAgentLoading(true)
+    setError(null)
+    try {
+      const result = await api.runTaskManagerAgent({ apply: true })
+      setTaskAgent(result)
+      setBanner(
+        result.applied && result.updates.length > 0
+          ? `Scout updated ${result.updates.length} task(s) and refreshed your queue.`
+          : 'Scout task check complete.',
+      )
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Task agent failed')
+    } finally {
+      setTaskAgentLoading(false)
+    }
+  }
+
+  const opsProjects = useMemo(() => activePmProjects(pmProjects), [pmProjects])
 
   if (loading) return <LoadingState message="Loading your work…" />
 
@@ -395,6 +504,70 @@ export function MyWorkPage() {
 
       {error && <ErrorState message={error} />}
 
+      <section className="rounded-xl border border-[var(--et-teal)]/25 bg-[var(--et-teal-light)]/25 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--et-teal-dark)]">
+              <Bot size={14} />
+              Scout task manager
+            </div>
+            <p className="mt-1 text-sm text-slate-700">
+              Auto-checks every 3 hours — reviews email tasks in the new queue, assigns unassigned work, and flags overdue items.
+            </p>
+            {taskAgent?.next_run_hint && (
+              <p className="mt-1 text-xs text-slate-500">{taskAgent.next_run_hint}</p>
+            )}
+            {taskAgent?.ran_at ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Last run {new Date(taskAgent.ran_at * 1000).toLocaleString()} · {taskAgent.unassigned_count} unassigned
+                {taskAgent.email_review_count > 0 ? ` · ${taskAgent.email_review_count} from email` : ''} ·{' '}
+                {taskAgent.overdue_count} overdue
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="et-btn-primary text-sm"
+            disabled={taskAgentLoading}
+            onClick={() => void handleRunTaskAgent()}
+          >
+            {taskAgentLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            Run check now
+          </button>
+        </div>
+        {taskAgentLoading && (
+          <p className="mt-3 flex items-center gap-2 text-sm text-slate-600">
+            <Loader2 size={14} className="animate-spin" />
+            Scout is reviewing tasks…
+          </p>
+        )}
+        {!taskAgentLoading && taskAgent && (
+          <div className="mt-3 space-y-2 text-sm text-slate-800">
+            <p>{taskAgent.summary}</p>
+            {taskAgent.actions.length > 0 && (
+              <ul className="space-y-1">
+                {taskAgent.actions.map((a) => (
+                  <li key={a}>• {a}</li>
+                ))}
+              </ul>
+            )}
+            {taskAgent.risks.length > 0 && (
+              <ul className="space-y-1 text-amber-800">
+                {taskAgent.risks.map((r) => (
+                  <li key={r}>⚠ {r}</li>
+                ))}
+              </ul>
+            )}
+            {taskAgent.updates.length > 0 && (
+              <p className="text-xs text-slate-500">
+                Applied {taskAgent.updates.length} update(s):{' '}
+                {taskAgent.updates.map((u) => `${u.field}→${u.new_value ?? '—'}`).join(', ')}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <TaskBox
           title="My tasks"
@@ -407,8 +580,10 @@ export function MyWorkPage() {
           title="New tasks"
           icon={Circle}
           count={openNewTasks.length}
-          empty="No unassigned tasks — add one or pick up from email."
+          empty="No unassigned tasks — break down an email below to add one for review."
           rows={openNewTasks}
+          reviewable
+          onAssigned={() => void load()}
           action={
             <button
               type="button"
@@ -530,21 +705,27 @@ export function MyWorkPage() {
                     </label>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="block text-sm">
-                        <span className="mb-1 block text-xs font-medium text-slate-600">Project (optional)</span>
+                        <span className="mb-1 block text-xs font-medium text-slate-600">Operations project (optional)</span>
                         <select
                           className="et-input w-full"
-                          value={draft.survey_id}
+                          value={draft.project_id}
                           onChange={(e) =>
-                            updateDraft(index, { survey_id: e.target.value ? Number(e.target.value) : '' })
+                            updateDraft(index, { project_id: e.target.value })
                           }
+                          disabled={!pmEnabled}
                         >
                           <option value="">General — no project</option>
-                          {projects.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.title} (#{p.id})
+                          {opsProjects.map((p) => (
+                            <option key={p.project_id} value={p.project_id}>
+                              {pmProjectOptionLabel(p)}
                             </option>
                           ))}
                         </select>
+                        {!pmEnabled && (
+                          <p className="mt-1 text-[10px] text-slate-500">
+                            Connect Operations to link tasks to pipeline projects.
+                          </p>
+                        )}
                       </label>
                       <label className="block text-sm">
                         <span className="mb-1 block text-xs font-medium text-slate-600">Assign to</span>
@@ -618,21 +799,22 @@ export function MyWorkPage() {
           >
             <h3 className="text-lg font-semibold text-slate-900">New task</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Link to a study or leave project empty for general work. Leave assignee empty to put it in the New tasks
+              Link to an Operations pipeline project or leave empty for general work. Leave assignee empty to put it in the New tasks
               box.
             </p>
             <div className="mt-4 space-y-3">
               <label className="block text-sm">
-                <span className="mb-1 block text-slate-600">Study / project (optional)</span>
+                <span className="mb-1 block text-slate-600">Operations project (optional)</span>
                 <select
                   className="et-input w-full"
-                  value={taskSurveyId}
-                  onChange={(e) => setTaskSurveyId(e.target.value ? Number(e.target.value) : '')}
+                  value={taskProjectId}
+                  onChange={(e) => setTaskProjectId(e.target.value)}
+                  disabled={!pmEnabled}
                 >
                   <option value="">No project — general task</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.title} (#{p.id})
+                  {opsProjects.map((p) => (
+                    <option key={p.project_id} value={p.project_id}>
+                      {pmProjectOptionLabel(p)}
                     </option>
                   ))}
                 </select>

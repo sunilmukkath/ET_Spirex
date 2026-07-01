@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from app.models.gmail import (
@@ -178,6 +180,42 @@ def _find_project_task(survey_id: int, task_id: str) -> ProjectTask | None:
     return next((t for t in workflow.tasks if t.id == task_id), None)
 
 
+def _resolve_email_assignee(
+    body_assignee: str | None,
+    suggestion,
+) -> str | None:
+    """Leave unassigned when email has no clear owner — new queue for team review."""
+    if body_assignee and str(body_assignee).strip():
+        return str(body_assignee).strip()
+    if suggestion.assignee and getattr(suggestion, "confidence", None) == "high":
+        return suggestion.assignee
+    return None
+
+
+def resolve_message_for_task(gmail_message_id: str) -> dict[str, Any] | None:
+    """Best-effort fetch of the source email for an email-linked task."""
+    from app.services import gmail_store
+
+    links = gmail_store.get_message_links(gmail_message_id)
+    owners = [str(link.get("created_by") or "").strip() for link in links if link.get("created_by")]
+    for owner in owners:
+        try:
+            return _resolve_message(owner, gmail_message_id)
+        except Exception:
+            continue
+    inbox_dir = Path(__file__).resolve().parents[2] / "data" / "gmail"
+    if inbox_dir.is_dir():
+        for path in sorted(inbox_dir.glob("*_inbox.json")):
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            for msg in raw.get("messages") or []:
+                if msg.get("id") == gmail_message_id:
+                    return msg
+    return None
+
+
 def create_task_from_email(
     username: str,
     message_id: str,
@@ -192,10 +230,21 @@ def create_task_from_email(
         raise ValueError("Task title is required.")
     note = (body.note or body.description or suggestion.description or "").strip()
     billable = suggestion.category != "general" if body.billable is None else body.billable
-    assignee = body.assignee or suggestion.assignee or username
+    assignee = _resolve_email_assignee(body.assignee, suggestion)
     email_url = gmail_message_url(message_id)
 
-    if body.survey_id is None:
+    survey_id = body.survey_id
+    if body.project_id and survey_id is None:
+        from app.services.task_pm_resolve import resolve_pm_project_for_task
+
+        project_name, resolved_survey = resolve_pm_project_for_task(body.project_id)
+        if resolved_survey is not None:
+            survey_id = resolved_survey
+        elif project_name:
+            prefix = f"[{project_name}]"
+            note = f"{prefix} {note}".strip() if note else prefix
+
+    if survey_id is None:
         created = create_personal_task(
             username,
             title=title,
@@ -207,6 +256,7 @@ def create_task_from_email(
             billable=billable,
             gmail_message_id=message_id,
             gmail_thread_id=str(message.get("thread_id") or "") or None,
+            default_assignee_to_owner=False,
         )
         gmail_store.link_message_to_task(
             message_id,
@@ -242,22 +292,22 @@ def create_task_from_email(
         billable=billable,
     )
 
-    _, created = add_task_to_workflow(body.survey_id, task, editor=username)
+    _, created = add_task_to_workflow(int(survey_id), task, editor=username)
     gmail_store.link_message_to_task(
         message_id,
-        survey_id=body.survey_id,
+        survey_id=int(survey_id),
         task_id=created.id,
         created_by=username,
         personal=False,
     )
 
     return CreateTaskFromEmailResponse(
-        survey_id=body.survey_id,
+        survey_id=int(survey_id),
         task_id=created.id,
         task_title=created.title,
         assignee=created.assignee,
         gmail_message_id=message_id,
-        survey_title=survey_title or _survey_title_for(body.survey_id),
+        survey_title=survey_title or _survey_title_for(int(survey_id)),
         personal=False,
         billable=created.billable,
         email_url=email_url,
@@ -279,6 +329,7 @@ def create_tasks_from_email_batch(
                 message_id,
                 CreateTaskFromEmailRequest(
                     survey_id=item.survey_id,
+                    project_id=item.project_id,
                     title=item.title,
                     note=item.note,
                     category=item.category,

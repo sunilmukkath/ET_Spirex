@@ -20,7 +20,7 @@ _init_lock = threading.Lock()
 _db_ready = False
 _db_init_error: str | None = None
 
-DEFAULT_TEAM = ("Sunil", "Ambika", "Shilaja", "Ravikumar")
+DEFAULT_TEAM = ("Sunil", "Ambika", "Shilaja", "Ravikumar", "Venisha", "Samara")
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,7 @@ def _apply_schema_patches(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS fiscal_year VARCHAR(40)"))
         conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS billing_month VARCHAR(40)"))
         conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_value_inr NUMERIC(14, 2)"))
+        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS linked_survey_ids JSONB DEFAULT '[]'::jsonb"))
 
 
 def _seed_team_members(engine: Engine) -> None:

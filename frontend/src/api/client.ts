@@ -1452,6 +1452,7 @@ export interface PmProject {
   owner_id: string | null
   owner_name: string | null
   limesurvey_survey_id: number | null
+  linked_survey_ids: number[]
   project_code: string | null
   fiscal_year: string | null
   billing_month: string | null
@@ -1561,7 +1562,9 @@ export interface PmSurveyLink {
   client_name: string | null
   stage: string
   limesurvey_survey_id: number | null
+  linked_survey_ids: number[]
   survey_url: string | null
+  survey_urls: string[]
 }
 
 export interface AcctDashboard {
@@ -1572,6 +1575,9 @@ export interface AcctDashboard {
   cash_balance: number
   invoice_count: number
   bill_count: number
+  estimate_count: number
+  sales_receipt_count: number
+  purchase_order_count: number
   contact_count: number
   account_count: number
 }
@@ -1628,6 +1634,103 @@ export interface AcctPayment {
   payment_date?: string | null
   payment_mode?: string | null
   reference_number?: string | null
+  sales_invoice_id?: string | null
+  bill_id?: string | null
+}
+
+export interface AcctDocumentLine {
+  description: string
+  quantity: number
+  rate: number
+  tax_percent?: number
+}
+
+export interface AcctEstimate {
+  estimate_id: string
+  estimate_number: string
+  contact_name?: string | null
+  status: string
+  estimate_date?: string | null
+  expiry_date?: string | null
+  total: number
+  currency: string
+}
+
+export interface AcctSalesReceipt {
+  sales_receipt_id: string
+  receipt_number: string
+  contact_name?: string | null
+  status: string
+  receipt_date?: string | null
+  payment_mode?: string | null
+  total: number
+  currency: string
+}
+
+export interface AcctPurchaseOrder {
+  purchase_order_id: string
+  po_number: string
+  contact_name?: string | null
+  status: string
+  po_date?: string | null
+  expected_date?: string | null
+  total: number
+  currency: string
+}
+
+export interface AcctAgingBucket {
+  bucket: string
+  label: string
+  amount: number
+  count: number
+}
+
+export interface AcctAgingLine {
+  document_id: string
+  document_number: string
+  contact_name?: string | null
+  document_date?: string | null
+  due_date?: string | null
+  days_overdue: number
+  balance: number
+  bucket: string
+}
+
+export interface AcctAgingReport {
+  buckets: AcctAgingBucket[]
+  lines: AcctAgingLine[]
+  total_outstanding: number
+}
+
+export interface AcctRevenueByCustomer {
+  contact_id?: string | null
+  contact_name: string
+  invoiced_mtd: number
+  invoiced_ytd: number
+  collected_mtd: number
+  collected_ytd: number
+  outstanding: number
+}
+
+export interface AcctRevenueReport {
+  invoiced_mtd: number
+  invoiced_ytd: number
+  collected_mtd: number
+  collected_ytd: number
+  sales_receipts_mtd: number
+  sales_receipts_ytd: number
+  expense_mtd: number
+  expense_ytd: number
+  net_cash_mtd: number
+  outstanding_receivables: number
+  outstanding_payables: number
+  by_customer: AcctRevenueByCustomer[]
+}
+
+export interface AcctSummaryReports {
+  receivables_aging: AcctAgingReport
+  payables_aging: AcctAgingReport
+  revenue: AcctRevenueReport
 }
 
 export interface ZohoImportModule {
@@ -1658,6 +1761,7 @@ export interface PmPipelineProject extends PmProject {
   has_survey_link: boolean
   data_collection_status: string
   data_collection_pct: number | null
+  open_task_count: number
 }
 
 export interface PmPipelineOverview {
@@ -1736,6 +1840,22 @@ export interface PmAgentBrief {
   summary: string
   actions: string[]
   risks: string[]
+}
+
+export interface TaskManagerAgentBrief extends PmAgentBrief {
+  ran_at: number
+  applied: boolean
+  unassigned_count: number
+  overdue_count: number
+  stale_count: number
+  email_review_count: number
+  next_run_hint?: string | null
+  updates: Array<{
+    task_id: string
+    field: string
+    new_value?: string | null
+    reason: string
+  }>
 }
 
 export interface PmAgentDraftSection {
@@ -1838,6 +1958,7 @@ export const api = {
     title: string
     description?: string
     survey_id?: number | null
+    project_id?: string | null
     assignee?: string | null
     category?: string
     priority?: string
@@ -1852,6 +1973,20 @@ export const api = {
     fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/tasks/unassigned', undefined, BOOTSTRAP_TIMEOUT_MS),
   getTeamAssignedTasks: () =>
     fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/tasks/assigned', undefined, BOOTSTRAP_TIMEOUT_MS),
+  runTaskManagerAgent: (body?: { apply?: boolean }) =>
+    fetchJson<TaskManagerAgentBrief>('/api/agents/task-manager', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? { apply: true }),
+    }),
+  getTaskManagerLastRun: () =>
+    fetchJson<TaskManagerAgentBrief | null>('/api/agents/task-manager/last-run', undefined, BOOTSTRAP_TIMEOUT_MS),
+  assignUnassignedTask: (taskId: string, assignee: string) =>
+    fetchJson<{ task: MyTaskRow }>(`/api/tasks/${encodeURIComponent(taskId)}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignee }),
+    }),
   getUserPreferences: () =>
     fetchJson<UserPreferences>('/api/me/preferences', undefined, BOOTSTRAP_TIMEOUT_MS),
   updateUserPreferences: (body: Partial<UserPreferences>) =>
@@ -2693,11 +2828,11 @@ export const api = {
     fetchJson<PmPipelineOverview>('/api/pm/pipeline', undefined, BOOTSTRAP_TIMEOUT_MS),
   listPmSurveyLinks: () =>
     fetchJson<PmSurveyLink[]>('/api/pm/survey-links', undefined, BOOTSTRAP_TIMEOUT_MS),
-  linkPmSurvey: (projectId: string, limesurvey_survey_id: number | null) =>
+  linkPmSurvey: (projectId: string, limesurvey_survey_id: number | null, action: 'add' | 'replace' | 'remove' | 'clear' = 'add') =>
     fetchJson<PmProject>(`/api/pm/projects/${projectId}/link-survey`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limesurvey_survey_id }),
+      body: JSON.stringify({ limesurvey_survey_id, action }),
     }),
   listPmClients: () => fetchJson<PmClient[]>('/api/pm/clients', undefined, BOOTSTRAP_TIMEOUT_MS),
   createPmClient: (body: {
@@ -2888,6 +3023,7 @@ export const api = {
         title: string
         note?: string
         survey_id?: number | null
+        project_id?: string | null
         category?: TaskCategory
         assignee?: string | null
         priority?: TaskPriority
@@ -2927,6 +3063,7 @@ export const api = {
         title: string
         note?: string
         survey_id?: number | null
+        project_id?: string | null
         category?: TaskCategory
         assignee?: string | null
         priority?: TaskPriority
@@ -3045,6 +3182,55 @@ export const api = {
     fetchJson<AcctBill[]>('/api/accounting/bills', undefined, BOOTSTRAP_TIMEOUT_MS),
   listAcctPayments: () =>
     fetchJson<AcctPayment[]>('/api/accounting/payments', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listAcctEstimates: () =>
+    fetchJson<AcctEstimate[]>('/api/accounting/estimates', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listAcctSalesReceipts: () =>
+    fetchJson<AcctSalesReceipt[]>('/api/accounting/sales-receipts', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listAcctPurchaseOrders: () =>
+    fetchJson<AcctPurchaseOrder[]>('/api/accounting/purchase-orders', undefined, BOOTSTRAP_TIMEOUT_MS),
+  getAcctSummaryReports: () =>
+    fetchJson<AcctSummaryReports>('/api/accounting/reports/summary', undefined, BOOTSTRAP_TIMEOUT_MS),
+  createAcctContact: (body: {
+    contact_type: string
+    display_name: string
+    company_name?: string
+    email?: string
+    phone?: string
+  }) =>
+    fetchJson<AcctContact>('/api/accounting/contacts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  createAcctInvoice: (body: Record<string, unknown>) =>
+    fetchJson<AcctSalesInvoice>('/api/accounting/invoices', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  createAcctBill: (body: Record<string, unknown>) =>
+    fetchJson<AcctBill>('/api/accounting/bills', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  createAcctEstimate: (body: Record<string, unknown>) =>
+    fetchJson<AcctEstimate>('/api/accounting/estimates', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  createAcctSalesReceipt: (body: Record<string, unknown>) =>
+    fetchJson<AcctSalesReceipt>('/api/accounting/sales-receipts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  createAcctPurchaseOrder: (body: Record<string, unknown>) =>
+    fetchJson<AcctPurchaseOrder>('/api/accounting/purchase-orders', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  createAcctPayment: (body: Record<string, unknown>) =>
+    fetchJson<AcctPayment>('/api/accounting/payments', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   listZohoModules: () =>
     fetchJson<ZohoImportModule[]>('/api/accounting/zoho/modules', undefined, BOOTSTRAP_TIMEOUT_MS),
   previewZohoImport: async (module: string, file: File) => {

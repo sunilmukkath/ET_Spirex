@@ -377,6 +377,7 @@ def add_task_to_workflow(
 
 def create_manual_task(username: str, body: dict[str, Any]) -> dict[str, Any]:
     from app.services.personal_tasks_store import create_personal_task
+    from app.services.task_pm_resolve import resolve_pm_project_for_task
 
     title = str(body.get("title") or "").strip()
     if not title:
@@ -384,6 +385,16 @@ def create_manual_task(username: str, body: dict[str, Any]) -> dict[str, Any]:
     assignee_raw = body.get("assignee")
     assignee = str(assignee_raw).strip() if assignee_raw else None
     survey_id = body.get("survey_id")
+    project_id = body.get("project_id")
+    description = str(body.get("description") or "").strip()
+
+    if project_id and survey_id is None:
+        project_name, resolved_survey = resolve_pm_project_for_task(project_id)
+        if resolved_survey is not None:
+            survey_id = resolved_survey
+        elif project_name:
+            prefix = f"[{project_name}]"
+            description = f"{prefix} {description}".strip() if description else prefix
 
     if survey_id is not None:
         task = ProjectTask(
@@ -421,6 +432,77 @@ def create_manual_task(username: str, body: dict[str, Any]) -> dict[str, Any]:
         "project_code": "",
         "personal": True,
     }
+
+
+def patch_project_task(
+    survey_id: int,
+    task_id: str,
+    *,
+    editor: str,
+    **fields: Any,
+) -> ProjectWorkflow:
+    workflow = get_project_workflow(survey_id)
+    tasks: list[ProjectTask] = []
+    found = False
+    for task in workflow.tasks:
+        if task.id != task_id:
+            tasks.append(task)
+            continue
+        found = True
+        data = task.model_dump()
+        for key, value in fields.items():
+            if key in data and value is not None:
+                data[key] = value
+        data["updated_at"] = time.time()
+        tasks.append(ProjectTask(**data))
+    if not found:
+        raise ValueError("Task not found")
+    data = workflow.model_dump()
+    data["tasks"] = [t.model_dump() for t in tasks]
+    return set_project_workflow(survey_id, ProjectWorkflow(**data), editor=editor)
+
+
+def assign_unassigned_task(task_id: str, assignee: str, *, editor: str) -> dict[str, Any]:
+    """Assign an open unassigned task (personal or project workflow)."""
+    from app.services.personal_tasks_store import _iter_all_personal_tasks, patch_personal_task
+
+    name = assignee.strip()
+    if not name:
+        raise ValueError("Assignee is required")
+    tid = task_id.strip()
+    if not tid:
+        raise ValueError("Task id is required")
+
+    for _owner, task in _iter_all_personal_tasks():
+        if task.id != tid or task.status == "done" or (task.assignee or "").strip():
+            continue
+        updated = patch_personal_task(tid, editor=editor, assignee=name)
+        if updated:
+            return {
+                "survey_id": None,
+                "task": updated.model_dump(),
+                "phase": None,
+                "client_name": "",
+                "project_code": "",
+                "personal": True,
+            }
+
+    if not _DATA_DIR.is_dir():
+        raise ValueError("Task not found or already assigned")
+    for path in sorted(_DATA_DIR.glob("*.json")):
+        try:
+            survey_id = int(path.stem)
+        except ValueError:
+            continue
+        workflow = get_project_workflow(survey_id)
+        for task in workflow.tasks:
+            if task.id != tid or task.status == "done" or (task.assignee or "").strip():
+                continue
+            saved = patch_project_task(survey_id, tid, editor=editor, assignee=name)
+            saved_task = next(t for t in saved.tasks if t.id == tid)
+            return _task_row(survey_id, saved, saved_task)
+
+    raise ValueError("Task not found or already assigned")
 
 
 def list_my_tasks(username: str) -> list[dict[str, Any]]:
@@ -476,6 +558,21 @@ def list_unassigned_tasks() -> list[dict[str, Any]]:
         )
     )
     return out
+
+
+def count_open_tasks_for_surveys(survey_ids: list[int]) -> dict[int, int]:
+    """Count open (non-done) workflow tasks for each of the given survey ids."""
+    counts: dict[int, int] = {}
+    for sid in survey_ids:
+        try:
+            survey_id = int(sid)
+        except (TypeError, ValueError):
+            continue
+        if survey_id in counts:
+            continue
+        workflow = get_project_workflow(survey_id)
+        counts[survey_id] = sum(1 for task in workflow.tasks if task.status != "done")
+    return counts
 
 
 def list_team_assigned_tasks(viewer_username: str | None) -> list[dict[str, Any]]:

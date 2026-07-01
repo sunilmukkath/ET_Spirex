@@ -5,7 +5,9 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-VALID_USERS = frozenset({"Sunil", "Tony", "Ravi", "Aneena", "Shilaja", "Palani", "Bagya"})
+VALID_USERS = frozenset(
+    {"Sunil", "Tony", "Ravi", "Aneena", "Shilaja", "Palani", "Bagya", "Ambika", "Venisha", "Samara"}
+)
 SESSION_TTL_SECONDS = 60 * 60 * 12  # 12 hours
 
 

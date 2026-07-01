@@ -91,6 +91,7 @@ class PmProjectOut(BaseModel):
     owner_id: UUID | None
     owner_name: str | None = None
     limesurvey_survey_id: int | None
+    linked_survey_ids: list[int] = Field(default_factory=list)
     project_code: str | None = None
     fiscal_year: str | None = None
     billing_month: str | None = None
@@ -325,11 +326,14 @@ class SurveyLinkOut(BaseModel):
     client_name: str | None
     stage: str
     limesurvey_survey_id: int | None
+    linked_survey_ids: list[int] = Field(default_factory=list)
     survey_url: str | None = None
+    survey_urls: list[str] = Field(default_factory=list)
 
 
 class LinkSurveyRequest(BaseModel):
     limesurvey_survey_id: int | None = None
+    action: Literal["add", "replace", "remove", "clear"] = "add"
 
 
 # --- Marketing ---
@@ -371,6 +375,7 @@ class PipelineProjectOut(PmProjectOut):
     has_survey_link: bool = False
     data_collection_status: str = ""
     data_collection_pct: float | None = None
+    open_task_count: int = 0
 
 
 class PipelineOverview(BaseModel):

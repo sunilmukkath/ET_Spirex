@@ -175,7 +175,7 @@ def project_import_template_xlsx() -> bytes:
         "project_type — quant | qual | mixed (default quant)",
         "engagement_type — tracking | ad-hoc (default ad-hoc)",
         "stage — Proposal, Fieldwork/Data Collection, Analysis, etc.",
-        "owner_name — Sunil, Ambika, Shilaja, or Ravikumar",
+        "owner_name — Sunil, Ambika, Shilaja, Ravikumar, Venisha, or Samara",
         "start_date / target_close_date — YYYY-MM-DD",
         "budget_estimate — number",
         "project_value_inr — finance project value in INR; also used as budget_estimate if budget_estimate is blank",
@@ -554,9 +554,9 @@ def _sync_project_from_row(
 
 
 def _survey_already_linked(session: Session, survey_id: int) -> str | None:
-    row = session.scalar(select(Project).where(Project.limesurvey_survey_id == survey_id))
-    if row:
-        return row.project_name
+    for row in session.scalars(select(Project)).all():
+        if survey_id in pm_ops_store.linked_survey_ids_for_project(row):
+            return row.project_name
     return None
 
 

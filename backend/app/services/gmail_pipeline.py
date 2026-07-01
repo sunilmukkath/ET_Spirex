@@ -145,6 +145,8 @@ def create_pipeline_from_email(
                     assignee=_normalize_team_member(item.assignee, owner_name),
                     priority=item.priority,
                     billable=item.billable,
+                    project_id=UUID(str(project.project_id)),
+                    survey_id=item.survey_id,
                 ),
             )
             tasks_created += 1

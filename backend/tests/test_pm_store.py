@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.models import Base, TeamMember
 from app.db.session import reset_engine_for_tests
 from app.models.pm import FieldworkEntryCreate, PmProjectCreate
-from app.services import pm_store
+from app.services import pm_ops_store, pm_store
 
 
 @pytest.fixture()
@@ -76,6 +76,33 @@ def test_create_project_and_fieldwork(pm_session):
     assert dashboard.pct_complete == 15.0
     assert len(dashboard.quota_cells) == 1
     assert dashboard.quota_cells[0].cumulative_completes == 35
+
+
+def test_project_can_capture_multiple_survey_links(pm_session):
+    project = pm_store.create_project(
+        pm_session,
+        PmProjectCreate(
+            project_name="Three Visit Study",
+            project_type="quant",
+            engagement_type="tracking",
+            owner_name="Sunil",
+        ),
+    )
+
+    pm_ops_store.link_survey(pm_session, UUID(str(project.project_id)), 101)
+    pm_ops_store.link_survey(pm_session, UUID(str(project.project_id)), 102)
+    pm_ops_store.link_survey(pm_session, UUID(str(project.project_id)), 103)
+
+    refreshed = pm_store.get_project(pm_session, UUID(str(project.project_id)))
+    assert refreshed is not None
+    out = pm_store.project_to_out(refreshed)
+    assert out.limesurvey_survey_id == 101
+    assert out.linked_survey_ids == [101, 102, 103]
+
+    pm_ops_store.link_survey(pm_session, UUID(str(project.project_id)), 102, action="remove")
+    refreshed = pm_store.get_project(pm_session, UUID(str(project.project_id)))
+    assert refreshed is not None
+    assert pm_store.project_to_out(refreshed).linked_survey_ids == [101, 103]
 
 
 def test_same_day_fieldwork_upsert(pm_session):

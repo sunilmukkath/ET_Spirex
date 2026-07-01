@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -77,6 +78,7 @@ class CreateTaskFromEmailItem(BaseModel):
     title: str
     note: str | None = None
     survey_id: int | None = None
+    project_id: UUID | None = None
     category: TaskCategory | None = None
     assignee: str | None = None
     priority: TaskPriority | None = None
@@ -107,6 +109,7 @@ class CreatePipelineFromEmailResponse(BaseModel):
 
 class CreateTaskFromEmailRequest(BaseModel):
     survey_id: int | None = None
+    project_id: UUID | None = None
     title: str | None = None
     description: str | None = None
     note: str | None = None

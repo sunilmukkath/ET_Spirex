@@ -180,3 +180,46 @@ def get_personal_task(username: str, task_id: str) -> ProjectTask | None:
             except Exception:
                 return None
     return None
+
+
+def find_personal_task_owner(task_id: str) -> str | None:
+    if not _DATA_DIR.is_dir():
+        return None
+    for path in sorted(_DATA_DIR.glob("*.json")):
+        owner = path.stem
+        for raw in _load(owner):
+            if str(raw.get("id")) == task_id:
+                return owner
+    return None
+
+
+def patch_personal_task(
+    task_id: str,
+    *,
+    editor: str,
+    **fields: Any,
+) -> ProjectTask | None:
+    owner = find_personal_task_owner(task_id)
+    if not owner:
+        return None
+    rows = _load(owner)
+    updated: ProjectTask | None = None
+    for i, raw in enumerate(rows):
+        if str(raw.get("id")) != task_id:
+            continue
+        try:
+            task = ProjectTask.model_validate(raw)
+        except Exception:
+            return None
+        data = task.model_dump()
+        for key, value in fields.items():
+            if key in data and value is not None:
+                data[key] = value
+        data["updated_at"] = time.time()
+        updated = ProjectTask(**data)
+        rows[i] = updated.model_dump()
+        break
+    if not updated:
+        return None
+    _save(owner, rows)
+    return updated

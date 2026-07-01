@@ -1,4 +1,5 @@
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -120,6 +121,7 @@ class CreateTaskRequest(BaseModel):
     title: str
     description: str = ""
     survey_id: int | None = None
+    project_id: UUID | None = None
     assignee: str | None = None
     category: TaskCategory = "general"
     priority: TaskPriority = "medium"

@@ -15,7 +15,18 @@ import { canAccessModule as checkModule, type AppModule } from '../lib/appModule
 const STORAGE_KEY = 'et_scout_auth'
 const LEGACY_STORAGE_KEY = 'et_spirex_auth'
 
-export const TEAM_USERS = ['Sunil', 'Tony', 'Ravi', 'Aneena', 'Shilaja', 'Palani', 'Bagya'] as const
+export const TEAM_USERS = [
+  'Sunil',
+  'Tony',
+  'Ravi',
+  'Aneena',
+  'Shilaja',
+  'Palani',
+  'Bagya',
+  'Ambika',
+  'Venisha',
+  'Samara',
+] as const
 
 interface AuthState {
   username: string

@@ -93,6 +93,7 @@ class Project(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("team_members.member_id", ondelete="SET NULL")
     )
     limesurvey_survey_id: Mapped[int | None] = mapped_column(Integer, unique=True)
+    linked_survey_ids: Mapped[list[Any]] = mapped_column(_json_type(), default=list)
     project_code: Mapped[str | None] = mapped_column(String(80))
     fiscal_year: Mapped[str | None] = mapped_column(String(40))
     billing_month: Mapped[str | None] = mapped_column(String(40))
@@ -580,6 +581,165 @@ class AcctPayment(Base, TimestampMixin):
     reference_number: Mapped[str | None] = mapped_column(String(80))
     allocations: Mapped[dict[str, Any] | None] = mapped_column(_json_type())
     zoho_payment_id: Mapped[str | None] = mapped_column(String(80))
+
+
+class AcctEstimate(Base, TimestampMixin):
+    __tablename__ = "acct_estimates"
+
+    estimate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("acct_organizations.org_id", ondelete="CASCADE"), nullable=False
+    )
+    estimate_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("acct_contacts.contact_id", ondelete="SET NULL")
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.project_id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
+    estimate_date: Mapped[date | None] = mapped_column(Date)
+    expiry_date: Mapped[date | None] = mapped_column(Date)
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    lines: Mapped[list["AcctEstimateLine"]] = relationship(
+        back_populates="estimate", cascade="all, delete-orphan"
+    )
+
+
+class AcctEstimateLine(Base, TimestampMixin):
+    __tablename__ = "acct_estimate_lines"
+
+    line_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    estimate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("acct_estimates.estimate_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("acct_accounts.account_id", ondelete="SET NULL")
+    )
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("1"), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    tax_percent: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("0"), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+
+    estimate: Mapped[AcctEstimate] = relationship(back_populates="lines")
+
+
+class AcctSalesReceipt(Base, TimestampMixin):
+    __tablename__ = "acct_sales_receipts"
+
+    sales_receipt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("acct_organizations.org_id", ondelete="CASCADE"), nullable=False
+    )
+    receipt_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("acct_contacts.contact_id", ondelete="SET NULL")
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.project_id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(String(20), default="paid", nullable=False)
+    receipt_date: Mapped[date | None] = mapped_column(Date)
+    payment_mode: Mapped[str | None] = mapped_column(String(40))
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    lines: Mapped[list["AcctSalesReceiptLine"]] = relationship(
+        back_populates="receipt", cascade="all, delete-orphan"
+    )
+
+
+class AcctSalesReceiptLine(Base, TimestampMixin):
+    __tablename__ = "acct_sales_receipt_lines"
+
+    line_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    sales_receipt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("acct_sales_receipts.sales_receipt_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("acct_accounts.account_id", ondelete="SET NULL")
+    )
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("1"), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    tax_percent: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("0"), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+
+    receipt: Mapped[AcctSalesReceipt] = relationship(back_populates="lines")
+
+
+class AcctPurchaseOrder(Base, TimestampMixin):
+    __tablename__ = "acct_purchase_orders"
+
+    purchase_order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("acct_organizations.org_id", ondelete="CASCADE"), nullable=False
+    )
+    po_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("acct_contacts.contact_id", ondelete="SET NULL")
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.project_id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(String(20), default="open", nullable=False)
+    po_date: Mapped[date | None] = mapped_column(Date)
+    expected_date: Mapped[date | None] = mapped_column(Date)
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    lines: Mapped[list["AcctPurchaseOrderLine"]] = relationship(
+        back_populates="purchase_order", cascade="all, delete-orphan"
+    )
+
+
+class AcctPurchaseOrderLine(Base, TimestampMixin):
+    __tablename__ = "acct_purchase_order_lines"
+
+    line_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    purchase_order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("acct_purchase_orders.purchase_order_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("acct_accounts.account_id", ondelete="SET NULL")
+    )
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("1"), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    tax_percent: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("0"), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+
+    purchase_order: Mapped[AcctPurchaseOrder] = relationship(back_populates="lines")
 
 
 class AcctJournalEntry(Base, TimestampMixin):

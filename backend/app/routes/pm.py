@@ -405,7 +405,12 @@ def pm_link_survey(
     session: Session = Depends(get_pm_db),
 ):
     try:
-        row = pm_ops_store.link_survey(session, project_id, body.limesurvey_survey_id)
+        row = pm_ops_store.link_survey(
+            session,
+            project_id,
+            body.limesurvey_survey_id,
+            action=body.action,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not row:

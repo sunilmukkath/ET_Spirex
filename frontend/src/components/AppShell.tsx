@@ -17,14 +17,6 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
     keywords: ['landing', 'dashboard', 'start', 'hub'],
   },
   {
-    id: 'app-quantitative',
-    label: 'Quantitative',
-    description: 'LimeSurvey studies, programming, survey links, and Survey Studio',
-    group: 'App',
-    href: '/quantitative',
-    keywords: ['home', 'surveys', 'limesurvey', 'quant', 'studio', 'programming'],
-  },
-  {
     id: 'app-my-work',
     label: 'My work',
     description: 'Assigned tasks and Gmail inbox → create tasks',
@@ -39,6 +31,14 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
     group: 'App',
     href: '/operations',
     keywords: ['pm', 'pipeline', 'finance', 'crm', 'marketing', 'proposal', 'clients'],
+  },
+  {
+    id: 'app-quantitative',
+    label: 'Quantitative',
+    description: 'LimeSurvey studies, programming, survey links, and Survey Studio',
+    group: 'App',
+    href: '/quantitative',
+    keywords: ['home', 'surveys', 'limesurvey', 'quant', 'studio', 'programming'],
   },
   {
     id: 'app-accounting',
@@ -75,14 +75,14 @@ type NavLinkDef = {
 
 const NAV_LINKS: NavLinkDef[] = [
   { module: 'home', label: 'Home', icon: Home, isActive: (p) => p === '/home' },
+  { module: 'my_work', label: 'My work', icon: ClipboardList, isActive: (p) => p === '/my-work' },
+  { module: 'operations', label: 'Operations', icon: LayoutGrid, isActive: (p) => p === '/operations' },
   {
     module: 'quantitative',
     label: 'Quantitative',
     icon: BarChart3,
     isActive: (_, isQuantitative) => isQuantitative,
   },
-  { module: 'my_work', label: 'My work', icon: ClipboardList, isActive: (p) => p === '/my-work' },
-  { module: 'operations', label: 'Operations', icon: LayoutGrid, isActive: (p) => p === '/operations' },
   { module: 'accounting', label: 'Accounting', icon: Landmark, isActive: (p) => p === '/accounting' },
   { module: 'team', label: 'Team', icon: Users, isActive: (p) => p === '/team' },
   { module: 'settings', label: 'Settings', icon: Settings, isActive: (p) => p === '/settings' },

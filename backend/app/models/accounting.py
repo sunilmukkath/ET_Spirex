@@ -164,6 +164,8 @@ class AcctPaymentCreate(BaseModel):
     payment_date: date | None = None
     payment_mode: str | None = None
     reference_number: str | None = None
+    sales_invoice_id: UUID | None = None
+    bill_id: UUID | None = None
 
 
 class AcctPaymentOut(BaseModel):
@@ -175,8 +177,199 @@ class AcctPaymentOut(BaseModel):
     payment_date: date | None = None
     payment_mode: str | None = None
     reference_number: str | None = None
+    sales_invoice_id: UUID | None = None
+    bill_id: UUID | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AcctDocumentLineCreate(BaseModel):
+    description: str
+    quantity: Decimal = Decimal("1")
+    rate: Decimal
+    tax_percent: Decimal = Decimal("0")
+    account_id: UUID | None = None
+
+
+class AcctEstimateCreate(BaseModel):
+    estimate_number: str
+    contact_id: UUID | None = None
+    project_id: UUID | None = None
+    estimate_date: date | None = None
+    expiry_date: date | None = None
+    currency: str = "INR"
+    notes: str | None = None
+    lines: list[AcctDocumentLineCreate] = Field(default_factory=list)
+
+
+class AcctEstimateLineOut(BaseModel):
+    line_id: UUID
+    description: str
+    quantity: Decimal
+    rate: Decimal
+    tax_percent: Decimal
+    line_total: Decimal
+    account_id: UUID | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AcctEstimateOut(BaseModel):
+    estimate_id: UUID
+    estimate_number: str
+    contact_id: UUID | None = None
+    contact_name: str | None = None
+    project_id: UUID | None = None
+    status: str
+    estimate_date: date | None = None
+    expiry_date: date | None = None
+    currency: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    notes: str | None = None
+    lines: list[AcctEstimateLineOut] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class AcctSalesReceiptCreate(BaseModel):
+    receipt_number: str
+    contact_id: UUID | None = None
+    project_id: UUID | None = None
+    receipt_date: date | None = None
+    payment_mode: str | None = None
+    currency: str = "INR"
+    notes: str | None = None
+    lines: list[AcctDocumentLineCreate] = Field(default_factory=list)
+
+
+class AcctSalesReceiptLineOut(BaseModel):
+    line_id: UUID
+    description: str
+    quantity: Decimal
+    rate: Decimal
+    tax_percent: Decimal
+    line_total: Decimal
+    account_id: UUID | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AcctSalesReceiptOut(BaseModel):
+    sales_receipt_id: UUID
+    receipt_number: str
+    contact_id: UUID | None = None
+    contact_name: str | None = None
+    project_id: UUID | None = None
+    status: str
+    receipt_date: date | None = None
+    payment_mode: str | None = None
+    currency: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    notes: str | None = None
+    lines: list[AcctSalesReceiptLineOut] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class AcctPurchaseOrderCreate(BaseModel):
+    po_number: str
+    contact_id: UUID | None = None
+    project_id: UUID | None = None
+    po_date: date | None = None
+    expected_date: date | None = None
+    currency: str = "INR"
+    notes: str | None = None
+    lines: list[AcctDocumentLineCreate] = Field(default_factory=list)
+
+
+class AcctPurchaseOrderLineOut(BaseModel):
+    line_id: UUID
+    description: str
+    quantity: Decimal
+    rate: Decimal
+    tax_percent: Decimal
+    line_total: Decimal
+    account_id: UUID | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AcctPurchaseOrderOut(BaseModel):
+    purchase_order_id: UUID
+    po_number: str
+    contact_id: UUID | None = None
+    contact_name: str | None = None
+    project_id: UUID | None = None
+    status: str
+    po_date: date | None = None
+    expected_date: date | None = None
+    currency: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    notes: str | None = None
+    lines: list[AcctPurchaseOrderLineOut] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class AcctAgingBucket(BaseModel):
+    bucket: str
+    label: str
+    amount: Decimal
+    count: int
+
+
+class AcctAgingLine(BaseModel):
+    document_id: UUID
+    document_number: str
+    contact_name: str | None = None
+    document_date: date | None = None
+    due_date: date | None = None
+    days_overdue: int
+    balance: Decimal
+    bucket: str
+
+
+class AcctAgingReport(BaseModel):
+    buckets: list[AcctAgingBucket]
+    lines: list[AcctAgingLine]
+    total_outstanding: Decimal
+
+
+class AcctRevenueByCustomer(BaseModel):
+    contact_id: UUID | None = None
+    contact_name: str
+    invoiced_mtd: Decimal
+    invoiced_ytd: Decimal
+    collected_mtd: Decimal
+    collected_ytd: Decimal
+    outstanding: Decimal
+
+
+class AcctRevenueReport(BaseModel):
+    invoiced_mtd: Decimal
+    invoiced_ytd: Decimal
+    collected_mtd: Decimal
+    collected_ytd: Decimal
+    sales_receipts_mtd: Decimal
+    sales_receipts_ytd: Decimal
+    expense_mtd: Decimal
+    expense_ytd: Decimal
+    net_cash_mtd: Decimal
+    outstanding_receivables: Decimal
+    outstanding_payables: Decimal
+    by_customer: list[AcctRevenueByCustomer]
+
+
+class AcctSummaryReports(BaseModel):
+    receivables_aging: AcctAgingReport
+    payables_aging: AcctAgingReport
+    revenue: AcctRevenueReport
 
 
 class AcctDashboard(BaseModel):
@@ -187,6 +380,9 @@ class AcctDashboard(BaseModel):
     cash_balance: Decimal
     invoice_count: int
     bill_count: int
+    estimate_count: int = 0
+    sales_receipt_count: int = 0
+    purchase_order_count: int = 0
     contact_count: int
     account_count: int
 

@@ -9,9 +9,9 @@ export type AppModule =
 
 export const APP_MODULES: AppModule[] = [
   'home',
-  'quantitative',
   'my_work',
   'operations',
+  'quantitative',
   'accounting',
   'team',
   'settings',
@@ -52,8 +52,8 @@ export type GlobalRole = 'admin' | 'manager' | 'member'
 
 export const DEFAULT_MODULES_BY_ROLE: Record<GlobalRole, AppModule[]> = {
   admin: [...APP_MODULES],
-  manager: ['home', 'quantitative', 'my_work', 'operations', 'team', 'settings'],
-  member: ['home', 'quantitative', 'my_work', 'settings'],
+  manager: ['home', 'my_work', 'operations', 'quantitative', 'team', 'settings'],
+  member: ['home', 'my_work', 'quantitative', 'settings'],
 }
 
 export function defaultModulesForRole(role: GlobalRole | undefined | null): AppModule[] {

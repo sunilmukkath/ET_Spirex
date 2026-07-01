@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.db.session import ensure_database_ready
+from app.db.session import database_enabled, ensure_database_ready
 from app.routes.api import router
 from app.routes.google_auth import router as google_auth_router
 from app.routes.gmail import router as gmail_router
@@ -30,11 +30,41 @@ def _init_database_background() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    from app.db.session import database_enabled
+    import asyncio
+
+    from app.config import settings
 
     if database_enabled():
         threading.Thread(target=_init_database_background, daemon=True).start()
+
+    scheduler_task: asyncio.Task | None = None
+
+    async def _task_manager_scheduler() -> None:
+        from app.services.task_manager_agent import run_scheduled_task_manager
+
+        interval = max(0.5, float(settings.task_manager_interval_hours)) * 3600
+        # Initial delay so the server finishes booting
+        await asyncio.sleep(60)
+        while True:
+            if settings.task_manager_enabled:
+                try:
+                    run_scheduled_task_manager()
+                    logger.info("Scout task manager completed scheduled run")
+                except Exception:
+                    logger.exception("Scout task manager scheduled run failed")
+            await asyncio.sleep(interval)
+
+    if settings.task_manager_enabled:
+        scheduler_task = asyncio.create_task(_task_manager_scheduler())
+
     yield
+
+    if scheduler_task:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(

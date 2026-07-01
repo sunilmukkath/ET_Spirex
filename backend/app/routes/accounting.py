@@ -24,11 +24,18 @@ from app.models.accounting import (
     AcctContactCreate,
     AcctContactOut,
     AcctDashboard,
+    AcctEstimateCreate,
+    AcctEstimateOut,
     AcctOrgOut,
     AcctPaymentCreate,
     AcctPaymentOut,
+    AcctPurchaseOrderCreate,
+    AcctPurchaseOrderOut,
     AcctSalesInvoiceCreate,
     AcctSalesInvoiceOut,
+    AcctSalesReceiptCreate,
+    AcctSalesReceiptOut,
+    AcctSummaryReports,
     ZohoImportPreview,
     ZohoImportResult,
 )
@@ -70,6 +77,14 @@ def get_org(session: Session = Depends(get_db)) -> AcctOrgOut:
 def get_dashboard(session: Session = Depends(get_db)) -> AcctDashboard:
     try:
         return accounting_store.dashboard(session)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/reports/summary", response_model=AcctSummaryReports)
+def get_summary_reports(session: Session = Depends(get_db)) -> AcctSummaryReports:
+    try:
+        return accounting_store.summary_reports(session)
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -125,7 +140,44 @@ def list_payments(session: Session = Depends(get_db)) -> list[AcctPaymentOut]:
 
 @router.post("/payments", response_model=AcctPaymentOut)
 def create_payment(body: AcctPaymentCreate, session: Session = Depends(get_db)) -> AcctPaymentOut:
-    return accounting_store.create_payment(session, body)
+    try:
+        return accounting_store.create_payment(session, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/estimates", response_model=list[AcctEstimateOut])
+def list_estimates(session: Session = Depends(get_db)) -> list[AcctEstimateOut]:
+    return accounting_store.list_estimates(session)
+
+
+@router.post("/estimates", response_model=AcctEstimateOut)
+def create_estimate(body: AcctEstimateCreate, session: Session = Depends(get_db)) -> AcctEstimateOut:
+    return accounting_store.create_estimate(session, body)
+
+
+@router.get("/sales-receipts", response_model=list[AcctSalesReceiptOut])
+def list_sales_receipts(session: Session = Depends(get_db)) -> list[AcctSalesReceiptOut]:
+    return accounting_store.list_sales_receipts(session)
+
+
+@router.post("/sales-receipts", response_model=AcctSalesReceiptOut)
+def create_sales_receipt(
+    body: AcctSalesReceiptCreate, session: Session = Depends(get_db)
+) -> AcctSalesReceiptOut:
+    return accounting_store.create_sales_receipt(session, body)
+
+
+@router.get("/purchase-orders", response_model=list[AcctPurchaseOrderOut])
+def list_purchase_orders(session: Session = Depends(get_db)) -> list[AcctPurchaseOrderOut]:
+    return accounting_store.list_purchase_orders(session)
+
+
+@router.post("/purchase-orders", response_model=AcctPurchaseOrderOut)
+def create_purchase_order(
+    body: AcctPurchaseOrderCreate, session: Session = Depends(get_db)
+) -> AcctPurchaseOrderOut:
+    return accounting_store.create_purchase_order(session, body)
 
 
 @router.get("/zoho/modules")

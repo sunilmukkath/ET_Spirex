@@ -335,12 +335,12 @@ def run_survey_link_agent(
     survey_ids = [int(s["id"]) for s in surveys_raw if s.get("id") is not None]
     pipeline = pm_ops_store.pipeline_overview(session, survey_ids)
 
-    linked = {p.limesurvey_survey_id for p in pipeline.projects if p.limesurvey_survey_id}
+    linked = {sid for p in pipeline.projects for sid in (p.linked_survey_ids or [])}
     unlinked_survey_ids = set(pipeline.unlinked_survey_ids)
 
     unlinked_projects: list[dict[str, Any]] = []
     for p in pipeline.projects:
-        if p.limesurvey_survey_id:
+        if p.linked_survey_ids:
             continue
         unlinked_projects.append(
             {

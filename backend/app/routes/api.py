@@ -92,7 +92,7 @@ from app.services.report_export import (
     profile_to_pptx,
 )
 from app.services.report_agent import run_report_writing_agent
-from app.services.topline_agent import run_topline_agent
+from app.services.task_manager_agent import format_last_run_for_user, run_task_manager_agent
 from app.services.report_template import save_template_bytes, template_info
 from app.services.ai_narrative import (
     ai_status,
@@ -107,6 +107,7 @@ from app.services.response_store import get_responses
 from app.services.project_workflow_store import (
     add_manual_activity,
     add_task_comment,
+    assign_unassigned_task,
     can_access_module,
     can_manage_project_team,
     create_manual_task,
@@ -117,7 +118,7 @@ from app.services.project_workflow_store import (
     set_project_workflow,
     workflow_access_summary,
 )
-from app.models.team_preset import TeamPresetCreate
+from app.models.task_manager import TaskAssignRequest, TaskManagerAgentRequest, TaskManagerAgentResponse
 from app.models.qual_asset import QualAssetCreate, QualAssetUpdate, QualSummaryRequest
 from app.services.team_preset_store import (
     apply_team_preset,
@@ -465,6 +466,42 @@ def team_assigned_tasks_route(authorization: str | None = Header(default=None)):
         raise HTTPException(status_code=401, detail="Not signed in")
     rows = list_team_assigned_tasks(record.username)
     return {"tasks": _format_task_rows(rows), "count": len(rows)}
+
+
+@router.post("/agents/task-manager", response_model=TaskManagerAgentResponse)
+def task_manager_agent_route(
+    body: TaskManagerAgentRequest,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    scope = body.username or record.username
+    return run_task_manager_agent(apply=body.apply, username=scope, triggered_by=record.username)
+
+
+@router.get("/agents/task-manager/last-run", response_model=TaskManagerAgentResponse | None)
+def task_manager_last_run_route(authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return format_last_run_for_user(record.username)
+
+
+@router.post("/tasks/{task_id}/assign")
+def assign_task_route(
+    task_id: str,
+    body: TaskAssignRequest,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    try:
+        row = assign_unassigned_task(task_id, body.assignee, editor=record.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"task": _format_task_rows([row])[0]}
 
 
 def _format_task_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

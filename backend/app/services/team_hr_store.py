@@ -36,6 +36,9 @@ _DEFAULT_TITLES: dict[str, str] = {
     "Shilaja": "Fieldwork Lead",
     "Palani": "Programming Lead",
     "Bagya": "Finance & Admin",
+    "Ambika": "Project Manager",
+    "Venisha": "Research Analyst",
+    "Samara": "Research Analyst",
 }
 
 

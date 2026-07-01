@@ -9,6 +9,7 @@ import {
   Link2,
   Loader2,
   Megaphone,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -23,6 +24,7 @@ import {
   type PmClient,
   type PmFinanceSummary,
   type PmPipelineOverview,
+  type PmPipelineProject,
   type PmSurveyLinkSuggestion,
   type ProjectRequirements,
 } from '../api/client'
@@ -60,6 +62,61 @@ const STAGES = [
   'Close-out',
   'Delivered',
 ]
+
+type ProjectEditForm = {
+  project_name: string
+  client_id: string
+  project_type: 'quant' | 'qual' | 'mixed'
+  engagement_type: 'tracking' | 'ad-hoc'
+  stage: string
+  owner_name: string
+  project_code: string
+  fiscal_year: string
+  billing_month: string
+  project_value_inr: string
+  budget_estimate: string
+  start_date: string
+  target_close_date: string
+  status_notes: string
+}
+
+function emptyProjectEditForm(): ProjectEditForm {
+  return {
+    project_name: '',
+    client_id: '',
+    project_type: 'quant',
+    engagement_type: 'ad-hoc',
+    stage: 'Proposal',
+    owner_name: '',
+    project_code: '',
+    fiscal_year: '',
+    billing_month: '',
+    project_value_inr: '',
+    budget_estimate: '',
+    start_date: '',
+    target_close_date: '',
+    status_notes: '',
+  }
+}
+
+function projectToEditForm(p: PmPipelineProject): ProjectEditForm {
+  return {
+    project_name: p.project_name ?? '',
+    client_id: p.client_id ?? '',
+    project_type: p.project_type,
+    engagement_type: p.engagement_type,
+    stage: p.stage,
+    owner_name: p.owner_name ?? '',
+    project_code: p.project_code ?? '',
+    fiscal_year: p.fiscal_year ?? '',
+    billing_month: p.billing_month ?? '',
+    project_value_inr: p.project_value_inr != null ? String(p.project_value_inr) : '',
+    budget_estimate: p.budget_estimate != null ? String(p.budget_estimate) : '',
+    start_date: p.start_date ?? '',
+    target_close_date: p.target_close_date ?? '',
+    status_notes: p.status_notes ?? '',
+  }
+}
 
 function AgentPanel({ brief, loading }: { brief: PmAgentBrief | null; loading: boolean }) {
   if (loading) {
@@ -169,6 +226,11 @@ export function OperationsHubPage() {
   const [newClientName, setNewClientName] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
 
+  const [editProjectId, setEditProjectId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<ProjectEditForm>(emptyProjectEditForm())
+  const [editSaving, setEditSaving] = useState(false)
+  const [creatingProject, setCreatingProject] = useState(false)
+
   const [linkQuery, setLinkQuery] = useState('')
   const [linkAgentLoading, setLinkAgentLoading] = useState(false)
   const [linkAgentSummary, setLinkAgentSummary] = useState<string | null>(null)
@@ -182,6 +244,10 @@ export function OperationsHubPage() {
   const [fieldworkCompletes, setFieldworkCompletes] = useState('0')
   const [fieldworkTarget, setFieldworkTarget] = useState('')
   const [fieldworkSaving, setFieldworkSaving] = useState(false)
+  const [manualLinkProjectId, setManualLinkProjectId] = useState<string | null>(null)
+  const [manualLinkProjectName, setManualLinkProjectName] = useState('')
+  const [manualSurveyId, setManualSurveyId] = useState('')
+  const [manualLinkSaving, setManualLinkSaving] = useState(false)
 
   const overviewProjectId = searchParams.get('project') ?? ''
 
@@ -276,19 +342,74 @@ export function OperationsHubPage() {
   async function handleCreateProject(e: FormEvent) {
     e.preventDefault()
     if (!newProjectName.trim()) return
-    await api.createPmProject({
-      project_name: newProjectName.trim(),
-      project_type: 'quant',
-      engagement_type: 'ad-hoc',
-      stage: 'Proposal',
-    })
-    setNewProjectName('')
-    await load()
+    setCreatingProject(true)
+    setError(null)
+    try {
+      const created = await api.createPmProject({
+        project_name: newProjectName.trim(),
+        project_type: 'quant',
+        engagement_type: 'ad-hoc',
+        stage: 'Proposal',
+      })
+      setNewProjectName('')
+      await load()
+      openEditProject({
+        ...created,
+        client_name: null,
+        proposal_status: null,
+        has_survey_link: false,
+        data_collection_status: '',
+        data_collection_pct: null,
+        open_task_count: 0,
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create project')
+    } finally {
+      setCreatingProject(false)
+    }
   }
 
   async function handleStageChange(projectId: string, stage: string) {
     await api.updatePmProject(projectId, { stage })
     await load()
+  }
+
+  function openEditProject(p: PmPipelineProject) {
+    setEditProjectId(p.project_id)
+    setEditForm(projectToEditForm(p))
+  }
+
+  async function saveEditProject(e: FormEvent) {
+    e.preventDefault()
+    if (!editProjectId || !editForm.project_name.trim()) return
+    setEditSaving(true)
+    setError(null)
+    try {
+      await api.updatePmProject(editProjectId, {
+        project_name: editForm.project_name.trim(),
+        client_id: editForm.client_id || null,
+        project_type: editForm.project_type,
+        engagement_type: editForm.engagement_type,
+        stage: editForm.stage,
+        owner_name: editForm.owner_name.trim() || null,
+        project_code: editForm.project_code.trim() || null,
+        fiscal_year: editForm.fiscal_year.trim() || null,
+        billing_month: editForm.billing_month.trim() || null,
+        project_value_inr:
+          editForm.project_value_inr.trim() === '' ? null : Number(editForm.project_value_inr),
+        budget_estimate:
+          editForm.budget_estimate.trim() === '' ? null : Number(editForm.budget_estimate),
+        start_date: editForm.start_date || null,
+        target_close_date: editForm.target_close_date || null,
+        status_notes: editForm.status_notes.trim() || null,
+      })
+      setEditProjectId(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update project')
+    } finally {
+      setEditSaving(false)
+    }
   }
 
   async function runFinanceAgent() {
@@ -421,6 +542,44 @@ export function OperationsHubPage() {
     setFieldworkTarget('')
   }
 
+  function openManualSurveyLink(projectId: string, projectName: string) {
+    setManualLinkProjectId(projectId)
+    setManualLinkProjectName(projectName)
+    setManualSurveyId('')
+  }
+
+  async function addManualSurveyLink(e: FormEvent) {
+    e.preventDefault()
+    if (!manualLinkProjectId || !manualSurveyId.trim()) return
+    const surveyId = Number(manualSurveyId)
+    if (!Number.isFinite(surveyId) || surveyId <= 0) {
+      setError('Enter a valid LimeSurvey study ID')
+      return
+    }
+    setManualLinkSaving(true)
+    setError(null)
+    try {
+      await api.linkPmSurvey(manualLinkProjectId, surveyId, 'add')
+      setManualLinkProjectId(null)
+      setManualSurveyId('')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to link survey')
+    } finally {
+      setManualLinkSaving(false)
+    }
+  }
+
+  async function removeSurveyLink(projectId: string, surveyId: number) {
+    setError(null)
+    try {
+      await api.linkPmSurvey(projectId, surveyId, 'remove')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove survey link')
+    }
+  }
+
   async function saveFieldworkLog(e: FormEvent) {
     e.preventDefault()
     if (!fieldworkProjectId) return
@@ -526,10 +685,11 @@ export function OperationsHubPage() {
             />
             <button
               type="submit"
-              className="inline-flex items-center gap-1 rounded-lg bg-[var(--et-teal)] px-4 py-2 text-sm font-medium text-white"
+              disabled={creatingProject || !newProjectName.trim()}
+              className="inline-flex items-center gap-1 rounded-lg bg-[var(--et-teal)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              <Plus size={16} />
-              Add project
+              {creatingProject ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+              Add &amp; edit details
             </button>
           </form>
 
@@ -542,6 +702,7 @@ export function OperationsHubPage() {
                   <th className="px-4 py-3">FY / Month</th>
                   <th className="px-4 py-3">Value INR</th>
                   <th className="px-4 py-3">Stage</th>
+                  <th className="px-4 py-3">Pending</th>
                   <th className="px-4 py-3">Data collection</th>
                   <th className="px-4 py-3">Survey</th>
                   <th className="px-4 py-3">Actions</th>
@@ -595,6 +756,20 @@ export function OperationsHubPage() {
                       </select>
                     </td>
                     <td className="px-4 py-3">
+                      {p.open_task_count > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => selectOverviewProject(p.project_id)}
+                          title={`${p.open_task_count} pending task${p.open_task_count === 1 ? '' : 's'}`}
+                          className="inline-flex min-w-[1.75rem] items-center justify-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 hover:bg-amber-200"
+                        >
+                          {p.open_task_count}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400">0</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       <div className="min-w-[8rem]">
                         <p className={`text-xs font-medium ${dataCollectionTone(p.stage, p.data_collection_pct)}`}>
                           {p.data_collection_status || '—'}
@@ -619,19 +794,48 @@ export function OperationsHubPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      {p.limesurvey_survey_id ? (
-                        <Link
-                          to={`/projects/${p.limesurvey_survey_id}`}
-                          className="text-[var(--et-teal-dark)] hover:underline"
-                        >
-                          #{p.limesurvey_survey_id}
-                        </Link>
+                      {p.linked_survey_ids?.length ? (
+                        <div className="flex max-w-[12rem] flex-wrap gap-1.5">
+                          {p.linked_survey_ids.map((sid, idx) => (
+                            <span
+                              key={sid}
+                              className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700"
+                            >
+                              <Link to={`/projects/${sid}`} className="font-medium text-[var(--et-teal-dark)] hover:underline">
+                                {idx + 1}: #{sid}
+                              </Link>
+                              <button
+                                type="button"
+                                onClick={() => void removeSurveyLink(p.project_id, sid)}
+                                className="text-slate-400 hover:text-red-600"
+                                title="Remove survey link"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
                       ) : (
                         <span className="text-amber-700">Unlinked</span>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => openManualSurveyLink(p.project_id, p.project_name)}
+                        className="mt-1 block text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
+                      >
+                        Add link
+                      </button>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditProject(p)}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+                        >
+                          <Pencil size={12} />
+                          Edit
+                        </button>
                         <button
                           type="button"
                           onClick={() => selectOverviewProject(p.project_id)}
@@ -682,10 +886,23 @@ export function OperationsHubPage() {
                     {overviewProject.client_name ?? 'No client'}
                     {' · '}
                     {overviewProject.stage}
-                    {overviewProject.limesurvey_survey_id
-                      ? ` · Survey #${overviewProject.limesurvey_survey_id}`
+                    {overviewProject.linked_survey_ids?.length
+                      ? ` · ${overviewProject.linked_survey_ids.length} survey link${overviewProject.linked_survey_ids.length === 1 ? '' : 's'}`
                       : ' · No survey linked'}
                   </p>
+                  {overviewProject.linked_survey_ids?.length > 1 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {overviewProject.linked_survey_ids.map((sid, idx) => (
+                        <Link
+                          key={sid}
+                          to={`/projects/${sid}`}
+                          className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[var(--et-teal-dark)] ring-1 ring-slate-200 hover:bg-slate-50"
+                        >
+                          Visit {idx + 1}: #{sid}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {overviewProject.limesurvey_survey_id && (
@@ -711,7 +928,11 @@ export function OperationsHubPage() {
                   surveyId={overviewProject.limesurvey_survey_id}
                   onNavigate={() => {}}
                   buildHref={surveyHrefBuilder}
-                  projectLabel={overviewProject.project_name}
+                  projectLabel={
+                    overviewProject.linked_survey_ids?.length > 1
+                      ? `${overviewProject.project_name} · Visit 1`
+                      : overviewProject.project_name
+                  }
                 />
               ) : (
                 <div className="space-y-3 p-6 text-sm text-slate-600">
@@ -1006,6 +1227,220 @@ export function OperationsHubPage() {
               <button type="submit" className="et-btn-primary" disabled={fieldworkSaving}>
                 {fieldworkSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {manualLinkProjectId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
+          <form
+            onSubmit={(e) => void addManualSurveyLink(e)}
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+          >
+            <h3 className="text-lg font-semibold text-slate-900">Add survey link</h3>
+            <p className="mt-1 text-sm text-slate-500">{manualLinkProjectName}</p>
+            <p className="mt-2 text-xs text-slate-500">
+              Use this for multi-visit or mixed-method studies, for example Visit 1, Visit 2, Visit 3.
+            </p>
+            <label className="mt-4 block text-sm">
+              <span className="mb-1 block text-slate-600">LimeSurvey study ID</span>
+              <input
+                type="number"
+                min={1}
+                className="et-input w-full"
+                value={manualSurveyId}
+                onChange={(e) => setManualSurveyId(e.target.value)}
+                placeholder="e.g. 997292"
+                autoFocus
+              />
+            </label>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" className="et-btn-secondary" onClick={() => setManualLinkProjectId(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="et-btn-primary" disabled={manualLinkSaving || !manualSurveyId.trim()}>
+                {manualLinkSaving ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                Add link
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editProjectId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
+          <form
+            onSubmit={(e) => void saveEditProject(e)}
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl et-scroll"
+          >
+            <div className="flex items-start gap-2">
+              <Pencil size={20} className="mt-0.5 text-[var(--et-teal)]" />
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Edit project details</h3>
+                <p className="text-sm text-slate-500">Update the operations record for this project.</p>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm sm:col-span-2">
+                <span className="mb-1 block text-slate-600">Project name</span>
+                <input
+                  className="et-input w-full"
+                  value={editForm.project_name}
+                  onChange={(e) => setEditForm({ ...editForm, project_name: e.target.value })}
+                  required
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Client</span>
+                <select
+                  className="et-select w-full"
+                  value={editForm.client_id}
+                  onChange={(e) => setEditForm({ ...editForm, client_id: e.target.value })}
+                >
+                  <option value="">No client</option>
+                  {clients.map((c) => (
+                    <option key={c.client_id} value={c.client_id}>
+                      {c.client_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Owner</span>
+                <input
+                  className="et-input w-full"
+                  value={editForm.owner_name}
+                  onChange={(e) => setEditForm({ ...editForm, owner_name: e.target.value })}
+                  placeholder="Assigned lead"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Project type</span>
+                <select
+                  className="et-select w-full"
+                  value={editForm.project_type}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, project_type: e.target.value as ProjectEditForm['project_type'] })
+                  }
+                >
+                  <option value="quant">Quant</option>
+                  <option value="qual">Qual</option>
+                  <option value="mixed">Mixed</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Engagement</span>
+                <select
+                  className="et-select w-full"
+                  value={editForm.engagement_type}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      engagement_type: e.target.value as ProjectEditForm['engagement_type'],
+                    })
+                  }
+                >
+                  <option value="ad-hoc">Ad-hoc</option>
+                  <option value="tracking">Tracking</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Stage</span>
+                <select
+                  className="et-select w-full"
+                  value={editForm.stage}
+                  onChange={(e) => setEditForm({ ...editForm, stage: e.target.value })}
+                >
+                  {STAGES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Project code</span>
+                <input
+                  className="et-input w-full"
+                  value={editForm.project_code}
+                  onChange={(e) => setEditForm({ ...editForm, project_code: e.target.value })}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Fiscal year</span>
+                <input
+                  className="et-input w-full"
+                  value={editForm.fiscal_year}
+                  onChange={(e) => setEditForm({ ...editForm, fiscal_year: e.target.value })}
+                  placeholder="e.g. 2026-27"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Billing month</span>
+                <input
+                  className="et-input w-full"
+                  value={editForm.billing_month}
+                  onChange={(e) => setEditForm({ ...editForm, billing_month: e.target.value })}
+                  placeholder="e.g. Jul 2026"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Project value (INR)</span>
+                <input
+                  type="number"
+                  min={0}
+                  className="et-input w-full"
+                  value={editForm.project_value_inr}
+                  onChange={(e) => setEditForm({ ...editForm, project_value_inr: e.target.value })}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Budget estimate (INR)</span>
+                <input
+                  type="number"
+                  min={0}
+                  className="et-input w-full"
+                  value={editForm.budget_estimate}
+                  onChange={(e) => setEditForm({ ...editForm, budget_estimate: e.target.value })}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Start date</span>
+                <input
+                  type="date"
+                  className="et-input w-full"
+                  value={editForm.start_date}
+                  onChange={(e) => setEditForm({ ...editForm, start_date: e.target.value })}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600">Target close date</span>
+                <input
+                  type="date"
+                  className="et-input w-full"
+                  value={editForm.target_close_date}
+                  onChange={(e) => setEditForm({ ...editForm, target_close_date: e.target.value })}
+                />
+              </label>
+              <label className="block text-sm sm:col-span-2">
+                <span className="mb-1 block text-slate-600">Status notes</span>
+                <textarea
+                  rows={3}
+                  className="et-input w-full"
+                  value={editForm.status_notes}
+                  onChange={(e) => setEditForm({ ...editForm, status_notes: e.target.value })}
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" className="et-btn-secondary" onClick={() => setEditProjectId(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="et-btn-primary" disabled={editSaving || !editForm.project_name.trim()}>
+                {editSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Save details
               </button>
             </div>
           </form>

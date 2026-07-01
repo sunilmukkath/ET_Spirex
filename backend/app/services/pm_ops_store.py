@@ -200,8 +200,10 @@ def list_survey_links(session: Session) -> list[SurveyLinkOut]:
     out: list[SurveyLinkOut] = []
     for row in rows:
         client_name = row.client.client_name if row.client else None
-        sid = row.limesurvey_survey_id
+        ids = linked_survey_ids_for_project(row)
+        sid = ids[0] if ids else None
         survey_url = f"{base}/index.php/{sid}" if sid and base else None
+        survey_urls = [f"{base}/index.php/{linked_id}" for linked_id in ids] if base else []
         out.append(
             SurveyLinkOut(
                 project_id=row.project_id,
@@ -209,28 +211,61 @@ def list_survey_links(session: Session) -> list[SurveyLinkOut]:
                 client_name=client_name,
                 stage=row.stage,
                 limesurvey_survey_id=sid,
+                linked_survey_ids=ids,
                 survey_url=survey_url,
+                survey_urls=survey_urls,
             )
         )
     return out
 
 
+def linked_survey_ids_for_project(project: Project) -> list[int]:
+    out: list[int] = []
+    raw_ids = list(project.linked_survey_ids or [])
+    for value in ([project.limesurvey_survey_id] if project.limesurvey_survey_id else []) + raw_ids:
+        try:
+            sid = int(value)
+        except (TypeError, ValueError):
+            continue
+        if sid > 0 and sid not in out:
+            out.append(sid)
+    return out
+
+
+def _find_survey_link_conflict(session: Session, project_id: UUID, survey_id: int) -> Project | None:
+    for candidate in session.scalars(select(Project)).all():
+        if candidate.project_id == project_id:
+            continue
+        if survey_id in linked_survey_ids_for_project(candidate):
+            return candidate
+    return None
+
+
 def link_survey(
-    session: Session, project_id: UUID, survey_id: int | None
+    session: Session, project_id: UUID, survey_id: int | None, *, action: str = "add"
 ) -> Project | None:
     row = session.get(Project, project_id)
     if not row:
         return None
-    if survey_id is not None:
-        conflict = session.scalar(
-            select(Project).where(
-                Project.limesurvey_survey_id == survey_id,
-                Project.project_id != project_id,
-            )
-        )
+    current = linked_survey_ids_for_project(row)
+    if action == "clear" or survey_id is None:
+        current = []
+    elif action == "remove":
+        current = [sid for sid in current if sid != int(survey_id)]
+    else:
+        sid = int(survey_id)
+        conflict = _find_survey_link_conflict(session, project_id, sid)
         if conflict:
-            raise ValueError(f"Survey {survey_id} is already linked to project {conflict.project_name}")
-    row.limesurvey_survey_id = survey_id
+            raise ValueError(f"Survey {sid} is already linked to project {conflict.project_name}")
+        current = [sid] if action == "replace" else [*current, sid]
+        deduped: list[int] = []
+        for item in current:
+            if item not in deduped:
+                deduped.append(item)
+        current = deduped
+
+    row.limesurvey_survey_id = current[0] if current else None
+    row.linked_survey_ids = current
     session.flush()
     instrument = session.scalar(
         select(SurveyInstrument)
@@ -238,15 +273,15 @@ def link_survey(
         .order_by(SurveyInstrument.version.desc())
         .limit(1)
     )
-    if survey_id is not None:
+    if row.limesurvey_survey_id is not None:
         if instrument:
-            instrument.limesurvey_survey_id = survey_id
+            instrument.limesurvey_survey_id = row.limesurvey_survey_id
         else:
             session.add(
                 SurveyInstrument(
                     project_id=project_id,
                     version=1,
-                    limesurvey_survey_id=survey_id,
+                    limesurvey_survey_id=row.limesurvey_survey_id,
                     pilot_status="draft",
                 )
             )
@@ -393,21 +428,36 @@ def pipeline_overview(session: Session, linked_survey_ids: list[int] | None = No
     linked = set()
     project_ids = [row.project_id for row in rows]
     fieldwork_latest = _latest_fieldwork_by_project(session, project_ids)
+
+    all_survey_ids: list[int] = []
+    survey_ids_by_project: dict[UUID, list[int]] = {}
+    for row in rows:
+        sids = linked_survey_ids_for_project(row)
+        survey_ids_by_project[row.project_id] = sids
+        all_survey_ids.extend(sids)
+
+    from app.services.project_workflow_store import count_open_tasks_for_surveys
+
+    open_task_counts = count_open_tasks_for_surveys(all_survey_ids)
+
     for row in rows:
         base = project_to_out(row)
+        survey_ids = survey_ids_by_project[row.project_id]
         fw = fieldwork_latest.get(row.project_id)
         dc_status, dc_pct = _data_collection_status(row.stage, fw)
+        open_tasks = sum(open_task_counts.get(sid, 0) for sid in survey_ids)
         p = PipelineProjectOut(
             **base.model_dump(),
             client_name=row.client.client_name if row.client else None,
             proposal_status=proposal_status.get(row.project_id),
-            has_survey_link=row.limesurvey_survey_id is not None,
+            has_survey_link=bool(survey_ids),
+            linked_survey_ids=survey_ids,
             data_collection_status=dc_status,
             data_collection_pct=dc_pct,
+            open_task_count=open_tasks,
         )
         projects.append(p)
-        if row.limesurvey_survey_id:
-            linked.add(row.limesurvey_survey_id)
+        linked.update(survey_ids)
 
     stage_counts: dict[str, int] = defaultdict(int)
     for p in projects:

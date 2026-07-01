@@ -35,13 +35,27 @@ def _resolve_owner_id(session: Session, owner_id: UUID | None, owner_name: str |
 def project_to_out(project: Project) -> PmProjectOut:
     owner_name = project.owner.name if project.owner else None
     req = requirements_from_raw(project.requirements) if project.requirements else None
+    linked_ids = _normalize_linked_survey_ids(project.limesurvey_survey_id, project.linked_survey_ids)
     return PmProjectOut.model_validate(
         {
             **PmProjectOut.model_validate(project).model_dump(),
             "owner_name": owner_name,
             "requirements": req,
+            "linked_survey_ids": linked_ids,
         }
     )
+
+
+def _normalize_linked_survey_ids(primary: int | None, raw: list | None) -> list[int]:
+    out: list[int] = []
+    for value in ([primary] if primary else []) + list(raw or []):
+        try:
+            sid = int(value)
+        except (TypeError, ValueError):
+            continue
+        if sid > 0 and sid not in out:
+            out.append(sid)
+    return out
 
 
 def list_projects(session: Session) -> list[PmProjectOut]:
@@ -72,6 +86,7 @@ def create_project(session: Session, body: PmProjectCreate) -> PmProjectOut:
         stage=body.stage,
         owner_id=_resolve_owner_id(session, body.owner_id, body.owner_name),
         limesurvey_survey_id=body.limesurvey_survey_id,
+        linked_survey_ids=[body.limesurvey_survey_id] if body.limesurvey_survey_id else [],
         project_code=body.project_code,
         fiscal_year=body.fiscal_year,
         billing_month=body.billing_month,
@@ -108,6 +123,9 @@ def update_project(session: Session, project_id: UUID, body: PmProjectUpdate) ->
                 setattr(row, key, value.model_dump())
             else:
                 setattr(row, key, value)
+        elif key == "limesurvey_survey_id":
+            setattr(row, key, value)
+            row.linked_survey_ids = [value] if value else []
         else:
             setattr(row, key, value)
     session.flush()

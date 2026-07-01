@@ -23,9 +23,9 @@ import {
   type PmFinanceSummary,
   type PmPipelineProject,
   type PmProposal,
-  type Project,
 } from '../api/client'
 import { ET_HOME_SUBTITLE, ET_HOME_TAGLINE, ET_PRODUCT_NAME } from '../lib/etCopy'
+import { activePmProjects, pmProjectOptionLabel } from '../lib/pmProjectOptions'
 import { TASK_CATEGORY_LABELS, TASK_STATUS_LABELS } from '../lib/workflowAccess'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
@@ -239,7 +239,6 @@ export function HomePage() {
 
   const [assignedTasks, setAssignedTasks] = useState<MyTaskRow[]>([])
   const [newTasks, setNewTasks] = useState<MyTaskRow[]>([])
-  const [limeProjects, setLimeProjects] = useState<Project[]>([])
   const [pmEnabled, setPmEnabled] = useState(false)
   const [pmProjects, setPmProjects] = useState<PmPipelineProject[]>([])
   const [proposals, setProposals] = useState<PmProposal[]>([])
@@ -249,7 +248,7 @@ export function HomePage() {
   const [showNewTask, setShowNewTask] = useState(false)
   const [showQuickLinkPicker, setShowQuickLinkPicker] = useState(false)
   const [quickLinkIds, setQuickLinkIds] = useState<string[]>(() => loadQuickLinkSelection())
-  const [taskSurveyId, setTaskSurveyId] = useState<number | ''>('')
+  const [taskProjectId, setTaskProjectId] = useState('')
   const [taskTitle, setTaskTitle] = useState('')
   const [taskAssignee, setTaskAssignee] = useState('')
   const [creatingTask, setCreatingTask] = useState(false)
@@ -257,10 +256,9 @@ export function HomePage() {
   const load = useCallback(async () => {
     setError(null)
     try {
-      const [assignedRes, newRes, surveysRes, pmStatusRes] = await Promise.allSettled([
+      const [assignedRes, newRes, pmStatusRes] = await Promise.allSettled([
         api.getMyTasks(),
         api.getUnassignedTasks(),
-        api.getProjects({ cachedOnly: true, limit: 50 }),
         api.getPmStatus(),
       ])
 
@@ -269,12 +267,6 @@ export function HomePage() {
 
       if (newRes.status === 'fulfilled') setNewTasks(newRes.value.tasks)
       else setNewTasks([])
-
-      if (surveysRes.status === 'fulfilled') {
-        setLimeProjects(surveysRes.value.projects ?? [])
-      } else {
-        setLimeProjects([])
-      }
 
       const pmOn =
         pmStatusRes.status === 'fulfilled' && pmStatusRes.value.enabled && pmStatusRes.value.ready
@@ -340,12 +332,12 @@ export function HomePage() {
     try {
       await api.createTask({
         title: taskTitle.trim(),
-        survey_id: taskSurveyId === '' ? null : Number(taskSurveyId),
+        project_id: taskProjectId || null,
         assignee: taskAssignee || null,
       })
       setShowNewTask(false)
       setTaskTitle('')
-      setTaskSurveyId('')
+      setTaskProjectId('')
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create task')
@@ -357,16 +349,16 @@ export function HomePage() {
   const openAssigned = assignedTasks.filter((t) => t.task.status !== 'done')
   const openNew = newTasks.filter((t) => t.task.status !== 'done')
 
-  const activePmProjects = useMemo(
-    () => pmProjects.filter((p) => p.stage !== 'Delivered'),
+  const activePmProjectsList = useMemo(
+    () => activePmProjects(pmProjects),
     [pmProjects],
   )
 
   const pipelineSpotlight = useMemo(() => {
-    if (!user?.username) return activePmProjects.slice(0, PROJECT_PREVIEW)
-    const mine = activePmProjects.filter((p) => p.owner_name === user.username)
-    return (mine.length ? mine : activePmProjects).slice(0, PROJECT_PREVIEW)
-  }, [activePmProjects, user?.username])
+    if (!user?.username) return activePmProjectsList.slice(0, PROJECT_PREVIEW)
+    const mine = activePmProjectsList.filter((p) => p.owner_name === user.username)
+    return (mine.length ? mine : activePmProjectsList).slice(0, PROJECT_PREVIEW)
+  }, [activePmProjectsList, user?.username])
 
   const deliveredCount = useMemo(
     () => pmProjects.filter((p) => p.stage === 'Delivered').length,
@@ -376,8 +368,8 @@ export function HomePage() {
   const myPmProjects = pipelineSpotlight
 
   const proposalProjects = useMemo(
-    () => activePmProjects.filter((p) => p.stage === 'Proposal').slice(0, PROJECT_PREVIEW),
-    [activePmProjects],
+    () => activePmProjectsList.filter((p) => p.stage === 'Proposal').slice(0, PROJECT_PREVIEW),
+    [activePmProjectsList],
   )
 
   const totalOutstanding = useMemo(
@@ -434,7 +426,7 @@ export function HomePage() {
           <StatChip label="New queue" value={openNew.length} href="/my-work" />
           <StatChip
             label="Active projects"
-            value={pmEnabled ? activePmProjects.length : '—'}
+            value={pmEnabled ? activePmProjectsList.length : '—'}
             href="/operations?tab=pipeline"
           />
           <StatChip label="Proposals" value={pmEnabled ? proposalProjects.length : '—'} href="/operations?tab=pipeline" />
@@ -559,7 +551,7 @@ export function HomePage() {
             title="Pipeline spotlight"
             href="/operations?tab=pipeline"
             actionLabel="All projects"
-            badge={activePmProjects.length}
+            badge={activePmProjectsList.length}
           />
           {!pmEnabled ? (
             <p className="text-sm text-slate-500">
@@ -662,20 +654,21 @@ export function HomePage() {
           >
             <h3 className="text-lg font-semibold text-slate-900">New task</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Link to a study or leave project empty for general work. Leave assignee empty for the team new-task queue.
+              Link to an Operations pipeline project or leave empty for general work. Leave assignee empty for the team new-task queue.
             </p>
             <div className="mt-4 space-y-3">
               <label className="block text-sm">
-                <span className="mb-1 block text-slate-600">Study / project (optional)</span>
+                <span className="mb-1 block text-slate-600">Operations project (optional)</span>
                 <select
                   className="et-input w-full"
-                  value={taskSurveyId}
-                  onChange={(e) => setTaskSurveyId(e.target.value ? Number(e.target.value) : '')}
+                  value={taskProjectId}
+                  onChange={(e) => setTaskProjectId(e.target.value)}
+                  disabled={!pmEnabled}
                 >
                   <option value="">No project — general task</option>
-                  {limeProjects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.title} (#{p.id})
+                  {activePmProjectsList.map((p) => (
+                    <option key={p.project_id} value={p.project_id}>
+                      {pmProjectOptionLabel(p)}
                     </option>
                   ))}
                 </select>
