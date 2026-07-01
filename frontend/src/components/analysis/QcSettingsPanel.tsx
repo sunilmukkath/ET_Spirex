@@ -37,6 +37,7 @@ interface Props {
   onChange: (config: QcConfig) => void
   onSave: () => Promise<void>
   saving?: boolean
+  defaultExpanded?: boolean
   speederStats?: DataQualityResult['speeders'] | null
   straightLineStats?: DataQualityResult['straight_liners'] | null
 }
@@ -67,11 +68,12 @@ export function QcSettingsPanel({
   onChange,
   onSave,
   saving,
+  defaultExpanded = false,
   speederStats,
   straightLineStats,
 }: Props) {
   const { user } = useAuth()
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const [straightSearch, setStraightSearch] = useState('')
   const thresholds = { ...DEFAULT_THRESHOLDS, ...config.thresholds }
   const rules = config.custom_rules ?? []
