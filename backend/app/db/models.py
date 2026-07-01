@@ -350,3 +350,40 @@ class MarketingActivity(Base, TimestampMixin):
     owner_name: Mapped[str | None] = mapped_column(String(120))
     due_date: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+class EtSurvey(Base, TimestampMixin):
+    """ET Scout native survey instrument (replaces LimeSurvey programming over time)."""
+
+    __tablename__ = "et_surveys"
+
+    workspace_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
+    language: Mapped[str] = mapped_column(String(20), default="en", nullable=False)
+    public_slug: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    definition: Mapped[dict[str, Any]] = mapped_column(_json_type(), default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    responses: Mapped[list["EtSurveyResponse"]] = relationship(
+        back_populates="survey", cascade="all, delete-orphan"
+    )
+
+
+class EtSurveyResponse(Base, TimestampMixin):
+    __tablename__ = "et_survey_responses"
+
+    response_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    workspace_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("et_surveys.workspace_id", ondelete="CASCADE"), nullable=False
+    )
+    answers: Mapped[dict[str, Any]] = mapped_column(_json_type(), default=dict)
+    complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    survey: Mapped[EtSurvey] = relationship(back_populates="responses")

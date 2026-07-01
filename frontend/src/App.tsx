@@ -25,6 +25,15 @@ const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m
 const SurveyWorkspace = lazy(() =>
   import('./pages/SurveyWorkspace').then((m) => ({ default: m.SurveyWorkspace })),
 )
+const SurveyStudioPage = lazy(() =>
+  import('./pages/SurveyStudioPage').then((m) => ({ default: m.SurveyStudioPage })),
+)
+const SurveyBuilderPage = lazy(() =>
+  import('./pages/SurveyBuilderPage').then((m) => ({ default: m.SurveyBuilderPage })),
+)
+const SurveyCollectorPage = lazy(() =>
+  import('./pages/SurveyCollectorPage').then((m) => ({ default: m.SurveyCollectorPage })),
+)
 
 function PageLoader() {
   return (
@@ -46,6 +55,7 @@ function App() {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<LandingPage />} />
+            <Route path="/s/:slug" element={<SurveyCollectorPage />} />
             <Route
               element={
                 <ProtectedRoute>
@@ -59,7 +69,16 @@ function App() {
               <Route path="operations" element={<OperationsHubPage />} />
               <Route path="fieldwork" element={<FieldworkTrackerPage />} />
               <Route path="settings" element={<AdminSettingsPage />} />
+              <Route path="studio" element={<SurveyStudioPage />} />
             </Route>
+            <Route
+              path="studio/:workspaceId"
+              element={
+                <ProtectedRoute>
+                  <SurveyBuilderPage />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="projects/:id"
               element={

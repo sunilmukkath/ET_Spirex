@@ -15,6 +15,8 @@ from app.lime_client import (
     list_projects,
     list_projects_cached,
 )
+from app.services.et_survey_projects import et_survey_project_detail, et_surveys_as_projects
+from app.services.et_survey_registry import is_et_survey
 from app.models.analysis import (
     AdvancedAnalysisRequest,
     BannerRequest,
@@ -425,13 +427,31 @@ def connection():
 
 @router.get("/projects")
 def projects(limit: int | None = None, include_stats: bool = False, cached_only: bool = False):
+    et_projects = et_surveys_as_projects()
     try:
         if cached_only:
             cached = list_projects_cached(limit=limit)
-            return {"projects": cached or [], "from_cache": cached is not None}
-        return {"projects": list_projects(include_stats=include_stats, limit=limit)}
+            lime_projects = cached or []
+            merged = _merge_project_lists(et_projects, lime_projects)
+            return {"projects": merged, "from_cache": cached is not None}
+        lime_projects = list_projects(include_stats=include_stats, limit=limit)
+        merged = _merge_project_lists(et_projects, lime_projects)
+        return {"projects": merged}
     except Exception as exc:
+        if et_projects:
+            return {"projects": et_projects, "lime_error": str(exc)}
         raise _handle_lime_error(exc) from exc
+
+
+def _merge_project_lists(et_projects: list, lime_projects: list) -> list:
+    combined = [*et_projects, *lime_projects]
+    combined.sort(
+        key=lambda p: (
+            -(p.get("responses") or {}).get("total", 0),
+            str(p.get("title") or "").lower(),
+        )
+    )
+    return combined
 
 
 @router.post("/projects/stats")
@@ -455,6 +475,11 @@ def projects_stats(body: ProjectStatsRequest):
 
 @router.get("/projects/{survey_id}")
 def project_detail(survey_id: int):
+    if is_et_survey(survey_id):
+        detail = et_survey_project_detail(survey_id)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Survey not found")
+        return detail
     try:
         return get_project_detail(survey_id)
     except Exception as exc:

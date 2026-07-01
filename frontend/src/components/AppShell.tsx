@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { BarChart3, ClipboardList, Home, LayoutGrid, LogOut, Menu, Settings, Users, X } from 'lucide-react'
+import { BarChart3, ClipboardList, Home, LayoutGrid, LogOut, Menu, PenLine, Settings, Users, X } from 'lucide-react'
 import type { CommandPaletteItem } from './workspace/CommandPalette'
 import { useAuth } from '../auth/AuthContext'
 import { BrandLogo } from './BrandLogo'
@@ -14,6 +14,14 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
     group: 'App',
     href: '/home',
     keywords: ['landing', 'dashboard', 'start', 'hub'],
+  },
+  {
+    id: 'app-studio',
+    label: 'Survey Studio',
+    description: 'Program ET Scout native surveys — replace LimeSurvey for new studies',
+    group: 'App',
+    href: '/studio',
+    keywords: ['builder', 'questionnaire', 'program', 'native', 'authoring'],
   },
   {
     id: 'app-dashboard',
@@ -118,6 +126,13 @@ export function AppShell() {
             >
               <LayoutGrid size={14} />
               Projects
+            </Link>
+            <Link
+              to="/studio"
+              className={`et-chip ${location.pathname.startsWith('/studio') ? 'et-chip-active' : 'et-chip-inactive'}`}
+            >
+              <PenLine size={14} />
+              Studio
             </Link>
             <Link
               to="/my-work"

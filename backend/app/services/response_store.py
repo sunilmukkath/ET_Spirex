@@ -45,6 +45,13 @@ def get_responses(
     completion_status: str = "all",
     refresh: bool = False,
 ) -> ResponseDataset:
+    from app.services.et_survey_registry import is_et_survey
+    from app.services.et_survey_responses import get_et_responses
+
+    if is_et_survey(survey_id):
+        status = completion_status if completion_status in {"complete", "incomplete", "all"} else "complete"
+        return get_et_responses(survey_id, completion_status=status, refresh=refresh)
+
     from app.services.qc_filter import (
         QC_APPROVED_STATUS,
         exclude_flagged_responses,

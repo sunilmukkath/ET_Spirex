@@ -13,6 +13,7 @@ from app.db.session import ensure_database_ready
 from app.routes.api import router
 from app.routes.google_auth import router as google_auth_router
 from app.routes.gmail import router as gmail_router
+from app.routes.et_surveys import collector_router, router as et_surveys_router
 from app.routes.assistant import router as assistant_router
 from app.routes.pm import router as pm_router
 
@@ -51,6 +52,8 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(et_surveys_router, prefix="/api")
+app.include_router(collector_router, prefix="/api")
 app.include_router(assistant_router, prefix="/api")
 app.include_router(pm_router, prefix="/api")
 app.include_router(gmail_router, prefix="/api")

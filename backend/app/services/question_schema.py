@@ -241,6 +241,12 @@ def build_survey_schema(
     enrich_only: bool = False,
 ) -> dict[str, Any]:
     """Build survey schema. enrich_only loads answer options without exporting all responses."""
+    from app.services.et_survey_registry import is_et_survey
+    from app.services.et_survey_schema import build_et_survey_schema
+
+    if is_et_survey(survey_id):
+        return build_et_survey_schema(survey_id)
+
     effective_light = light and not enrich_only
     cache_key = (survey_id, completion_status, effective_light, enrich_only)
     now = time.time()

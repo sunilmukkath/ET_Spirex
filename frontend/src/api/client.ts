@@ -14,6 +14,10 @@ export interface Project {
     total: number
     loaded?: boolean
   }
+  provider?: 'et' | 'lime'
+  description?: string
+  public_slug?: string
+  et_status?: 'draft' | 'active' | 'closed'
 }
 
 export interface ProjectDetail extends Project {
@@ -960,6 +964,110 @@ export interface AssistantChatMessage {
 export interface AssistantChatResponse {
   reply: string
   configured: boolean
+}
+
+export type EtQuestionType =
+  | 'display'
+  | 'single'
+  | 'multi'
+  | 'text'
+  | 'long_text'
+  | 'numeric'
+  | 'scale'
+  | 'matrix'
+  | 'yes_no'
+
+export interface EtAnswerOption {
+  code: string
+  label: string
+  sort_order: number
+}
+
+export interface EtMatrixRow {
+  code: string
+  label: string
+  sort_order: number
+}
+
+export interface EtShowIfRule {
+  question_id: string
+  operator: 'equals' | 'not_equals' | 'includes' | 'not_includes'
+  values: string[]
+}
+
+export interface EtQuestion {
+  id: string
+  code: string
+  type: EtQuestionType
+  text: string
+  help_text?: string
+  required?: boolean
+  sort_order: number
+  options?: EtAnswerOption[]
+  rows?: EtMatrixRow[]
+  scale_min?: number
+  scale_max?: number
+  scale_min_label?: string
+  scale_max_label?: string
+  show_if?: EtShowIfRule | null
+}
+
+export interface EtBlock {
+  id: string
+  title: string
+  description?: string
+  sort_order: number
+  questions: EtQuestion[]
+}
+
+export interface EtSurveyDefinition {
+  version: number
+  blocks: EtBlock[]
+  settings: {
+    welcome_title: string
+    welcome_message: string
+    thank_you_title: string
+    thank_you_message: string
+    single_page: boolean
+    show_progress: boolean
+    language: string
+  }
+}
+
+export interface EtStudioSurveyListItem {
+  workspace_id: number
+  title: string
+  description: string
+  status: 'draft' | 'active' | 'closed'
+  language: string
+  public_slug: string
+  created_by: string
+  updated_at: string
+  response_count: number
+  provider: 'et'
+  active: boolean
+}
+
+export interface EtStudioSurvey extends EtStudioSurveyListItem {
+  definition: EtSurveyDefinition
+  version: number
+  created_at: string
+}
+
+export interface EtStudioSurveyUpdate {
+  title?: string
+  description?: string
+  status?: 'draft' | 'active' | 'closed'
+  definition?: EtSurveyDefinition
+  language?: string
+}
+
+export interface EtCollectorSurvey {
+  title: string
+  description: string
+  status: 'draft' | 'active' | 'closed'
+  definition: EtSurveyDefinition
+  public_slug: string
 }
 
 export interface ReportSectionPayload {
@@ -2252,4 +2360,34 @@ export const api = {
       },
       BOOTSTRAP_TIMEOUT_MS,
     ),
+  getStudioStatus: () =>
+    fetchJson<{ available: boolean }>('/api/studio/status', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listStudioSurveys: () =>
+    fetchJson<{ surveys: EtStudioSurveyListItem[] }>('/api/studio/surveys', undefined, BOOTSTRAP_TIMEOUT_MS),
+  createStudioSurvey: (body: { title: string; description?: string; language?: string }) =>
+    fetchJson<EtStudioSurvey>('/api/studio/surveys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  getStudioSurvey: (workspaceId: number) =>
+    fetchJson<EtStudioSurvey>(`/api/studio/surveys/${workspaceId}`, undefined, BOOTSTRAP_TIMEOUT_MS),
+  updateStudioSurvey: (workspaceId: number, body: EtStudioSurveyUpdate) =>
+    fetchJson<EtStudioSurvey>(`/api/studio/surveys/${workspaceId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  publishStudioSurvey: (workspaceId: number) =>
+    fetchJson<EtStudioSurvey>(`/api/studio/surveys/${workspaceId}/publish`, { method: 'POST' }),
+  deleteStudioSurvey: (workspaceId: number) =>
+    fetchJson<{ ok: boolean }>(`/api/studio/surveys/${workspaceId}`, { method: 'DELETE' }),
+  getCollectorSurvey: (slug: string) =>
+    fetchJson<EtCollectorSurvey>(`/api/collector/${slug}`, undefined, BOOTSTRAP_TIMEOUT_MS),
+  submitCollectorResponse: (slug: string, body: { answers: Record<string, unknown>; complete?: boolean }) =>
+    fetchJson<{ response_id: string; complete: boolean }>(`/api/collector/${slug}/responses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
 }
