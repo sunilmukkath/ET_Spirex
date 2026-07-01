@@ -69,6 +69,7 @@ export const DEFAULT_MODULES_BY_ROLE: Record<GlobalRole, AppModule[]> = {
     'crm_marketing',
     'quantitative',
     'qualitative',
+    'accounting',
     'team',
     'settings',
   ],

@@ -556,6 +556,7 @@ def pm_create_budget_line(
     out = pm_ops_store.create_budget_line(session, body)
     if not out:
         raise HTTPException(status_code=404, detail="Project not found")
+    session.commit()
     return out
 
 
@@ -568,6 +569,7 @@ def pm_create_invoice(
     out = pm_ops_store.create_invoice(session, body)
     if not out:
         raise HTTPException(status_code=404, detail="Project not found")
+    session.commit()
     return out
 
 

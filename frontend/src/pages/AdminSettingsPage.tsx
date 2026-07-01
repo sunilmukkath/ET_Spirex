@@ -297,8 +297,6 @@ export function AdminSettingsPage() {
               >
                 <option value="pipeline">Pipeline</option>
                 <option value="finance">Finance</option>
-                <option value="programming">Programming</option>
-                <option value="links">Survey links</option>
               </select>
             </label>
             <div className="space-y-2 sm:col-span-2">

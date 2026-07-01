@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from app.models.project_requirements import ProjectRequirements
 
@@ -293,6 +293,19 @@ class FinanceSummary(BaseModel):
     margin_pct: float | None
     budget_lines: list[BudgetLineOut] = Field(default_factory=list)
     invoices: list[InvoiceOut] = Field(default_factory=list)
+
+    @field_serializer(
+        "budget_estimate",
+        "budget_actual",
+        "project_value_inr",
+        "total_estimated_lines",
+        "total_actual_lines",
+        "total_invoiced",
+        "total_paid",
+        "total_outstanding",
+    )
+    def _serialize_money(self, value: Decimal | None) -> float | None:
+        return float(value) if value is not None else None
 
 
 # --- Survey instruments / programming ---

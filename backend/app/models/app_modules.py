@@ -35,6 +35,7 @@ DEFAULT_MODULES_BY_ROLE: dict[str, tuple[AppModule, ...]] = {
         "my_work",
         "operations",
         "crm_marketing",
+        "accounting",
         "team",
         "settings",
     ),

@@ -43,9 +43,11 @@ function parseTab(value: string | null): Tab {
   return 'pipeline'
 }
 
-function formatInr(value: number | null | undefined): string {
-  if (value == null) return '—'
-  return value.toLocaleString('en-IN', {
+function formatInr(value: number | string | null | undefined): string {
+  if (value == null || value === '') return '—'
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return '—'
+  return n.toLocaleString('en-IN', {
     maximumFractionDigits: 0,
   })
 }
@@ -211,7 +213,16 @@ export function OperationsHubPage() {
   const [clients, setClients] = useState<PmClient[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [finance, setFinance] = useState<PmFinanceSummary | null>(null)
+  const [financeLoading, setFinanceLoading] = useState(false)
+  const [financeError, setFinanceError] = useState<string | null>(null)
   const [financeAgent, setFinanceAgent] = useState<PmAgentBrief | null>(null)
+  const [budgetCategory, setBudgetCategory] = useState('')
+  const [budgetEstimate, setBudgetEstimate] = useState('')
+  const [budgetActual, setBudgetActual] = useState('')
+  const [budgetSaving, setBudgetSaving] = useState(false)
+  const [invoiceAmount, setInvoiceAmount] = useState('')
+  const [invoiceDue, setInvoiceDue] = useState('')
+  const [invoiceSaving, setInvoiceSaving] = useState(false)
   const [proposalDraft, setProposalDraft] = useState<PmAgentDraft | null>(null)
   const [proposalProjectId, setProposalProjectId] = useState('')
   const [proposalBrief, setProposalBrief] = useState('')
@@ -249,6 +260,39 @@ export function OperationsHubPage() {
 
   const overviewProjectId = searchParams.get('project') ?? ''
   const overviewView = searchParams.get('view') === 'workflow' ? 'workflow' : 'overview'
+
+  const selectTab = useCallback(
+    (next: Tab) => {
+      setTab(next)
+      setSearchParams(
+        (prev) => {
+          if (next === 'pipeline') prev.delete('tab')
+          else prev.set('tab', next)
+          return prev
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  const reloadFinance = useCallback(async (projectId: string) => {
+    if (!projectId) {
+      setFinance(null)
+      setFinanceError(null)
+      return
+    }
+    setFinanceLoading(true)
+    setFinanceError(null)
+    try {
+      setFinance(await api.getPmFinance(projectId))
+    } catch (err) {
+      setFinance(null)
+      setFinanceError(err instanceof Error ? err.message : 'Failed to load finance')
+    } finally {
+      setFinanceLoading(false)
+    }
+  }, [])
 
   const selectOverviewProject = useCallback(
     (projectId: string) => {
@@ -314,23 +358,40 @@ export function OperationsHubPage() {
       setPipeline(pipe)
       setClients(clientRows)
       const first = pipe.projects[0]?.project_id ?? ''
-      setSelectedProjectId((cur) => cur || first)
+      const financeProject = searchParams.get('project')
+      setSelectedProjectId((cur) => {
+        if (financeProject && pipe.projects.some((p) => p.project_id === financeProject)) {
+          return financeProject
+        }
+        return cur || first
+      })
       setProposalProjectId((cur) => cur || first)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load operations hub')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [searchParams])
 
   useEffect(() => {
     void load()
   }, [load])
 
   useEffect(() => {
-    const next = parseTab(searchParams.get('tab'))
-    setTab(next)
-  }, [searchParams])
+    const urlTab = searchParams.get('tab')
+    if (urlTab && TAB_IDS.has(urlTab as Tab)) {
+      setTab(urlTab as Tab)
+      return
+    }
+    if (prefs.operations_default_tab) {
+      setTab(parseTab(prefs.operations_default_tab))
+    }
+  }, [searchParams, prefs.operations_default_tab])
+
+  useEffect(() => {
+    if (tab !== 'finance' || !selectedProjectId) return
+    void reloadFinance(selectedProjectId)
+  }, [selectedProjectId, tab, reloadFinance])
 
   const projects = pipeline?.projects ?? []
   const overviewProject = useMemo(
@@ -344,23 +405,49 @@ export function OperationsHubPage() {
     return (mode: string, view?: string) => buildSurveyWorkspaceHref(surveyId, mode, view)
   }, [overviewProject?.limesurvey_survey_id])
 
-  useEffect(() => {
-    if (!searchParams.get('tab') && prefs.operations_default_tab) {
-      setTab(parseTab(prefs.operations_default_tab))
+  async function handleAddBudgetLine(e: FormEvent) {
+    e.preventDefault()
+    if (!selectedProjectId || !budgetCategory.trim()) return
+    setBudgetSaving(true)
+    setFinanceError(null)
+    try {
+      await api.createPmBudgetLine({
+        project_id: selectedProjectId,
+        category: budgetCategory.trim(),
+        estimated_cost: budgetEstimate.trim() ? Number(budgetEstimate) : undefined,
+        actual_cost: budgetActual.trim() ? Number(budgetActual) : undefined,
+      })
+      setBudgetCategory('')
+      setBudgetEstimate('')
+      setBudgetActual('')
+      await reloadFinance(selectedProjectId)
+    } catch (err) {
+      setFinanceError(err instanceof Error ? err.message : 'Failed to add budget line')
+    } finally {
+      setBudgetSaving(false)
     }
-  }, [prefs.operations_default_tab, searchParams])
+  }
 
-  useEffect(() => {
-    if (!selectedProjectId || tab !== 'finance') return
-    void (async () => {
-      try {
-        const f = await api.getPmFinance(selectedProjectId)
-        setFinance(f)
-      } catch {
-        setFinance(null)
-      }
-    })()
-  }, [selectedProjectId, tab])
+  async function handleAddInvoice(e: FormEvent) {
+    e.preventDefault()
+    if (!selectedProjectId || !invoiceAmount.trim()) return
+    setInvoiceSaving(true)
+    setFinanceError(null)
+    try {
+      await api.createPmInvoice({
+        project_id: selectedProjectId,
+        amount: Number(invoiceAmount),
+        due_date: invoiceDue || undefined,
+      })
+      setInvoiceAmount('')
+      setInvoiceDue('')
+      await reloadFinance(selectedProjectId)
+    } catch (err) {
+      setFinanceError(err instanceof Error ? err.message : 'Failed to add invoice')
+    } finally {
+      setInvoiceSaving(false)
+    }
+  }
 
   async function handleCreateProject(e: FormEvent) {
     e.preventDefault()
@@ -663,7 +750,7 @@ export function OperationsHubPage() {
           <button
             key={id}
             type="button"
-            onClick={() => setTab(id)}
+            onClick={() => selectTab(id)}
             className={`et-segment-btn inline-flex items-center gap-1.5 text-xs ${
               tab === id ? 'et-segment-btn-active' : 'et-segment-btn-inactive'
             }`}
@@ -876,6 +963,12 @@ export function OperationsHubPage() {
                         >
                           Proposal agent
                         </button>
+                        <Link
+                          to={`/operations?tab=finance&project=${p.project_id}`}
+                          className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+                        >
+                          Finance
+                        </Link>
                         <Link
                           to={`/crm-marketing?tab=agent&project=${p.project_id}`}
                           className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
@@ -1149,6 +1242,7 @@ export function OperationsHubPage() {
               onChange={(e) => setSelectedProjectId(e.target.value)}
               className="et-select mt-1 w-full max-w-md"
             >
+              {projects.length === 0 && <option value="">No projects</option>}
               {projects.map((p) => (
                 <option key={p.project_id} value={p.project_id}>
                   {p.project_name}
@@ -1156,30 +1250,157 @@ export function OperationsHubPage() {
               ))}
             </select>
           </label>
-          {finance && (
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-xs text-slate-500">Budget estimate</p>
-                <p className="text-xl font-semibold">{formatInr(finance.budget_estimate)}</p>
-                {finance.project_value_inr != null && (
-                  <p className="mt-1 text-xs text-slate-500">Project value: {formatInr(finance.project_value_inr)}</p>
-                )}
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-xs text-slate-500">Actual</p>
-                <p className="text-xl font-semibold">{formatInr(finance.budget_actual)}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-xs text-slate-500">Outstanding</p>
-                <p className="text-xl font-semibold">{formatInr(finance.total_outstanding)}</p>
-                {(finance.fiscal_year || finance.billing_month) && (
-                  <p className="mt-1 text-xs text-slate-500">
-                    {[finance.fiscal_year, finance.billing_month].filter(Boolean).join(' · ')}
-                  </p>
-                )}
-              </div>
+
+          {financeLoading && (
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <Loader2 size={16} className="animate-spin text-[var(--et-teal)]" />
+              Loading finance…
             </div>
           )}
+          {financeError && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              {financeError}
+            </div>
+          )}
+
+          {finance && !financeLoading && (
+            <>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs text-slate-500">Budget estimate</p>
+                  <p className="text-xl font-semibold">{formatInr(finance.budget_estimate)}</p>
+                  {finance.project_value_inr != null && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Project value: {formatInr(finance.project_value_inr)}
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs text-slate-500">Actual</p>
+                  <p className="text-xl font-semibold">{formatInr(finance.budget_actual)}</p>
+                  {finance.margin_pct != null && (
+                    <p className="mt-1 text-xs text-slate-500">Margin {finance.margin_pct.toFixed(1)}%</p>
+                  )}
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs text-slate-500">Outstanding</p>
+                  <p className="text-xl font-semibold">{formatInr(finance.total_outstanding)}</p>
+                  {(finance.fiscal_year || finance.billing_month) && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      {[finance.fiscal_year, finance.billing_month].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-900">Budget lines</p>
+                  {(finance.budget_lines?.length ?? 0) === 0 ? (
+                    <p className="mt-2 text-xs text-slate-500">No line items yet.</p>
+                  ) : (
+                    <ul className="mt-2 divide-y divide-slate-100 text-sm">
+                      {finance.budget_lines.map((line) => (
+                        <li key={line.line_id} className="flex justify-between gap-2 py-2">
+                          <span className="text-slate-800">{line.category}</span>
+                          <span className="shrink-0 text-xs text-slate-600">
+                            est {formatInr(line.estimated_cost)} · act {formatInr(line.actual_cost)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <form onSubmit={(e) => void handleAddBudgetLine(e)} className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+                    <input
+                      value={budgetCategory}
+                      onChange={(e) => setBudgetCategory(e.target.value)}
+                      placeholder="Category (e.g. Fieldwork)"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        value={budgetEstimate}
+                        onChange={(e) => setBudgetEstimate(e.target.value)}
+                        placeholder="Estimate INR"
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        value={budgetActual}
+                        onChange={(e) => setBudgetActual(e.target.value)}
+                        placeholder="Actual INR"
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={budgetSaving || !budgetCategory.trim()}
+                      className="rounded-lg bg-[var(--et-teal)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      {budgetSaving ? 'Saving…' : 'Add budget line'}
+                    </button>
+                  </form>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-900">Invoices</p>
+                  {(finance.invoices?.length ?? 0) === 0 ? (
+                    <p className="mt-2 text-xs text-slate-500">No invoices logged.</p>
+                  ) : (
+                    <ul className="mt-2 divide-y divide-slate-100 text-sm">
+                      {finance.invoices.map((inv) => (
+                        <li key={inv.invoice_id} className="flex justify-between gap-2 py-2">
+                          <span className="text-slate-800">{formatInr(inv.amount)}</span>
+                          <span className="text-xs text-slate-600">
+                            {inv.paid_status}
+                            {inv.due_date ? ` · due ${inv.due_date}` : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <form onSubmit={(e) => void handleAddInvoice(e)} className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+                    <input
+                      type="number"
+                      min={0}
+                      value={invoiceAmount}
+                      onChange={(e) => setInvoiceAmount(e.target.value)}
+                      placeholder="Amount INR"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                    <input
+                      type="date"
+                      value={invoiceDue}
+                      onChange={(e) => setInvoiceDue(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      disabled={invoiceSaving || !invoiceAmount.trim()}
+                      className="rounded-lg bg-[var(--et-teal)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      {invoiceSaving ? 'Saving…' : 'Add invoice'}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </>
+          )}
+
+          {!financeLoading && !finance && selectedProjectId && !financeError && (
+            <p className="text-sm text-slate-500">Select a project to view finance details.</p>
+          )}
+
+          <p className="text-xs text-slate-500">
+            Full books (AR/AP, Zoho migration):{' '}
+            <Link to="/accounting" className="font-medium text-[var(--et-teal-dark)] hover:underline">
+              Accounting
+            </Link>
+          </p>
+
           <button
             type="button"
             onClick={() => void runFinanceAgent()}
