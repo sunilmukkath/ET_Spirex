@@ -21,51 +21,19 @@ import {
 } from '../api/client'
 import { AiAssistPanel } from '../components/ai/AiAssistPanel'
 import { ErrorState, LoadingState } from '../components/States'
-
-const QUESTION_TYPES: { value: EtQuestionType; label: string }[] = [
-  { value: 'display', label: 'Instruction text' },
-  { value: 'single', label: 'Single choice' },
-  { value: 'multi', label: 'Multiple choice' },
-  { value: 'yes_no', label: 'Yes / No' },
-  { value: 'scale', label: 'Rating scale' },
-  { value: 'numeric', label: 'Numeric' },
-  { value: 'text', label: 'Short text' },
-  { value: 'long_text', label: 'Long text' },
-  { value: 'matrix', label: 'Matrix grid' },
-]
+import {
+  ALL_QUESTION_TYPES,
+  QUESTION_TYPE_GROUPS,
+  newQuestion,
+  patchQuestionForType,
+  usesColumnOptions,
+  usesOptions,
+  usesRows,
+  usesScale,
+} from '../lib/etSurveyQuestionTypes'
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`
-}
-
-function defaultOptions(): EtQuestion['options'] {
-  return [
-    { code: '1', label: 'Option 1', sort_order: 0 },
-    { code: '2', label: 'Option 2', sort_order: 1 },
-  ]
-}
-
-function newQuestion(type: EtQuestionType, index: number): EtQuestion {
-  const code = `Q${index}`
-  const base: EtQuestion = {
-    id: uid('q'),
-    code,
-    type,
-    text: type === 'display' ? 'Instruction text here.' : `Question ${index}`,
-    required: type !== 'display',
-    sort_order: index,
-    options: type === 'single' || type === 'multi' ? defaultOptions() : [],
-    rows:
-      type === 'matrix'
-        ? [
-            { code: 'R1', label: 'Row 1', sort_order: 0 },
-            { code: 'R2', label: 'Row 2', sort_order: 1 },
-          ]
-        : [],
-    scale_min: 1,
-    scale_max: 5,
-  }
-  return base
 }
 
 export function SurveyBuilderPage() {
@@ -351,16 +319,24 @@ export function SurveyBuilderPage() {
                 onChange={(e) => updateBlock(selectedBlock.id, { title: e.target.value })}
                 className="mb-3 w-full border-b border-transparent text-base font-semibold text-slate-900 focus:border-[var(--et-teal)] focus:outline-none"
               />
-              <div className="mb-3 flex flex-wrap gap-1">
-                {QUESTION_TYPES.map((t) => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => addQuestion(t.value)}
-                    className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] text-slate-600 hover:border-[var(--et-teal)]"
-                  >
-                    + {t.label}
-                  </button>
+              <div className="mb-3 space-y-2">
+                {QUESTION_TYPE_GROUPS.map((group) => (
+                  <div key={group.title}>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{group.title}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {group.types.map((t) => (
+                        <button
+                          key={t.value}
+                          type="button"
+                          title={t.hint}
+                          onClick={() => addQuestion(t.value)}
+                          className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] text-slate-600 hover:border-[var(--et-navy)] hover:text-[var(--et-navy)]"
+                        >
+                          + {t.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
               <ul className="space-y-2">
@@ -418,9 +394,11 @@ function QuestionEditor({
   onChange: (patch: Partial<EtQuestion>) => void
   onDelete: () => void
 }) {
-  const showOptions = question.type === 'single' || question.type === 'multi'
-  const showScale = question.type === 'scale' || question.type === 'matrix'
-  const showRows = question.type === 'matrix'
+  const showOptions = usesOptions(question.type)
+  const showScale = usesScale(question.type)
+  const showRows = usesRows(question.type)
+  const showColumns = usesColumnOptions(question.type)
+  const showChoiceExtras = question.type === 'single' || question.type === 'multi' || question.type === 'dropdown'
 
   return (
     <div className="space-y-3">
@@ -442,10 +420,13 @@ function QuestionEditor({
         Type
         <select
           value={question.type}
-          onChange={(e) => onChange({ type: e.target.value as EtQuestionType })}
+          onChange={(e) => {
+            const next = e.target.value as EtQuestionType
+            onChange(patchQuestionForType(question, next))
+          }}
           className="et-select mt-1 w-full text-sm"
         >
-          {QUESTION_TYPES.map((t) => (
+          {ALL_QUESTION_TYPES.map((t) => (
             <option key={t.value} value={t.value}>
               {t.label}
             </option>
@@ -461,6 +442,15 @@ function QuestionEditor({
           className="et-input mt-1 w-full text-sm"
         />
       </label>
+      <label className="block text-xs text-slate-500">
+        Help text <span className="text-slate-400">(optional)</span>
+        <input
+          value={question.help_text ?? ''}
+          onChange={(e) => onChange({ help_text: e.target.value })}
+          className="et-input mt-1 w-full text-sm"
+          placeholder="Shown below the question"
+        />
+      </label>
       {question.type !== 'display' && (
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
@@ -471,102 +461,176 @@ function QuestionEditor({
           Required
         </label>
       )}
+      {showChoiceExtras && (
+        <>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={Boolean(question.randomize_options)}
+              onChange={(e) => onChange({ randomize_options: e.target.checked })}
+            />
+            Randomize option order
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={Boolean(question.allow_other)}
+              onChange={(e) => onChange({ allow_other: e.target.checked })}
+            />
+            Allow &quot;Other&quot; with text box
+          </label>
+          {question.allow_other && (
+            <input
+              value={question.other_label ?? ''}
+              onChange={(e) => onChange({ other_label: e.target.value })}
+              className="et-input w-full text-sm"
+              placeholder="Other label"
+            />
+          )}
+        </>
+      )}
       {showScale && (
-        <div className="grid grid-cols-2 gap-2">
-          <label className="text-xs text-slate-500">
-            Scale min
-            <input
-              type="number"
-              value={question.scale_min ?? 1}
-              onChange={(e) => onChange({ scale_min: Number(e.target.value) })}
-              className="et-input mt-1 w-full"
-            />
-          </label>
-          <label className="text-xs text-slate-500">
-            Scale max
-            <input
-              type="number"
-              value={question.scale_max ?? 5}
-              onChange={(e) => onChange({ scale_max: Number(e.target.value) })}
-              className="et-input mt-1 w-full"
-            />
-          </label>
+        <div className="space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-3">
+          <p className="text-xs font-medium text-slate-600">Scale range</p>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-xs text-slate-500">
+              Min
+              <input
+                type="number"
+                value={question.scale_min ?? 1}
+                onChange={(e) => onChange({ scale_min: Number(e.target.value) })}
+                className="et-input mt-1 w-full"
+              />
+            </label>
+            <label className="text-xs text-slate-500">
+              Max
+              <input
+                type="number"
+                value={question.scale_max ?? 5}
+                onChange={(e) => onChange({ scale_max: Number(e.target.value) })}
+                className="et-input mt-1 w-full"
+              />
+            </label>
+            <label className="text-xs text-slate-500">
+              Min label
+              <input
+                value={question.scale_min_label ?? ''}
+                onChange={(e) => onChange({ scale_min_label: e.target.value })}
+                className="et-input mt-1 w-full"
+                placeholder="e.g. Not at all"
+              />
+            </label>
+            <label className="text-xs text-slate-500">
+              Max label
+              <input
+                value={question.scale_max_label ?? ''}
+                onChange={(e) => onChange({ scale_max_label: e.target.value })}
+                className="et-input mt-1 w-full"
+                placeholder="e.g. Extremely"
+              />
+            </label>
+          </div>
         </div>
       )}
       {showOptions && (
-        <div>
-          <p className="mb-1 text-xs font-medium text-slate-500">Answer options</p>
-          <ul className="space-y-2">
-            {(question.options ?? []).map((opt, i) => (
-              <li key={i} className="flex gap-2">
-                <input
-                  value={opt.code}
-                  onChange={(e) => {
-                    const options = [...(question.options ?? [])]
-                    options[i] = { ...opt, code: e.target.value }
-                    onChange({ options })
-                  }}
-                  className="et-input w-16 font-mono text-xs"
-                  placeholder="Code"
-                />
-                <input
-                  value={opt.label}
-                  onChange={(e) => {
-                    const options = [...(question.options ?? [])]
-                    options[i] = { ...opt, label: e.target.value }
-                    onChange({ options })
-                  }}
-                  className="et-input flex-1 text-sm"
-                  placeholder="Label"
-                />
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            onClick={() =>
-              onChange({
-                options: [
-                  ...(question.options ?? []),
-                  { code: String((question.options?.length ?? 0) + 1), label: 'New option', sort_order: question.options?.length ?? 0 },
-                ],
-              })
-            }
-            className="mt-2 text-xs text-[var(--et-teal)]"
-          >
-            + Add option
-          </button>
-        </div>
+        <OptionListEditor
+          title="Answer options"
+          items={question.options ?? []}
+          onChange={(options) => onChange({ options })}
+        />
       )}
       {showRows && (
-        <div>
-          <p className="mb-1 text-xs font-medium text-slate-500">Matrix rows</p>
-          <ul className="space-y-2">
-            {(question.rows ?? []).map((row, i) => (
-              <li key={i} className="flex gap-2">
-                <input
-                  value={row.code}
-                  onChange={(e) => {
-                    const rows = [...(question.rows ?? [])]
-                    rows[i] = { ...row, code: e.target.value }
-                    onChange({ rows })
-                  }}
-                  className="et-input w-16 font-mono text-xs"
-                />
-                <input
-                  value={row.label}
-                  onChange={(e) => {
-                    const rows = [...(question.rows ?? [])]
-                    rows[i] = { ...row, label: e.target.value }
-                    onChange({ rows })
-                  }}
-                  className="et-input flex-1 text-sm"
-                />
-              </li>
-            ))}
-          </ul>
-        </div>
+        <OptionListEditor
+          title={question.type === 'array_carousel' ? 'Carousel items (sub-questions)' : 'Matrix rows'}
+          items={question.rows ?? []}
+          codePrefix="R"
+          onChange={(rows) => onChange({ rows })}
+        />
       )}
+      {showColumns && (
+        <OptionListEditor
+          title="Column options (scale labels)"
+          items={question.options ?? []}
+          onChange={(options) => onChange({ options })}
+          hint="Leave as Likert labels, or clear and use numeric scale min/max only."
+        />
+      )}
+      {question.type === 'array_carousel' && (
+        <p className="rounded-lg bg-[var(--et-yellow-light)] px-3 py-2 text-xs text-[var(--et-navy)]">
+          Respondents see one sub-question at a time with Previous / Next navigation — ideal for mobile.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function OptionListEditor({
+  title,
+  items,
+  onChange,
+  codePrefix = '',
+  hint,
+}: {
+  title: string
+  items: { code: string; label: string; sort_order: number }[]
+  onChange: (items: { code: string; label: string; sort_order: number }[]) => void
+  codePrefix?: string
+  hint?: string
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-xs font-medium text-slate-500">{title}</p>
+      {hint && <p className="mb-2 text-[10px] text-slate-400">{hint}</p>}
+      <ul className="space-y-2">
+        {items.map((opt, i) => (
+          <li key={`${opt.code}-${i}`} className="flex gap-2">
+            <input
+              value={opt.code}
+              onChange={(e) => {
+                const next = [...items]
+                next[i] = { ...opt, code: e.target.value }
+                onChange(next)
+              }}
+              className="et-input w-16 font-mono text-xs"
+              placeholder="Code"
+            />
+            <input
+              value={opt.label}
+              onChange={(e) => {
+                const next = [...items]
+                next[i] = { ...opt, label: e.target.value }
+                onChange(next)
+              }}
+              className="et-input flex-1 text-sm"
+              placeholder="Label"
+            />
+            <button
+              type="button"
+              onClick={() => onChange(items.filter((_, j) => j !== i))}
+              className="text-slate-400 hover:text-rose-600"
+              aria-label="Remove"
+            >
+              <Trash2 size={14} />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={() =>
+          onChange([
+            ...items,
+            {
+              code: codePrefix ? `${codePrefix}${items.length + 1}` : String(items.length + 1),
+              label: 'New item',
+              sort_order: items.length,
+            },
+          ])
+        }
+        className="mt-2 text-xs font-medium text-[var(--et-navy)] hover:underline"
+      >
+        + Add item
+      </button>
     </div>
   )
 }

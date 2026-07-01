@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { api, type EtCollectorSurvey, type EtQuestion } from '../api/client'
 import { BrandLogo } from '../components/BrandLogo'
+import { EtQuestionField } from '../components/survey/EtQuestionField'
 import { ErrorState, LoadingState } from '../components/States'
 
 function matchesShowIf(
@@ -121,7 +122,7 @@ export function SurveyCollectorPage() {
               </h2>
               <div className="space-y-6">
                 {visibleQuestions.map((q) => (
-                  <QuestionField key={q.id} question={q} value={answers[q.id]} onChange={(v) => setAnswer(q.id, v)} />
+                  <EtQuestionField key={q.id} question={q} value={answers[q.id]} onChange={(v) => setAnswer(q.id, v)} />
                 ))}
               </div>
             </>
@@ -161,168 +162,6 @@ export function SurveyCollectorPage() {
           </div>
         </div>
       </div>
-    </div>
-  )
-}
-
-function QuestionField({
-  question,
-  value,
-  onChange,
-}: {
-  question: EtQuestion
-  value: unknown
-  onChange: (v: unknown) => void
-}) {
-  if (question.type === 'display') {
-    return <p className="text-sm leading-relaxed text-slate-700">{question.text}</p>
-  }
-
-  return (
-    <div>
-      <p className="text-sm font-medium text-slate-900">
-        {question.text}
-        {question.required && <span className="text-rose-500"> *</span>}
-      </p>
-      {question.help_text && <p className="mt-0.5 text-xs text-slate-500">{question.help_text}</p>}
-
-      {question.type === 'single' || question.type === 'yes_no' ? (
-        <ul className="mt-2 space-y-2">
-          {(question.options ?? []).map((opt) => (
-            <li key={opt.code}>
-              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-100 px-3 py-2 hover:border-[var(--et-teal)]/40">
-                <input
-                  type="radio"
-                  name={question.id}
-                  checked={String(value) === opt.code}
-                  onChange={() => onChange(opt.code)}
-                />
-                <span className="text-sm text-slate-800">{opt.label}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {question.type === 'multi' ? (
-        <ul className="mt-2 space-y-2">
-          {(question.options ?? []).map((opt) => {
-            const selected = Array.isArray(value) ? value.map(String) : []
-            const checked = selected.includes(opt.code)
-            return (
-              <li key={opt.code}>
-                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-100 px-3 py-2">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => {
-                      const next = new Set(selected)
-                      if (checked) next.delete(opt.code)
-                      else next.add(opt.code)
-                      onChange([...next])
-                    }}
-                  />
-                  <span className="text-sm">{opt.label}</span>
-                </label>
-              </li>
-            )
-          })}
-        </ul>
-      ) : null}
-
-      {question.type === 'scale' ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {Array.from(
-            { length: (question.scale_max ?? 5) - (question.scale_min ?? 1) + 1 },
-            (_, i) => (question.scale_min ?? 1) + i,
-          ).map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => onChange(String(n))}
-              className={`h-10 w-10 rounded-full border text-sm ${
-                String(value) === String(n)
-                  ? 'border-[var(--et-teal)] bg-[var(--et-teal)] text-white'
-                  : 'border-slate-200 text-slate-700 hover:border-[var(--et-teal)]'
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {question.type === 'numeric' ? (
-        <input
-          type="number"
-          value={value === undefined || value === null ? '' : String(value)}
-          onChange={(e) => onChange(e.target.value)}
-          className="et-input mt-2 w-full max-w-xs"
-        />
-      ) : null}
-
-      {question.type === 'text' ? (
-        <input
-          type="text"
-          value={value === undefined || value === null ? '' : String(value)}
-          onChange={(e) => onChange(e.target.value)}
-          className="et-input mt-2 w-full"
-        />
-      ) : null}
-
-      {question.type === 'long_text' ? (
-        <textarea
-          value={value === undefined || value === null ? '' : String(value)}
-          onChange={(e) => onChange(e.target.value)}
-          rows={4}
-          className="et-input mt-2 w-full"
-        />
-      ) : null}
-
-      {question.type === 'matrix' ? (
-        <div className="mt-3 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr>
-                <th className="p-2 text-left" />
-                {Array.from(
-                  { length: (question.scale_max ?? 5) - (question.scale_min ?? 1) + 1 },
-                  (_, i) => (question.scale_min ?? 1) + i,
-                ).map((n) => (
-                  <th key={n} className="p-2 text-center font-normal text-slate-500">
-                    {n}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {(question.rows ?? []).map((row) => {
-                const matrixVal = (value as Record<string, string> | undefined) ?? {}
-                return (
-                  <tr key={row.code} className="border-t border-slate-100">
-                    <td className="p-2 font-medium text-slate-800">{row.label}</td>
-                    {Array.from(
-                      { length: (question.scale_max ?? 5) - (question.scale_min ?? 1) + 1 },
-                      (_, i) => (question.scale_min ?? 1) + i,
-                    ).map((n) => (
-                      <td key={n} className="p-2 text-center">
-                        <input
-                          type="radio"
-                          name={`${question.id}_${row.code}`}
-                          checked={matrixVal[row.code] === String(n)}
-                          onChange={() =>
-                            onChange({ ...matrixVal, [row.code]: String(n) })
-                          }
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
     </div>
   )
 }

@@ -362,6 +362,23 @@ class PipelineOverview(BaseModel):
     unlinked_survey_ids: list[int] = Field(default_factory=list)
 
 
+class PmImportRowResult(BaseModel):
+    row_number: int
+    project_name: str
+    status: Literal["created", "skipped", "error"]
+    project_id: UUID | None = None
+    limesurvey_survey_id: int | None = None
+    message: str | None = None
+
+
+class PmImportResult(BaseModel):
+    total_rows: int
+    created: int
+    skipped: int
+    errors: int
+    rows: list[PmImportRowResult] = Field(default_factory=list)
+
+
 # --- Agent I/O ---
 
 

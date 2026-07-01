@@ -3,6 +3,7 @@
 from app.models.et_survey import (
     EtAnswerOption,
     EtBlock,
+    EtMatrixRow,
     EtQuestion,
     EtSurveyDefinition,
     EtSurveySettings,
@@ -54,6 +55,47 @@ def test_build_schema_from_definition(monkeypatch):
     assert len(schema["variables"]) == 1
     assert schema["variables"][0]["code"] == "Q1"
     assert schema["variables"][0]["kind"] == "single"
+
+
+def test_array_carousel_schema_columns(monkeypatch):
+    definition = EtSurveyDefinition(
+        version=1,
+        blocks=[
+            EtBlock(
+                id="b1",
+                title="Battery",
+                sort_order=0,
+                questions=[
+                    EtQuestion(
+                        id="q_car",
+                        code="QATTR",
+                        type="array_carousel",
+                        text="Rate each attribute",
+                        sort_order=0,
+                        rows=[EtMatrixRow(code="R1", label="Quality", sort_order=0)],
+                        options=[
+                            EtAnswerOption(code="1", label="Low", sort_order=0),
+                            EtAnswerOption(code="5", label="High", sort_order=1),
+                        ],
+                    ),
+                ],
+            )
+        ],
+    )
+
+    class FakeSurvey:
+        workspace_id = 9_000_002
+        title = "Carousel test"
+        response_count = 0
+
+    fake = FakeSurvey()
+    fake.definition = definition
+
+    monkeypatch.setattr("app.services.et_survey_schema.get_et_survey", lambda _id: fake)
+    schema = build_et_survey_schema(9_000_002)
+    var = schema["variables"][0]
+    assert var["et_type"] == "array_carousel"
+    assert var["columns"] == ["QATTR_R1"]
 
 
 def test_is_et_survey_id_range():

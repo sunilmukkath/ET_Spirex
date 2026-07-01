@@ -1,10 +1,12 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   Bot,
   Briefcase,
   Code2,
   DollarSign,
+  Download,
+  FileUp,
   FileText,
   Link2,
   Loader2,
@@ -21,6 +23,7 @@ import {
   type PmAgentDraft,
   type PmClient,
   type PmFinanceSummary,
+  type PmImportResult,
   type PmPipelineOverview,
   type Project,
   type ProjectRequirements,
@@ -160,6 +163,10 @@ export function OperationsHubPage() {
   const [newClientName, setNewClientName] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
   const [linkSurveyId, setLinkSurveyId] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<PmImportResult | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -236,6 +243,21 @@ export function OperationsHubPage() {
     })
     setNewProjectName('')
     await load()
+  }
+
+  async function handleImportProjects(file: File) {
+    setImporting(true)
+    setImportError(null)
+    setImportResult(null)
+    try {
+      const result = await api.importPmProjects(file)
+      setImportResult(result)
+      await load()
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setImporting(false)
+    }
   }
 
   async function handleStageChange(projectId: string, stage: string) {
@@ -394,6 +416,71 @@ export function OperationsHubPage() {
                 <p className="mt-1 text-[10px] leading-tight text-slate-500">{s.stage}</p>
               </div>
             ))}
+          </div>
+
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-semibold text-[var(--et-navy)]">Import projects from Excel</h3>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Upload a sheet with project names and LimeSurvey IDs or survey titles — ET Scout creates pipeline
+              entries and links studies automatically.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void api.downloadPmProjectImportTemplate().catch(() => setImportError('Template download failed'))}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Download size={14} />
+                Download template
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".xlsx,.xlsm,.csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void handleImportProjects(file)
+                  e.target.value = ''
+                }}
+              />
+              <button
+                type="button"
+                disabled={importing}
+                onClick={() => importInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-lg et-btn-accent px-3 py-2 text-xs disabled:opacity-50"
+              >
+                {importing ? <Loader2 size={14} className="animate-spin" /> : <FileUp size={14} />}
+                Upload project sheet
+              </button>
+            </div>
+            {importError && <p className="mt-2 text-xs text-rose-600">{importError}</p>}
+            {importResult && (
+              <div className="mt-3 rounded-lg bg-[var(--et-gray-50)] px-3 py-2 text-xs text-slate-700">
+                <p className="font-medium text-[var(--et-navy)]">
+                  Import complete — {importResult.created} created, {importResult.skipped} skipped,{' '}
+                  {importResult.errors} errors
+                </p>
+                <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto et-scroll">
+                  {importResult.rows.map((row) => (
+                    <li key={`${row.row_number}-${row.project_name}`}>
+                      <span
+                        className={
+                          row.status === 'created'
+                            ? 'text-emerald-700'
+                            : row.status === 'skipped'
+                              ? 'text-amber-700'
+                              : 'text-rose-700'
+                        }
+                      >
+                        Row {row.row_number}: {row.project_name}
+                      </span>
+                      {row.message ? ` — ${row.message}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
 
           <form onSubmit={(e) => void handleCreateProject(e)} className="flex flex-wrap gap-2">

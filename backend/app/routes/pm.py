@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import time
 from uuid import UUID
 
 from collections.abc import Generator
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -39,6 +41,7 @@ from app.models.pm import (
     MarketingActivityCreate,
     MarketingActivityOut,
     PipelineOverview,
+    PmImportResult,
     PmProjectCreate,
     PmProjectOut,
     PmProjectUpdate,
@@ -51,6 +54,7 @@ from app.models.pm import (
 )
 from app.models.project_requirements import ProjectRequirements
 from app.services import pm_ops_store, pm_store
+from app.services.pm_import import import_projects_from_sheet, project_import_template_xlsx
 from app.services.crm_agent import run_crm_agent
 from app.services.finance_agent import run_finance_agent
 from app.services.proposal_agent import run_proposal_writing_agent
@@ -139,6 +143,35 @@ def pm_create_project(
     session: Session = Depends(get_pm_db),
 ):
     return pm_store.create_project(session, body)
+
+
+@router.get("/projects/import/template")
+def pm_project_import_template(_: str = Depends(require_auth)):
+    data = project_import_template_xlsx()
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="et_scout_project_import_template.xlsx"'},
+    )
+
+
+@router.post("/projects/import", response_model=PmImportResult)
+async def pm_import_projects(
+    file: UploadFile = File(...),
+    _: str = Depends(require_auth),
+    session: Session = Depends(get_pm_db),
+):
+    filename = file.filename or "upload.xlsx"
+    lower = filename.lower()
+    if not lower.endswith((".xlsx", ".xlsm", ".csv")):
+        raise HTTPException(status_code=400, detail="Upload .xlsx or .csv project sheet")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    try:
+        return import_projects_from_sheet(session, data, filename=filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/projects/{project_id}", response_model=PmProjectOut)

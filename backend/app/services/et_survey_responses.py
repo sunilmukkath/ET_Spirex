@@ -21,7 +21,10 @@ _TTL = 120
 def _flatten_answers(answers: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
     row: dict[str, Any] = {}
     code_by_id = {v["id"]: v["code"] for v in schema.get("variables") or []}
-    matrix_vars = {v["id"]: v for v in schema.get("variables") or [] if v.get("et_type") == "matrix"}
+    matrix_types = {"matrix", "array_carousel"}
+    matrix_vars = {
+        v["id"]: v for v in schema.get("variables") or [] if v.get("et_type") in matrix_types
+    }
 
     for qid, value in answers.items():
         var = matrix_vars.get(qid)

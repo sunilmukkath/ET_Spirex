@@ -975,11 +975,16 @@ export type EtQuestionType =
   | 'display'
   | 'single'
   | 'multi'
+  | 'dropdown'
   | 'text'
   | 'long_text'
   | 'numeric'
+  | 'email'
+  | 'date'
   | 'scale'
   | 'matrix'
+  | 'array_carousel'
+  | 'ranking'
   | 'yes_no'
 
 export interface EtAnswerOption {
@@ -1014,6 +1019,9 @@ export interface EtQuestion {
   scale_max?: number
   scale_min_label?: string
   scale_max_label?: string
+  allow_other?: boolean
+  other_label?: string
+  randomize_options?: boolean
   show_if?: EtShowIfRule | null
 }
 
@@ -1406,6 +1414,23 @@ export interface PmPipelineOverview {
   stages: Array<{ stage: string; count: number }>
   projects: PmPipelineProject[]
   unlinked_survey_ids: number[]
+}
+
+export interface PmImportRowResult {
+  row_number: number
+  project_name: string
+  status: 'created' | 'skipped' | 'error'
+  project_id: string | null
+  limesurvey_survey_id: number | null
+  message: string | null
+}
+
+export interface PmImportResult {
+  total_rows: number
+  created: number
+  skipped: number
+  errors: number
+  rows: PmImportRowResult[]
 }
 
 export interface PmMarketingActivity {
@@ -2172,6 +2197,51 @@ export const api = {
       },
       BOOTSTRAP_TIMEOUT_MS,
     ),
+  downloadPmProjectImportTemplate: async () => {
+    const token = localStorage.getItem('et_scout_auth')
+    let auth = ''
+    if (token) {
+      try {
+        auth = JSON.parse(token).token ?? ''
+      } catch {
+        auth = ''
+      }
+    }
+    const res = await fetch('/api/pm/projects/import/template', {
+      headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+    })
+    if (!res.ok) throw new Error('Could not download template')
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'et_scout_project_import_template.xlsx'
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+  importPmProjects: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const token = localStorage.getItem('et_scout_auth')
+    let auth = ''
+    if (token) {
+      try {
+        auth = JSON.parse(token).token ?? ''
+      } catch {
+        auth = ''
+      }
+    }
+    const res = await fetch('/api/pm/projects/import', {
+      method: 'POST',
+      headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+      body: form,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Import failed')
+    }
+    return res.json() as Promise<PmImportResult>
+  },
   getPmFieldworkDashboard: (projectId: string) =>
     fetchJson<PmFieldworkDashboard>(
       `/api/pm/projects/${projectId}/fieldwork/dashboard`,

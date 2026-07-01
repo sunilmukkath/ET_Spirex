@@ -25,7 +25,7 @@ Rules:
         {
           "id": "q1",
           "code": "Q1",
-          "type": "single|multi|yes_no|scale|numeric|text|long_text|matrix|display",
+          "type": "single|multi|dropdown|yes_no|scale|numeric|text|long_text|email|date|matrix|array_carousel|ranking|display",
           "text": "Question text",
           "help_text": "",
           "required": true,
@@ -41,7 +41,7 @@ Rules:
 }
 - Use sensible codes Q1, Q2… and section blocks (Screener, Main, Demographics).
 - Include display/instruction items where helpful.
-- For matrix questions include rows and scale_min/scale_max.
+- For matrix and array_carousel questions include rows and scale_min/scale_max (or options as column labels).
 - Do not invent client names unless provided in context."""
 
 

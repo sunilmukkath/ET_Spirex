@@ -10,11 +10,16 @@ EtQuestionType = Literal[
     "display",
     "single",
     "multi",
+    "dropdown",
     "text",
     "long_text",
     "numeric",
+    "email",
+    "date",
     "scale",
     "matrix",
+    "array_carousel",
+    "ranking",
     "yes_no",
 ]
 
@@ -57,6 +62,9 @@ class EtQuestion(BaseModel):
     scale_max: int = 5
     scale_min_label: str = ""
     scale_max_label: str = ""
+    allow_other: bool = False
+    other_label: str = "Other (please specify)"
+    randomize_options: bool = False
     show_if: EtShowIfRule | None = None
 
 

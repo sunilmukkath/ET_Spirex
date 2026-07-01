@@ -11,12 +11,17 @@ from app.services.question_types import get_type_info
 _ET_TYPE_MAP: dict[str, str] = {
     "display": "X",
     "single": "L",
+    "dropdown": "L",
     "multi": "M",
     "text": "S",
     "long_text": "T",
     "numeric": "N",
+    "email": "S",
+    "date": "S",
     "scale": "5",
     "matrix": "F",
+    "array_carousel": "F",
+    "ranking": "R",
     "yes_no": "Y",
 }
 
@@ -38,7 +43,7 @@ def _question_to_variable(
     ]
     subquestions: list[dict[str, Any]] = []
 
-    if question.type == "matrix":
+    if question.type in ("matrix", "array_carousel"):
         columns = [f"{question.code}_{row.code}" for row in question.rows]
         subquestions = [
             {
