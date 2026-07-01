@@ -16,9 +16,18 @@ export interface ChartPalette {
 export const CHART_PALETTES: ChartPalette[] = [
   {
     id: 'et_teal',
-    label: 'ET Teal',
-    colors: ['#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#6366f1', '#8b5cf6', '#f59e0b', '#ec4899'],
-    heatmapRgb: [13, 148, 136],
+    label: 'Elastic Tree',
+    colors: [
+      '#7c3aed',
+      '#2563eb',
+      '#0ea5e9',
+      '#0f766e',
+      '#16a34a',
+      '#84cc16',
+      '#0b2545',
+      '#f0b429',
+    ],
+    heatmapRgb: [11, 37, 69],
   },
   {
     id: 'ocean',

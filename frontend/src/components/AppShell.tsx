@@ -96,7 +96,7 @@ export function AppShell() {
 
   return (
     <div className="et-canvas-dots min-h-screen">
-      <header className="sticky top-0 z-20 border-b border-[var(--et-teal)]/10 bg-white/90 shadow-sm backdrop-blur-md">
+      <header className="sticky top-0 z-20 border-b border-[var(--border-subtle)] bg-white/95 shadow-sm backdrop-blur-md">
         <div className="et-page et-page-wide flex items-center justify-between gap-4 py-3.5">
           <div className="flex items-center gap-2">
             <button
@@ -180,7 +180,7 @@ export function AppShell() {
                     refreshSessions()
                     setShowSessions((v) => !v)
                   }}
-                  className="hidden items-center gap-1.5 rounded-full bg-[var(--et-teal-light)] px-3 py-1.5 text-xs font-medium text-[var(--et-teal-dark)] ring-1 ring-[var(--et-teal)]/20 sm:flex"
+                  className="hidden items-center gap-1.5 rounded-full bg-[var(--et-yellow-light)] px-3 py-1.5 text-xs font-medium text-[var(--et-navy)] ring-1 ring-[var(--et-yellow)]/25 sm:flex"
                 >
                   <Users size={14} />
                   {activeSessions.length} signed in
@@ -204,7 +204,7 @@ export function AppShell() {
               </div>
             )}
             <div className="flex items-center gap-2 rounded-full bg-[var(--et-navy)] py-1.5 pl-3 pr-1.5 text-sm text-white shadow-md">
-              <span className="hidden h-2 w-2 rounded-full bg-[var(--et-teal-light)] sm:inline" />
+              <span className="hidden h-2 w-2 rounded-full bg-[var(--et-yellow)] sm:inline" />
               <span className="font-medium">{user?.username}</span>
               <button
                 type="button"
@@ -239,7 +239,7 @@ export function AppShell() {
                 to="/home"
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/home' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                  location.pathname === '/home' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 <Home size={16} />
@@ -249,7 +249,7 @@ export function AppShell() {
                 to="/dashboard"
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/dashboard' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                  location.pathname === '/dashboard' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 <LayoutGrid size={16} />
@@ -259,7 +259,7 @@ export function AppShell() {
                 to="/my-work"
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/my-work' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                  location.pathname === '/my-work' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 <ClipboardList size={16} />
@@ -269,7 +269,7 @@ export function AppShell() {
                 to="/operations"
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/operations' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                  location.pathname === '/operations' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 <LayoutGrid size={16} />
@@ -279,7 +279,7 @@ export function AppShell() {
                 to="/fieldwork"
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/fieldwork' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                  location.pathname === '/fieldwork' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 <BarChart3 size={16} />
@@ -289,7 +289,7 @@ export function AppShell() {
                 to="/settings"
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  location.pathname === '/settings' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                  location.pathname === '/settings' ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 <Settings size={16} />

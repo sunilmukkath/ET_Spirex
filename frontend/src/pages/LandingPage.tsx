@@ -133,9 +133,9 @@ export function LandingPage() {
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[var(--et-navy)] text-white">
       <div className="pointer-events-none absolute inset-0">
-        <div className="landing-glow absolute -left-24 top-8 h-[28rem] w-[28rem] rounded-full bg-[var(--et-teal)]/25 blur-3xl" />
+        <div className="landing-glow absolute -left-24 top-8 h-[28rem] w-[28rem] rounded-full bg-[var(--et-yellow)]/20 blur-3xl" />
         <div
-          className="landing-glow absolute bottom-0 right-0 h-[32rem] w-[32rem] rounded-full bg-[var(--et-gold)]/12 blur-3xl"
+          className="landing-glow absolute bottom-0 right-0 h-[32rem] w-[32rem] rounded-full bg-[var(--et-info-blue)]/10 blur-3xl"
           style={{ animationDelay: '2s' }}
         />
         <div className="et-grid absolute inset-0 opacity-[0.06]" />
@@ -155,10 +155,10 @@ export function LandingPage() {
           <button
             type="button"
             onClick={scrollToSignIn}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium transition hover:border-[var(--et-teal)]/40 hover:bg-white/10 sm:px-5"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium transition hover:border-[var(--et-yellow)]/50 hover:bg-white/10 sm:px-5"
           >
             Sign in
-            <ChevronRight size={14} className="text-[var(--et-teal-light)]" />
+            <ChevronRight size={14} className="text-[var(--et-yellow-bright)]" />
           </button>
         </div>
       </header>
@@ -167,7 +167,7 @@ export function LandingPage() {
         <div className="grid gap-14 lg:grid-cols-[1.05fr_0.95fr] lg:items-start lg:gap-16">
           <div>
             <div className="animate-fade-in">
-              <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--et-teal)]/35 bg-[var(--et-teal)]/10 px-3.5 py-1.5 text-xs font-semibold text-[var(--et-teal-light)]">
+              <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--et-yellow)]/40 bg-[var(--et-yellow)]/15 px-3.5 py-1.5 text-xs font-semibold text-[var(--et-yellow-bright)]">
                 <Sparkles size={14} />
                 {ET_LANDING_BADGE}
               </div>
@@ -195,7 +195,7 @@ export function LandingPage() {
                 <button
                   type="button"
                   onClick={scrollToSignIn}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[var(--et-teal)] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--et-teal)]/25 transition hover:bg-[var(--accent-hover)]"
+                  className="inline-flex items-center gap-2 rounded-xl bg-[var(--et-yellow)] px-5 py-3 text-sm font-semibold text-[var(--et-navy)] shadow-lg shadow-[var(--et-yellow)]/30 transition hover:brightness-105"
                 >
                   Sign in to workspace
                   <ArrowRight size={16} />
@@ -226,7 +226,7 @@ export function LandingPage() {
                         aria-hidden
                       />
                     )}
-                    <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--et-teal)]/20 text-[var(--et-teal-light)]">
+                    <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--et-yellow)]/20 text-[var(--et-yellow-bright)]">
                       <Icon size={18} />
                     </div>
                     <p className="text-sm font-semibold text-white">{label}</p>
@@ -252,17 +252,17 @@ export function LandingPage() {
                 {CAPABILITY_GROUPS.map((group) => (
                   <div key={group.title}>
                     <div className="mb-3">
-                      <h3 className="text-sm font-semibold text-[var(--et-teal-light)]">{group.title}</h3>
+                      <h3 className="text-sm font-semibold text-[var(--et-yellow-bright)]">{group.title}</h3>
                       <p className="text-xs text-white/45">{group.description}</p>
                     </div>
                     <div className="grid gap-2.5 sm:grid-cols-3">
                       {group.features.map(({ icon: Icon, title, desc }) => (
                         <div
                           key={title}
-                          className="group rounded-2xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-[var(--et-teal)]/35 hover:bg-white/[0.07] hover:shadow-lg hover:shadow-black/10"
+                          className="group rounded-2xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-[var(--et-yellow)]/35 hover:bg-white/[0.07] hover:shadow-lg hover:shadow-black/10"
                         >
                           <div className="mb-2.5 flex items-center gap-2.5">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--et-teal)]/20 text-[var(--et-teal-light)] ring-1 ring-white/10 transition group-hover:bg-[var(--et-teal)]/30">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--et-yellow)]/20 text-[var(--et-yellow-bright)] ring-1 ring-white/10 transition group-hover:bg-[var(--et-yellow)]/30">
                               <Icon size={16} />
                             </span>
                             <h4 className="text-sm font-semibold text-white">{title}</h4>

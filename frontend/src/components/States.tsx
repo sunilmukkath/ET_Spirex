@@ -4,19 +4,19 @@ export function LoadingState({ message = 'Loading...' }: { message?: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-24">
       <div className="relative">
-        <div className="absolute inset-0 animate-ping rounded-full bg-[var(--et-teal)]/20" />
-        <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-md ring-1 ring-[var(--et-teal)]/15">
-          <Loader2 className="animate-spin text-[var(--et-teal)]" size={26} />
+        <div className="absolute inset-0 animate-ping rounded-full bg-[var(--et-yellow)]/25" />
+        <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-md ring-1 ring-[var(--et-yellow)]/30">
+          <Loader2 className="animate-spin text-[var(--et-navy)]" size={26} />
         </div>
       </div>
-      <p className="text-sm font-medium text-slate-600">{message}</p>
+      <p className="text-sm font-medium text-[var(--et-gray-600)]">{message}</p>
     </div>
   )
 }
 
 export function ErrorState({ message }: { message: string }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-red-200/80 bg-gradient-to-br from-red-50 to-white p-4 text-red-800 shadow-sm">
+    <div className="flex items-start gap-3 rounded-xl border border-[var(--et-negative)]/20 bg-[var(--et-negative-light)] p-4 text-[var(--et-negative)] shadow-sm">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-100">
         <AlertCircle size={18} />
       </div>
@@ -42,8 +42,8 @@ export function EmptyState({
       <div className="et-empty-icon mx-auto">
         {icon ?? <Inbox size={28} strokeWidth={1.5} />}
       </div>
-      <h3 className="mt-5 font-display text-lg font-semibold text-slate-900">{title}</h3>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-500">{description}</p>
+      <h3 className="mt-5 font-display text-lg font-semibold text-[var(--ink)]">{title}</h3>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[var(--muted)]">{description}</p>
     </div>
   )
 }

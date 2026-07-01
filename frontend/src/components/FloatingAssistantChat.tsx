@@ -138,7 +138,7 @@ export function FloatingAssistantChat() {
         >
           <header className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--canvas)] px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--et-teal)]/15 text-[var(--et-teal)]">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--et-yellow-light)] text-[var(--et-navy)]">
                 <Sparkles size={16} />
               </span>
               <div className="min-w-0">
@@ -162,7 +162,7 @@ export function FloatingAssistantChat() {
                 key={m.id}
                 className={
                   m.role === 'user'
-                    ? 'ml-8 rounded-2xl rounded-br-md bg-[var(--et-teal)] px-3 py-2 text-sm text-white'
+                    ? 'ml-8 rounded-2xl rounded-br-md bg-[var(--et-navy)] px-3 py-2 text-sm text-white'
                     : 'mr-4 rounded-2xl rounded-bl-md bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink)]'
                 }
               >
@@ -199,7 +199,7 @@ export function FloatingAssistantChat() {
                 type="button"
                 onClick={() => void send()}
                 disabled={sending || !input.trim()}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--et-teal)] text-white hover:opacity-90 disabled:opacity-40"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--et-navy)] text-white hover:opacity-90 disabled:opacity-40"
                 aria-label="Send message"
               >
                 {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
@@ -212,7 +212,7 @@ export function FloatingAssistantChat() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-5 right-5 z-[80] flex h-14 w-14 items-center justify-center rounded-full bg-[var(--et-teal)] text-white shadow-lg transition hover:scale-105 hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--et-teal)] focus-visible:ring-offset-2"
+        className="fixed bottom-5 right-5 z-[80] flex h-14 w-14 items-center justify-center rounded-full bg-[var(--et-navy)] text-[var(--et-yellow-bright)] shadow-lg transition hover:scale-105 hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--et-yellow)] focus-visible:ring-offset-2"
         aria-label={open ? 'Close ET Scout Copilot' : 'Open ET Scout Copilot'}
         aria-expanded={open}
       >

@@ -38,8 +38,8 @@ export function LocationMap({ points, bounds }: Props) {
     for (const p of points) {
       L.circleMarker([p.lat, p.lng], {
         radius: 5,
-        color: '#00796b',
-        fillColor: '#00796b',
+        color: '#0b2545',
+        fillColor: '#0f766e',
         fillOpacity: 0.75,
         weight: 1,
       }).addTo(map)
