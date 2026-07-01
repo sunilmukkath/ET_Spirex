@@ -172,6 +172,7 @@ def run_data_quality(
         col_index,
         interviewer_variable_id=interviewer_id,
         similarity_threshold=thresholds.interviewer_duplicate_similarity_pct / 100.0,
+        min_cluster=thresholds.interviewer_duplicate_min_cluster,
     )
     interviewer_gps_proximity = _detect_interviewer_gps_proximity(
         df,
@@ -857,16 +858,24 @@ def _detect_interviewer_duplicate_answers(
     *,
     interviewer_variable_id: str | None,
     similarity_threshold: float = 0.85,
+    min_cluster: int = 4,
 ) -> dict[str, Any]:
-    if not interviewer_variable_id:
+    min_cluster = max(2, int(min_cluster or 4))
+    threshold_pct = round(similarity_threshold * 100, 1)
+
+    def _unavailable(message: str) -> dict[str, Any]:
         return {
             "available": False,
-            "message": "Select an interviewer question in QC or Field team settings.",
+            "message": message,
             "count": 0,
             "flags": [],
             "by_interviewer": [],
-            "threshold_pct": round(similarity_threshold * 100, 1),
+            "threshold_pct": threshold_pct,
+            "min_cluster": min_cluster,
         }
+
+    if not interviewer_variable_id:
+        return _unavailable("Select an interviewer question in QC or Field team settings.")
 
     from app.services.field_reports import _interviewer_labels
     from app.services.question_schema import get_variable
@@ -874,27 +883,13 @@ def _detect_interviewer_duplicate_answers(
 
     var = get_variable(schema, interviewer_variable_id)
     if not var:
-        return {
-            "available": False,
-            "message": "Interviewer question not found in this survey.",
-            "count": 0,
-            "flags": [],
-            "by_interviewer": [],
-            "threshold_pct": round(similarity_threshold * 100, 1),
-        }
+        return _unavailable("Interviewer question not found in this survey.")
 
     interviewer_col = find_variable_column(var, df)
     exclude = {interviewer_col} if interviewer_col else set()
     compare_cols = _comparable_fingerprint_columns(schema, col_index, exclude_columns=exclude)
     if len(compare_cols) < _MIN_COMPARABLE_FIELDS:
-        return {
-            "available": False,
-            "message": f"Need at least {_MIN_COMPARABLE_FIELDS} comparable closed-ended fields.",
-            "count": 0,
-            "flags": [],
-            "by_interviewer": [],
-            "threshold_pct": round(similarity_threshold * 100, 1),
-        }
+        return _unavailable(f"Need at least {_MIN_COMPARABLE_FIELDS} comparable closed-ended fields.")
 
     id_col = response_id_column(df)
     interviewers = _interviewer_labels(schema, var, df)
@@ -922,7 +917,7 @@ def _detect_interviewer_duplicate_answers(
     by_interviewer_summary: list[dict[str, Any]] = []
 
     for interviewer, indices in by_interviewer.items():
-        if len(indices) < 2:
+        if len(indices) < min_cluster:
             continue
 
         def sort_key(row_idx: Any) -> tuple[str, Any]:
@@ -930,15 +925,26 @@ def _detect_interviewer_duplicate_answers(
             return (str(rid), row_idx)
 
         sorted_indices = sorted(indices, key=sort_key)
-        interviewer_flags = 0
-        max_similarity = 0.0
+        parent = {idx: idx for idx in sorted_indices}
+
+        def find(row_idx: Any) -> Any:
+            while parent[row_idx] != row_idx:
+                parent[row_idx] = parent[parent[row_idx]]
+                row_idx = parent[row_idx]
+            return row_idx
+
+        def union(a: Any, b: Any) -> None:
+            root_a, root_b = find(a), find(b)
+            if root_a != root_b:
+                parent[root_b] = root_a
+
+        pair_similarity: dict[tuple[Any, Any], float] = {}
 
         for i in range(len(sorted_indices)):
             idx_a = sorted_indices[i]
             fp_a = fingerprints.get(idx_a, {})
             if not fp_a:
                 continue
-            rid_a = str(safe_response_id(df.at[idx_a, id_col] if id_col else None, idx_a))
             for j in range(i + 1, len(sorted_indices)):
                 idx_b = sorted_indices[j]
                 fp_b = fingerprints.get(idx_b, {})
@@ -951,23 +957,52 @@ def _detect_interviewer_duplicate_answers(
                 similarity = matches / len(common)
                 if similarity < similarity_threshold:
                     continue
-                max_similarity = max(max_similarity, similarity)
-                rid_b = str(safe_response_id(df.at[idx_b, id_col] if id_col else None, idx_b))
-                if rid_b in flagged_ids:
+                union(idx_a, idx_b)
+                pair_similarity[(idx_a, idx_b)] = similarity
+                pair_similarity[(idx_b, idx_a)] = similarity
+
+        clusters: dict[Any, list[Any]] = defaultdict(list)
+        for idx in sorted_indices:
+            clusters[find(idx)].append(idx)
+
+        interviewer_flags = 0
+        max_similarity = 0.0
+
+        for cluster_indices in clusters.values():
+            if len(cluster_indices) < min_cluster:
+                continue
+            cluster_rids = [
+                str(safe_response_id(df.at[idx, id_col] if id_col else None, idx))
+                for idx in cluster_indices
+            ]
+            cluster_max_sim = 0.0
+            for i, idx_a in enumerate(cluster_indices):
+                for idx_b in cluster_indices[i + 1 :]:
+                    cluster_max_sim = max(
+                        cluster_max_sim,
+                        pair_similarity.get((idx_a, idx_b), 0.0),
+                    )
+            max_similarity = max(max_similarity, cluster_max_sim)
+            pct = round(cluster_max_sim * 100, 1) if cluster_max_sim else threshold_pct
+
+            for idx in cluster_indices:
+                rid = str(safe_response_id(df.at[idx, id_col] if id_col else None, idx))
+                if rid in flagged_ids:
                     continue
-                flagged_ids.add(rid_b)
+                flagged_ids.add(rid)
                 interviewer_flags += 1
-                pct = round(similarity * 100, 1)
                 flags.append({
-                    "response_id": rid_b,
+                    "response_id": rid,
                     "interviewer": interviewer,
-                    "match_response_id": rid_a,
+                    "match_response_id": next((r for r in cluster_rids if r != rid), cluster_rids[0]),
                     "similarity_pct": pct,
-                    "matched_fields": matches,
-                    "comparable_fields": len(common),
+                    "cluster_size": len(cluster_indices),
+                    "cluster_response_ids": cluster_rids[:12],
+                    "matched_fields": None,
+                    "comparable_fields": len(compare_cols),
                     "reason": (
-                        f"{pct}% same answers as record {rid_a} "
-                        f"({matches}/{len(common)} fields, interviewer: {interviewer})"
+                        f"One of {len(cluster_indices)} interviews with ≥{threshold_pct}% matching answers "
+                        f"(interviewer: {interviewer})"
                     ),
                 })
 
@@ -986,7 +1021,8 @@ def _detect_interviewer_duplicate_answers(
         "count": len(flags),
         "flags": flags[:_MAX_FLAGS],
         "by_interviewer": by_interviewer_summary,
-        "threshold_pct": round(similarity_threshold * 100, 1),
+        "threshold_pct": threshold_pct,
+        "min_cluster": min_cluster,
         "comparable_fields": len(compare_cols),
     }
 

@@ -314,6 +314,20 @@ def list_projects(*, include_stats: bool = False, limit: int | None = None) -> l
     return result
 
 
+def list_projects_cached(*, limit: int | None = None) -> list[dict[str, Any]] | None:
+    """Return cached project list without calling LimeSurvey, or None if no cache."""
+    username = settings.limesurvey_filter_user or settings.limesurvey_username
+    cache_key = username or ""
+    if cache_key not in _projects_cache:
+        return None
+    cached_at, cached = _projects_cache[cache_key]
+    if time.time() - cached_at >= _PROJECTS_TTL:
+        return None
+    if limit is not None:
+        return cached[: max(1, min(limit, 100))]
+    return list(cached)
+
+
 def get_project_detail(survey_id: int) -> dict[str, Any]:
     listing = _survey_list_index().get(survey_id, {})
 

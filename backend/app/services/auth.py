@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import secrets
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 VALID_USERS = frozenset({"Sunil", "Tony", "Ravi", "Aneena", "Shilaja", "Palani", "Bagya"})
-DEFAULT_PASSWORD = "ET@2026"
 SESSION_TTL_SECONDS = 60 * 60 * 12  # 12 hours
 
 
@@ -21,12 +20,9 @@ class SessionRecord:
 _sessions: dict[str, SessionRecord] = {}
 
 
-def authenticate(username: str, password: str) -> str | None:
+def create_session(username: str) -> str | None:
     name = str(username or "").strip()
-    secret = str(password or "").strip()
     if name not in VALID_USERS:
-        return None
-    if secret != DEFAULT_PASSWORD:
         return None
     token = secrets.token_urlsafe(32)
     now = time.time()

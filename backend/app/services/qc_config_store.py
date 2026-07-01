@@ -47,6 +47,10 @@ def _normalize_thresholds(raw: dict | None) -> QcThresholds:
             100.0,
             max(50.0, float(raw.get("interviewer_duplicate_similarity_pct", 85) or 85)),
         ),
+        interviewer_duplicate_min_cluster=min(
+            20,
+            max(2, int(raw.get("interviewer_duplicate_min_cluster", 4) or 4)),
+        ),
         interviewer_gps_proximity_meters=min(
             500.0,
             max(1.0, float(raw.get("interviewer_gps_proximity_meters", 10) or 10)),

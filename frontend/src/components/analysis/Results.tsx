@@ -1,5 +1,14 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import type { BannerResult, FilterPreset, FilterSpec, ProfileResult, SurveyVariable, TableCell } from '../../api/client'
+import {
+  buildColumnHeatmapMaxes,
+  buildRowHeatmapMaxes,
+  cellHeatmapValue,
+  heatmapCellBackground,
+  heatmapUsesRowScale,
+  type CrosstabHeatmapMetric,
+} from '../../lib/crosstabHeatmap'
+import { CHART_PALETTES } from '../../lib/chartPalettes'
 import { ErrorState } from '../States'
 import { FilterEditor } from './FilterEditor'
 import { Loader2 } from 'lucide-react'
@@ -73,7 +82,7 @@ export function ProfileResults({
           onClick={onConfigureQuestion}
           className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-[var(--et-teal)]/40 hover:bg-slate-50"
         >
-          Configure analysis
+          Analysis setup ↓
         </button>
       )}
       {onExportReport && (
@@ -255,20 +264,28 @@ export interface MultiCrosstabControls {
   onTablePresetApply?: (rowId: string, preset: FilterPreset) => void
 }
 
+export interface CrosstabDisplayOptions {
+  heatmapEnabled?: boolean
+  heatmapMetric?: CrosstabHeatmapMetric
+  heatmapRgb?: [number, number, number]
+}
+
 export function CrosstabsResults({
   result,
   multiControls,
+  display,
 }: {
   result: BannerResult
   multiControls?: MultiCrosstabControls
+  display?: CrosstabDisplayOptions
 }) {
   if (result.error && !result.tables) return <ErrorState message={result.error} />
 
   if (result.table_type === 'multi' && result.tables?.length) {
-    return <MultiCrosstabList result={result} controls={multiControls} />
+    return <MultiCrosstabList result={result} controls={multiControls} display={display} />
   }
 
-  return <BannerTable result={result} />
+  return <BannerTable result={result} display={display} />
 }
 
 function crosstabTableTitle(table: BannerResult, index: number) {
@@ -278,9 +295,11 @@ function crosstabTableTitle(table: BannerResult, index: number) {
 function MultiCrosstabList({
   result,
   controls,
+  display,
 }: {
   result: BannerResult
   controls?: MultiCrosstabControls
+  display?: CrosstabDisplayOptions
 }) {
   const tables = result.tables ?? []
   const [allExpanded, setAllExpanded] = useState(false)
@@ -415,7 +434,7 @@ function MultiCrosstabList({
                     Updating table…
                   </div>
                 ) : (
-                  <BannerTable result={{ ...table, ...tableProps }} />
+                  <BannerTable result={{ ...table, ...tableProps }} display={display} />
                 )}
               </div>
             )}
@@ -426,7 +445,13 @@ function MultiCrosstabList({
   )
 }
 
-export function BannerTable({ result }: { result: BannerResult }) {
+export function BannerTable({
+  result,
+  display,
+}: {
+  result: BannerResult
+  display?: CrosstabDisplayOptions
+}) {
   if (result.error) return <ErrorState message={result.error} />
 
   if (result.table_type === 'array' && result.sections) {
@@ -436,7 +461,17 @@ export function BannerTable({ result }: { result: BannerResult }) {
         {result.sections.map((section, i) => (
           <div key={i}>
             <h4 className="mb-3 font-medium text-slate-800">{section.subquestion || section.row_header}</h4>
-            <BannerTable result={{ ...section, confidence_level: result.confidence_level, show_counts: result.show_counts, show_col_pct: result.show_col_pct, show_row_pct: result.show_row_pct, show_significance: result.show_significance }} />
+            <BannerTable
+              result={{
+                ...section,
+                confidence_level: result.confidence_level,
+                show_counts: result.show_counts,
+                show_col_pct: result.show_col_pct,
+                show_row_pct: result.show_row_pct,
+                show_significance: result.show_significance,
+              }}
+              display={display}
+            />
           </div>
         ))}
       </div>
@@ -445,6 +480,16 @@ export function BannerTable({ result }: { result: BannerResult }) {
 
   if (!result.headers || !result.rows) return null
 
+  return <BannerTableGrid result={result} display={display} />
+}
+
+function BannerTableGrid({
+  result,
+  display,
+}: {
+  result: BannerResult
+  display?: CrosstabDisplayOptions
+}) {
   const isMetric = ['mean', 'top2box', 'bottom2box'].includes(result.table_type || '')
   const showCounts = result.show_counts !== false
   const showColPct = result.show_col_pct !== false
@@ -453,6 +498,51 @@ export function BannerTable({ result }: { result: BannerResult }) {
   const headerRows = result.header_rows
   const hasNestedHeaders = Boolean(headerRows && headerRows.length > 0)
   const cellMetrics = stackedCellMetrics(isMetric, showCounts, showColPct, showRowPct)
+
+  const heatmapEnabled = Boolean(display?.heatmapEnabled)
+  const heatmapMetric: CrosstabHeatmapMetric =
+    display?.heatmapMetric ?? (isMetric ? 'value' : 'col_pct')
+  const heatmapRgb = display?.heatmapRgb ?? CHART_PALETTES[0].heatmapRgb
+  const dataRows = result.rows!
+
+  const columnHeatmapMaxes = useMemo(() => {
+    if (!heatmapEnabled || heatmapUsesRowScale(heatmapMetric)) return null
+    return buildColumnHeatmapMaxes(dataRows, heatmapMetric, isMetric)
+  }, [heatmapEnabled, heatmapMetric, dataRows, isMetric])
+
+  const rowHeatmapMaxes = useMemo(() => {
+    if (!heatmapEnabled || !heatmapUsesRowScale(heatmapMetric)) return null
+    return buildRowHeatmapMaxes(dataRows, heatmapMetric, isMetric)
+  }, [heatmapEnabled, heatmapMetric, dataRows, isMetric])
+
+  function heatmapStyleForCell(
+    cell: TableCell,
+    rowIndex: number,
+    colIndex: number,
+    isTotalRow: boolean,
+  ): React.CSSProperties | undefined {
+    if (!heatmapEnabled || isTotalRow) return undefined
+    const value = cellHeatmapValue(cell, heatmapMetric, isMetric)
+    const max = heatmapUsesRowScale(heatmapMetric)
+      ? rowHeatmapMaxes?.[rowIndex] ?? 0
+      : columnHeatmapMaxes?.[colIndex] ?? 0
+    const bg = heatmapCellBackground(value, max, heatmapRgb)
+    return bg ? { backgroundColor: bg } : undefined
+  }
+
+  const dataRowIndexByCode = useMemo(() => {
+    const map = new Map<string, number>()
+    let idx = 0
+    for (const row of dataRows) {
+      if (!row.is_total) {
+        map.set(row.code, idx)
+        idx += 1
+      }
+    }
+    return map
+  }, [dataRows])
+
+  const heatmapApplyMetric = heatmapEnabled ? heatmapMetricToCellMetric(heatmapMetric) : null
 
   return (
     <div className="space-y-4">
@@ -500,7 +590,7 @@ export function BannerTable({ result }: { result: BannerResult }) {
                 <th className="sticky left-0 z-10 min-w-[180px] bg-slate-50 px-3 py-2.5 font-semibold text-slate-700">
                   {result.row_header}
                 </th>
-                {result.headers.map((h) => (
+                {result.headers!.map((h) => (
                   <th key={h.key} className="min-w-[90px] px-3 py-2.5 font-semibold text-slate-700">
                     {h.label}
                   </th>
@@ -509,9 +599,10 @@ export function BannerTable({ result }: { result: BannerResult }) {
             )}
           </thead>
           <tbody>
-            {result.rows.map((row) => {
+            {result.rows!.map((row) => {
               const rowClass = `border-b border-slate-100 ${row.is_total ? 'bg-slate-50 font-semibold' : ''}`
               const labelBg = row.is_total ? 'bg-slate-50' : 'bg-white'
+              const dataRowIndex = dataRowIndexByCode.get(row.code) ?? 0
 
               if (cellMetrics.length <= 1) {
                 const metric = cellMetrics[0] ?? 'count'
@@ -521,7 +612,15 @@ export function BannerTable({ result }: { result: BannerResult }) {
                       {row.label}
                     </td>
                     {row.cells.map((cell, ci) => (
-                      <td key={ci} className="px-3 py-2 text-slate-700">
+                      <td
+                        key={ci}
+                        className="px-3 py-2 text-slate-700"
+                        style={
+                          heatmapApplyMetric === metric
+                            ? heatmapStyleForCell(cell, dataRowIndex, ci, Boolean(row.is_total))
+                            : undefined
+                        }
+                      >
                         <CellDisplay
                           cell={cell}
                           isMetric={isMetric}
@@ -542,6 +641,9 @@ export function BannerTable({ result }: { result: BannerResult }) {
                   labelBg={labelBg}
                   metrics={cellMetrics}
                   isMetric={isMetric}
+                  dataRowIndex={dataRowIndex}
+                  heatmapStyleForCell={heatmapStyleForCell}
+                  heatmapApplyMetric={heatmapApplyMetric}
                 />
               )
             })}
@@ -551,6 +653,19 @@ export function BannerTable({ result }: { result: BannerResult }) {
       {!isMetric && result.show_significance && (
         <p className="text-xs text-slate-500">
           Chi-square standardized residuals at {Math.round(conf * 100)}%: + higher than expected, − lower (suffix shows level).
+        </p>
+      )}
+      {heatmapEnabled && (
+        <p className="text-xs text-slate-500">
+          Heatmap colors scale {heatmapUsesRowScale(heatmapMetric) ? 'within each row' : 'within each column'} by{' '}
+          {heatmapMetric === 'col_pct'
+            ? 'column %'
+            : heatmapMetric === 'row_pct'
+              ? 'row %'
+              : heatmapMetric === 'count'
+                ? 'count'
+                : 'value'}
+          .
         </p>
       )}
     </div>
@@ -573,18 +688,36 @@ function stackedCellMetrics(
   return metrics.length ? metrics : ['count']
 }
 
+function heatmapMetricToCellMetric(metric: CrosstabHeatmapMetric): CellMetric {
+  if (metric === 'row_pct') return 'row_pct'
+  if (metric === 'count') return 'count'
+  if (metric === 'value') return 'value'
+  return 'col_pct'
+}
+
 function FragmentRow({
   row,
   rowClass,
   labelBg,
   metrics,
   isMetric,
+  dataRowIndex,
+  heatmapStyleForCell,
+  heatmapApplyMetric,
 }: {
   row: { code: string; label: string; cells: TableCell[]; is_total?: boolean }
   rowClass: string
   labelBg: string
   metrics: CellMetric[]
   isMetric: boolean
+  dataRowIndex: number
+  heatmapStyleForCell?: (
+    cell: TableCell,
+    rowIndex: number,
+    colIndex: number,
+    isTotalRow: boolean,
+  ) => React.CSSProperties | undefined
+  heatmapApplyMetric?: CellMetric | null
 }) {
   return (
     <>
@@ -602,6 +735,11 @@ function FragmentRow({
             <td
               key={ci}
               className={`px-3 py-2 text-slate-700 ${mi > 0 ? 'border-t border-dashed border-slate-100' : ''}`}
+              style={
+                heatmapStyleForCell && metric === heatmapApplyMetric
+                  ? heatmapStyleForCell(cell, dataRowIndex, ci, Boolean(row.is_total))
+                  : undefined
+              }
             >
               <CellDisplay cell={cell} isMetric={isMetric} metric={metric} showSig={metric === 'col_pct'} />
             </td>

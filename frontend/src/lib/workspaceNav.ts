@@ -5,7 +5,7 @@ export type WorkspaceNavId =
   | 'home'
   | 'workflow'
   | 'qual-library'
-  | 'profile'
+  | 'questions'
   | 'crosstabs'
   | 'charts'
   | 'reports'
@@ -18,7 +18,7 @@ export type WorkspaceNavId =
   | 'weighting'
   | 'raw-data'
 
-export type SetupView = 'questions' | 'custom' | 'weighting'
+export type SetupView = 'custom' | 'weighting'
 
 export type NavGroup = 'Overview' | 'Qual' | 'Analyze' | 'Field' | 'Data' | 'App'
 
@@ -61,14 +61,13 @@ export const WORKSPACE_NAV_ITEMS: WorkspaceNavItem[] = [
     keywords: ['qual', 'qualitative', 'transcript', 'fgd', 'idi', 'interview', 'themes', 'coding'],
   },
   {
-    id: 'profile',
-    label: 'Question profiles',
-    description: 'Frequencies and summaries for one question at a time',
+    id: 'questions',
+    label: 'Questions',
+    description: 'Distributions, summary stats, and per-question analysis setup',
     group: 'Analyze',
     mode: 'explore',
-    view: 'profile',
-    modules: 'analysis',
-    keywords: ['explore', 'distribution', 'frequencies', 'profile', 'single'],
+    modules: ['analysis', 'programming'],
+    keywords: ['explore', 'distribution', 'frequencies', 'profile', 'setup', 'configuration', 'types'],
   },
   {
     id: 'crosstabs',
@@ -138,16 +137,6 @@ export const WORKSPACE_NAV_ITEMS: WorkspaceNavItem[] = [
     keywords: ['interviewer', 'rejections', 'throughput', 'team'],
   },
   {
-    id: 'questions',
-    label: 'Question setup',
-    description: 'Analysis types and per-question configuration (programming)',
-    group: 'Data',
-    mode: 'variables',
-    view: 'questions',
-    modules: 'programming',
-    keywords: ['variables', 'setup', 'types', 'configuration', 'programming'],
-  },
-  {
     id: 'custom-vars',
     label: 'Custom variables',
     description: 'Recodes, net scores, and combined awareness questions',
@@ -203,14 +192,13 @@ export const APP_COMMAND_ITEMS: Array<{
 
 /** Quant-only workspace destinations — hidden when study_type is qual. */
 const QUANT_ONLY_NAV_IDS = new Set<WorkspaceNavId>([
-  'profile',
+  'questions',
   'crosstabs',
   'charts',
   'statistics',
   'fielding',
   'quality',
   'team',
-  'questions',
   'custom-vars',
   'weighting',
   'raw-data',
@@ -260,7 +248,7 @@ export function resolveActiveNavId(
   if (mode === 'home') return 'home'
   if (mode === 'workflow') return 'workflow'
   if (mode === 'qual') return 'qual-library'
-  if (mode === 'explore') return analyzeView === 'compare' ? 'crosstabs' : 'profile'
+  if (mode === 'explore') return analyzeView === 'compare' ? 'crosstabs' : 'questions'
   if (mode === 'charts') return 'charts'
   if (mode === 'reports') return 'reports'
   if (mode === 'multivariate') return 'statistics'
@@ -271,17 +259,16 @@ export function resolveActiveNavId(
     return 'fielding'
   }
   if (mode === 'variables') {
-    if (setupView === 'custom') return 'custom-vars'
     if (setupView === 'weighting') return 'weighting'
-    return 'questions'
+    return 'custom-vars'
   }
   return 'home'
 }
 
 export function parseSetupView(rawMode: string | null, rawView: string | null): SetupView {
-  if (rawMode !== 'variables') return 'questions'
-  if (rawView === 'custom' || rawView === 'weighting') return rawView
-  return 'questions'
+  if (rawMode !== 'variables') return 'custom'
+  if (rawView === 'weighting') return 'weighting'
+  return 'custom'
 }
 
 export function navItemToSearchParams(item: WorkspaceNavItem): { mode: string; view?: string } {
@@ -298,7 +285,7 @@ export function navItemToSearchParams(item: WorkspaceNavItem): { mode: string; v
   if (item.mode === 'variables') {
     return {
       mode: 'variables',
-      view: item.view && item.view !== 'questions' ? item.view : undefined,
+      view: item.view === 'weighting' ? 'weighting' : 'custom',
     }
   }
   return { mode: item.mode }

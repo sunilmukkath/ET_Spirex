@@ -95,11 +95,12 @@ export function surveyEntryUsesDefaults(search: string): boolean {
   return false
 }
 
-export function resolveSurveyHref(username: string | undefined, surveyId: number) {
-  if (!username) return `/projects/${surveyId}`
-  const saved = loadSurveySession(username, surveyId)
-  if (saved) return buildSurveyPath(surveyId, saved)
+export function surveyOverviewHref(surveyId: number): string {
   return `/projects/${surveyId}`
+}
+
+export function resolveSurveyHref(_username: string | undefined, surveyId: number) {
+  return surveyOverviewHref(surveyId)
 }
 
 export function mergeSessionIntoSearch(

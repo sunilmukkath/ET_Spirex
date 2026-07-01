@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.models.project_requirements import ProjectRequirements
 from app.models.team_registry import PROJECT_MODULES
 
 ProjectRole = Literal["lead", "contributor"]
@@ -82,6 +83,9 @@ class ProjectTask(BaseModel):
     created_at: float | None = None
     updated_at: float | None = None
     comments: list[TaskComment] = Field(default_factory=list)
+    source: Literal["manual", "email", "pilot"] = "manual"
+    gmail_message_id: str | None = None
+    gmail_thread_id: str | None = None
 
 
 class ProjectWorkflow(BaseModel):
@@ -97,6 +101,7 @@ class ProjectWorkflow(BaseModel):
     activities: list[ProjectActivity] = Field(default_factory=list)
     translations: list[TranslationRow] = Field(default_factory=list)
     pilot_tasks_seeded: bool = False
+    requirements: ProjectRequirements = Field(default_factory=ProjectRequirements)
 
 
 MAX_ACTIVITIES = 200

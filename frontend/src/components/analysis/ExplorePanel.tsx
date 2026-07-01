@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BarChart3, Info, Loader2, Maximize2, Minimize2 } from 'lucide-react'
 import type {
+  CustomVariable,
+  CustomVariableType,
   FilterGroup,
   FilterPreset,
   FilterSpec,
@@ -10,6 +12,7 @@ import type {
 import { CollapsibleSection } from '../CollapsibleSection'
 import { TableSkeleton } from '../States'
 import { FilterEditor } from './FilterEditor'
+import { QuestionSetupInline } from './QuestionSetupInline'
 import { ProfileResults } from './Results'
 import { SuggestedCharts } from './SuggestedCharts'
 import { SurveyOverviewBar } from './SurveyOverviewBar'
@@ -52,8 +55,11 @@ export interface ExplorePanelProps {
   profileResult: ProfileResult | null
   schemaLoading: boolean
   enriching: boolean
+  customVariables: CustomVariable[]
+  onSetupChanged?: () => void
+  onCreateVariable: (type: CustomVariableType, source: SurveyVariable) => void
+  onEditVariable: (variable: CustomVariable) => void
   onCompareQuestion: () => void
-  onConfigureQuestion: () => void
   onOpenChart: (chartType: ChartTypeId) => void
   onExportReport: (format: 'pdf' | 'pptx') => void
   exportingReport: boolean
@@ -78,8 +84,11 @@ export function ExplorePanel({
   profileResult,
   schemaLoading,
   enriching,
+  customVariables,
+  onSetupChanged,
+  onCreateVariable,
+  onEditVariable,
   onCompareQuestion,
-  onConfigureQuestion,
   onOpenChart,
   onExportReport,
   exportingReport,
@@ -87,16 +96,26 @@ export function ExplorePanel({
   const [overviewOpen, setOverviewOpen] = useState(!selectedVar)
   const [filtersOpen, setFiltersOpen] = useState(true)
   const [chartsOpen, setChartsOpen] = useState(false)
+  const [setupOpen, setSetupOpen] = useState(false)
+  const setupRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (selectedVar) {
       setOverviewOpen(false)
       setFiltersOpen(true)
       setChartsOpen(false)
+      setSetupOpen(false)
     } else {
       setOverviewOpen(true)
     }
   }, [selectedVar?.id])
+
+  function openSetupSection() {
+    setSetupOpen(true)
+    requestAnimationFrame(() => {
+      setupRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
 
   const overviewSummary = `${responseCount.toLocaleString()} responses · ${questionCount} questions`
   const filtersSummary = useMemo(() => {
@@ -107,18 +126,22 @@ export function ExplorePanel({
     ? `${selectedVar.code} — quick chart shortcuts`
     : 'Select a question first'
 
-  const anySectionOpen = overviewOpen || filtersOpen || chartsOpen
+  const setupSummary = selectedVar ? 'Analysis type, weights, and derived variables' : 'Select a question first'
+
+  const anySectionOpen = overviewOpen || filtersOpen || chartsOpen || setupOpen
 
   function collapseAll() {
     setOverviewOpen(false)
     setFiltersOpen(false)
     setChartsOpen(false)
+    setSetupOpen(false)
   }
 
   function expandAll() {
     setOverviewOpen(true)
     setFiltersOpen(true)
     setChartsOpen(true)
+    setSetupOpen(true)
   }
 
   const overview = (
@@ -212,6 +235,24 @@ export function ExplorePanel({
             >
               <SuggestedCharts variable={selectedVar} onSelectChart={onOpenChart} />
             </CollapsibleSection>
+
+            <div ref={setupRef}>
+              <CollapsibleSection
+                title="Analysis setup"
+                summary={setupSummary}
+                open={setupOpen}
+                onOpenChange={setSetupOpen}
+              >
+                <QuestionSetupInline
+                  surveyId={surveyId}
+                  variable={selectedVar}
+                  customVariables={customVariables}
+                  onCreateVariable={onCreateVariable}
+                  onEditVariable={onEditVariable}
+                  onChanged={onSetupChanged}
+                />
+              </CollapsibleSection>
+            </div>
           </>
         )}
 
@@ -220,7 +261,7 @@ export function ExplorePanel({
             <EmptyCanvas
               icon={<BarChart3 size={40} />}
               title="Select a question"
-              description="Choose any question from the sidebar to see its distribution, chart, and summary stats."
+              description="Choose any question from the sidebar to see its distribution, chart shortcuts, and analysis setup."
             />
           )}
 
@@ -244,7 +285,7 @@ export function ExplorePanel({
               <ProfileResults
                 result={profileResult}
                 onCompareQuestion={selectedId ? onCompareQuestion : undefined}
-                onConfigureQuestion={selectedId ? onConfigureQuestion : undefined}
+                onConfigureQuestion={selectedId ? openSetupSection : undefined}
                 onExportReport={selectedId ? onExportReport : undefined}
                 exportingReport={exportingReport}
               />

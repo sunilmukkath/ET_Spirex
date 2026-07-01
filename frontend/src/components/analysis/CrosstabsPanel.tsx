@@ -15,6 +15,8 @@ import { BannerLayerEditor } from './BannerLayerEditor'
 import { BannerPicker } from './BannerPicker'
 import { FilterEditor } from './FilterEditor'
 import { CrosstabsResults } from './Results'
+import { CrosstabViewPane } from './CrosstabViewPane'
+import type { CrosstabHeatmapMetric } from '../../lib/crosstabHeatmap'
 
 function metricLabel(metric: string): string {
   const labels: Record<string, string> = {
@@ -128,6 +130,10 @@ export interface CrosstabsPanelProps {
   onShowColPctChange: (v: boolean) => void
   showRowPct: boolean
   onShowRowPctChange: (v: boolean) => void
+  heatmapEnabled: boolean
+  onHeatmapEnabledChange: (v: boolean) => void
+  heatmapMetric: CrosstabHeatmapMetric
+  onHeatmapMetricChange: (v: CrosstabHeatmapMetric) => void
   sigEnabled: boolean
   onSigEnabledChange: (v: boolean) => void
   confidenceLevel: number
@@ -182,6 +188,10 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
     onShowColPctChange,
     showRowPct,
     onShowRowPctChange,
+    heatmapEnabled,
+    onHeatmapEnabledChange,
+    heatmapMetric,
+    onHeatmapMetricChange,
     sigEnabled,
     onSigEnabledChange,
     confidenceLevel,
@@ -473,6 +483,34 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
               Row %
             </label>
           </div>
+
+          <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-4">
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={heatmapEnabled}
+                onChange={(e) => onHeatmapEnabledChange(e.target.checked)}
+              />
+              <span className="font-medium text-slate-700">Heatmap colors</span>
+            </label>
+            <label className="min-w-[10rem] flex-1 text-xs sm:flex-none">
+              <span className="font-medium text-slate-500">Color by</span>
+              <select
+                value={heatmapMetric}
+                onChange={(e) => onHeatmapMetricChange(e.target.value as CrosstabHeatmapMetric)}
+                disabled={!heatmapEnabled}
+                className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm disabled:opacity-50"
+              >
+                <option value="col_pct">Column %</option>
+                <option value="row_pct">Row %</option>
+                <option value="count">Count</option>
+                <option value="value">Metric value</option>
+              </select>
+            </label>
+            <p className="text-[11px] text-slate-400">
+              Column % scales within each banner column; row % scales within each answer row.
+            </p>
+          </div>
         </CollapsibleSection>
 
         <CollapsibleSection
@@ -555,20 +593,33 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
         )}
         {bannerResult && (
           <div className="animate-fade-in rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-6">
-            <CrosstabsResults
-              result={bannerResult}
-              multiControls={{
-                surveyId,
-                completionStatus,
-                variables,
-                globalFilters: filters,
-                tableFilters,
-                onTableFiltersChange,
-                onRefreshTable,
-                refreshingTableId,
-                onTablePresetApply: onTablePresetApply,
-              }}
-            />
+            <CrosstabViewPane
+              title={
+                bannerResult.table_type === 'multi' && bannerResult.tables?.length
+                  ? `${bannerResult.tables.length} crosstab tables`
+                  : 'Crosstab table'
+              }
+              enabled={hasResults}
+            >
+              <CrosstabsResults
+                result={bannerResult}
+                display={{
+                  heatmapEnabled,
+                  heatmapMetric,
+                }}
+                multiControls={{
+                  surveyId,
+                  completionStatus,
+                  variables,
+                  globalFilters: filters,
+                  tableFilters,
+                  onTableFiltersChange,
+                  onRefreshTable,
+                  refreshingTableId,
+                  onTablePresetApply: onTablePresetApply,
+                }}
+              />
+            </CrosstabViewPane>
           </div>
         )}
         </div>

@@ -11,7 +11,6 @@ import {
   Scale,
   ShieldCheck,
   Sigma,
-  SlidersHorizontal,
   Table2,
   Users,
   Variable,
@@ -217,8 +216,8 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
         <LinkSection title={NAV_GROUP_LABELS.Analyze}>
           <QuickLink
             icon={<Layers size={18} />}
-            title="Question profiles"
-            desc="Single-question distributions and summary stats"
+            title="Questions"
+            desc="Distributions, summary stats, and per-question analysis setup"
             onClick={() => onNavigate('explore', 'profile')}
           />
           <QuickLink
@@ -273,12 +272,6 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
 
         {showQuant && (
         <LinkSection title={NAV_GROUP_LABELS.Data}>
-          <QuickLink
-            icon={<SlidersHorizontal size={18} />}
-            title="Question setup"
-            desc="Analysis types and per-question configuration"
-            onClick={() => onNavigate('variables', 'questions')}
-          />
           <QuickLink
             icon={<Variable size={18} />}
             title="Custom variables"

@@ -12,6 +12,16 @@ const DashboardPage = lazy(() =>
 const AdminSettingsPage = lazy(() =>
   import('./pages/AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })),
 )
+const MyWorkPage = lazy(() =>
+  import('./pages/MyWorkPage').then((m) => ({ default: m.MyWorkPage })),
+)
+const FieldworkTrackerPage = lazy(() =>
+  import('./pages/FieldworkTrackerPage').then((m) => ({ default: m.FieldworkTrackerPage })),
+)
+const OperationsHubPage = lazy(() =>
+  import('./pages/OperationsHubPage').then((m) => ({ default: m.OperationsHubPage })),
+)
+const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })))
 const SurveyWorkspace = lazy(() =>
   import('./pages/SurveyWorkspace').then((m) => ({ default: m.SurveyWorkspace })),
 )
@@ -43,7 +53,11 @@ function App() {
                 </ProtectedRoute>
               }
             >
+              <Route path="home" element={<HomePage />} />
               <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="my-work" element={<MyWorkPage />} />
+              <Route path="operations" element={<OperationsHubPage />} />
+              <Route path="fieldwork" element={<FieldworkTrackerPage />} />
               <Route path="settings" element={<AdminSettingsPage />} />
             </Route>
             <Route

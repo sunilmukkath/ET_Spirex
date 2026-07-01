@@ -55,6 +55,8 @@ interface Props {
   onCreateVariable: (type: CustomVariableType, source: SurveyVariable) => void
   onEditVariable: (variable: CustomVariable) => void
   onSaved: (variableId: string, entry: VariableSetupEntry | null) => void
+  /** When true, render only the setup form (no list row toggle). */
+  embedded?: boolean
 }
 
 export function QuestionSetupRow({
@@ -69,6 +71,7 @@ export function QuestionSetupRow({
   onCreateVariable,
   onEditVariable,
   onSaved,
+  embedded = false,
 }: Props) {
   const [kindOverride, setKindOverride] = useState('')
   const [valueWeights, setValueWeights] = useState<Record<string, string>>({})
@@ -180,52 +183,13 @@ export function QuestionSetupRow({
     }
   }
 
-  return (
-    <li
-      className={`border-t border-slate-100 first:border-t-0 ${
-        isOpen ? 'bg-[var(--et-teal-light)]/20 ring-1 ring-inset ring-[var(--et-teal)]/25' : ''
-      }`}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={isOpen}
-        className={`flex w-full items-start gap-3 px-4 py-3.5 text-left transition sm:px-5 ${
-          isOpen ? 'bg-[var(--et-teal-light)]/30' : 'hover:bg-slate-50'
-        }`}
-      >
-        <ChevronRight
-          size={18}
-          className={`mt-0.5 shrink-0 text-slate-400 transition-transform duration-200 ${
-            isOpen ? 'rotate-90 text-[var(--et-teal-dark)]' : ''
-          }`}
-        />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium leading-snug text-slate-900">{variable.text || variable.code}</p>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
-            <span className="font-mono">{variable.code}</span>
-            <span className="text-slate-300">·</span>
-            <span>{variable.type_label}</span>
-            {hasSetup && (
-              <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold uppercase text-amber-800">
-                customized
-              </span>
-            )}
-            {derivedCount > 0 && (
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">
-                {derivedCount} derived
-              </span>
-            )}
-          </div>
-        </div>
-        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-400">
-          {isOpen ? 'Close' : 'Setup'}
-        </span>
-      </button>
-
-      {isOpen && (
+  const setupBody = (isOpen || embedded) && (
         <div
-          className="border-t border-[var(--et-teal)]/20 bg-white px-4 pb-5 pt-4 sm:px-5 sm:pl-12"
+          className={
+            embedded
+              ? ''
+              : 'border-t border-[var(--et-teal)]/20 bg-white px-4 pb-5 pt-4 sm:px-5 sm:pl-12'
+          }
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -405,7 +369,55 @@ export function QuestionSetupRow({
             </div>
           )}
         </div>
-      )}
+  )
+
+  if (embedded) {
+    return <div className="question-setup-embedded">{setupBody}</div>
+  }
+
+  return (
+    <li
+      className={`border-t border-slate-100 first:border-t-0 ${
+        isOpen ? 'bg-[var(--et-teal-light)]/20 ring-1 ring-inset ring-[var(--et-teal)]/25' : ''
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        className={`flex w-full items-start gap-3 px-4 py-3.5 text-left transition sm:px-5 ${
+          isOpen ? 'bg-[var(--et-teal-light)]/30' : 'hover:bg-slate-50'
+        }`}
+      >
+        <ChevronRight
+          size={18}
+          className={`mt-0.5 shrink-0 text-slate-400 transition-transform duration-200 ${
+            isOpen ? 'rotate-90 text-[var(--et-teal-dark)]' : ''
+          }`}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium leading-snug text-slate-900">{variable.text || variable.code}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+            <span className="font-mono">{variable.code}</span>
+            <span className="text-slate-300">·</span>
+            <span>{variable.type_label}</span>
+            {hasSetup && (
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold uppercase text-amber-800">
+                customized
+              </span>
+            )}
+            {derivedCount > 0 && (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">
+                {derivedCount} derived
+              </span>
+            )}
+          </div>
+        </div>
+        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-400">
+          {isOpen ? 'Close' : 'Setup'}
+        </span>
+      </button>
+      {setupBody}
     </li>
   )
 }

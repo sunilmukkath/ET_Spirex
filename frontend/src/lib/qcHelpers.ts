@@ -180,7 +180,7 @@ export function aggregateFlaggedRows(
       'interviewer_duplicates',
       'high',
       f.reason ??
-        `${f.similarity_pct ?? '?'}% match with ${f.match_response_id ?? 'another record'} (${f.interviewer ?? 'interviewer'})`,
+        `${f.similarity_pct ?? '?'}% match — group of ${f.cluster_size ?? '?'} similar interviews (${f.interviewer ?? 'interviewer'})`,
     )
   }
   for (const f of result.interviewer_gps_proximity?.flags ?? []) {

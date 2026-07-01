@@ -25,3 +25,27 @@ services:
         sync: false
       - key: CORS_ORIGINS
         value: "https://et-spirex.onrender.com"
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: GOOGLE_OAUTH_SUCCESS_URL
+        sync: false
+      - key: GOOGLE_AUTH_REDIRECT_URI
+        sync: false
+      - key: GOOGLE_AUTH_SUCCESS_URL
+        sync: false
+      - key: APP_PUBLIC_URL
+        value: "https://et-spirex.onrender.com"
+      - key: GMAIL_TEAM_EMAIL_MAP
+        sync: false
+      - key: SUPER_ADMIN_EMAIL
+        value: "sunilmukkath@elastictree.com"
+      - key: SUPER_ADMIN_USERNAME
+        value: "Sunil"
+      - key: WORKSPACE_DOMAIN
+        value: "elastictree.com"

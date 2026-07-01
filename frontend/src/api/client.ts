@@ -459,6 +459,7 @@ export interface QcThresholds {
   min_array_items_straight_line: number
   min_text_length_gibberish: number
   interviewer_duplicate_similarity_pct?: number
+  interviewer_duplicate_min_cluster?: number
   interviewer_gps_proximity_meters?: number
   interviewer_gps_proximity_min_cluster?: number
   interviewer_gps_proximity_flag_all_in_cluster?: boolean
@@ -543,6 +544,9 @@ export interface ProjectTask {
   created_at?: number | null
   updated_at?: number | null
   comments?: TaskComment[]
+  source?: 'manual' | 'email' | 'pilot'
+  gmail_message_id?: string | null
+  gmail_thread_id?: string | null
 }
 
 export type ActivityType =
@@ -641,6 +645,41 @@ export interface ProjectWorkflow {
   activities?: ProjectActivity[]
   translations?: TranslationRow[]
   pilot_tasks_seeded?: boolean
+  requirements?: ProjectRequirements
+}
+
+export interface ProjectRequirements {
+  summary?: string
+  objectives?: string
+  methodology?: string
+  sample_design?: string
+  deliverables?: string
+  timeline?: string
+  constraints?: string
+  updated_at?: number | null
+  updated_by?: string | null
+}
+
+export const REQUIREMENT_FIELD_LABELS: Record<keyof Omit<ProjectRequirements, 'updated_at' | 'updated_by'>, string> = {
+  summary: 'Executive summary',
+  objectives: 'Research objectives',
+  methodology: 'Methodology',
+  sample_design: 'Sample design',
+  deliverables: 'Deliverables',
+  timeline: 'Timeline',
+  constraints: 'Constraints & assumptions',
+}
+
+export interface UserPreferences {
+  dashboard_view_mode: 'strips' | 'table'
+  dashboard_sort_key: string
+  default_completion_status: 'complete' | 'partial' | 'all'
+  default_report_format: 'pptx' | 'pdf'
+  ai_narrative_default: boolean
+  crosstab_heatmap_default: boolean
+  operations_default_tab: string
+  home_refresh_on_login: boolean
+  pinned_only_default: boolean
 }
 
 export interface MyTaskRow {
@@ -777,6 +816,7 @@ export interface DataQualityResult {
     message?: string
     count: number
     threshold_pct?: number
+    min_cluster?: number
     comparable_fields?: number
     by_interviewer?: {
       interviewer: string
@@ -789,7 +829,9 @@ export interface DataQualityResult {
       interviewer: string
       match_response_id: string | number
       similarity_pct: number
-      matched_fields: number
+      cluster_size?: number
+      cluster_response_ids?: (string | number)[]
+      matched_fields?: number | null
       comparable_fields: number
       reason?: string
     }[]
@@ -950,6 +992,8 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 const API_TIMEOUT_MS = 12_000
+/** Auth bootstrap and PM status while Render cold-starts or VPN is slow. */
+const BOOTSTRAP_TIMEOUT_MS = 90_000
 /** Schema, QC summary, and warmup on large surveys. */
 const SURVEY_LOAD_TIMEOUT_MS = 120_000
 /** LimeSurvey-backed list/connection calls (can be slow on VPN). */
@@ -966,6 +1010,9 @@ function timeoutErrorMessage(timeoutMs: number): string {
   }
   if (timeoutMs >= LIMESURVEY_TIMEOUT_MS) {
     return 'LimeSurvey is not responding. Check your VPN/network connection, then refresh. Cached surveys may still appear if available.'
+  }
+  if (timeoutMs >= BOOTSTRAP_TIMEOUT_MS) {
+    return 'The server is waking up (this can take up to a minute on free hosting). Wait a moment, then refresh — or start the local backend on port 8000 if you are developing locally.'
   }
   return 'Request timed out. Check your connection or try again in a moment.'
 }
@@ -1078,21 +1125,244 @@ export function invalidateSchemaCache(surveyId?: number) {
   }
 }
 
+export interface GmailConnectionStatus {
+  configured: boolean
+  connected: boolean
+  email?: string | null
+  last_sync_at?: number | null
+  message?: string
+}
+
+export interface GmailMessageSummary {
+  id: string
+  thread_id: string
+  subject: string
+  from_name: string
+  from_email: string
+  to_emails: string[]
+  cc_emails: string[]
+  snippet: string
+  internal_date: number | null
+  is_unread: boolean
+  has_task: boolean
+  linked_survey_id: number | null
+  linked_task_id: string | null
+}
+
+export interface GmailTaskSuggestion {
+  title: string
+  description: string
+  category: TaskCategory
+  assignee: string | null
+  priority: TaskPriority
+  confidence: 'high' | 'medium' | 'low'
+}
+
+export interface PmProject {
+  project_id: string
+  project_name: string
+  client_id: string | null
+  project_type: 'quant' | 'qual' | 'mixed'
+  engagement_type: 'tracking' | 'ad-hoc'
+  stage: string
+  owner_id: string | null
+  owner_name: string | null
+  limesurvey_survey_id: number | null
+  start_date: string | null
+  target_close_date: string | null
+  actual_close_date: string | null
+  budget_estimate: number | null
+  budget_actual: number | null
+  status_notes: string | null
+  requirements?: ProjectRequirements | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PmFieldworkEntry {
+  entry_id: string
+  project_id: string
+  entry_date: string
+  completes_today: number
+  cumulative_completes: number
+  target_completes: number | null
+  quota_cell: Record<string, unknown> | null
+  rejects_today: number
+  reject_reason: string | null
+  flagged_for_qc: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface PmQuotaCellSummary {
+  cell_key: string
+  label: string
+  cumulative_completes: number
+  target_completes: number | null
+  pct_complete: number | null
+}
+
+export interface PmFieldworkDashboard {
+  project_id: string
+  project_name: string
+  latest_entry_date: string | null
+  cumulative_completes: number
+  target_completes: number | null
+  pct_complete: number | null
+  rejects_today: number
+  flagged_for_qc: boolean
+  quota_cells: PmQuotaCellSummary[]
+  daily_series: PmFieldworkEntry[]
+}
+
+export interface PmClient {
+  client_id: string
+  client_name: string
+  sector: string | null
+  contact_person: string | null
+  contact_email: string | null
+  repeat_client: boolean
+  notes: string | null
+  project_count?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PmProposal {
+  proposal_id: string
+  project_id: string
+  version: number
+  methodology_summary: string | null
+  sample_size: number | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PmFinanceSummary {
+  project_id: string
+  project_name: string
+  budget_estimate: number | null
+  budget_actual: number | null
+  total_estimated_lines: number | null
+  total_actual_lines: number | null
+  total_invoiced: number | null
+  total_paid: number | null
+  total_outstanding: number | null
+  margin_pct: number | null
+  budget_lines: Array<{
+    line_id: string
+    category: string
+    estimated_cost: number | null
+    actual_cost: number | null
+  }>
+  invoices: Array<{
+    invoice_id: string
+    amount: number
+    paid_status: string
+    due_date: string | null
+  }>
+}
+
+export interface PmSurveyLink {
+  project_id: string
+  project_name: string
+  client_name: string | null
+  stage: string
+  limesurvey_survey_id: number | null
+  survey_url: string | null
+}
+
+export interface PmPipelineProject extends PmProject {
+  client_name: string | null
+  proposal_status: string | null
+  has_survey_link: boolean
+}
+
+export interface PmPipelineOverview {
+  stages: Array<{ stage: string; count: number }>
+  projects: PmPipelineProject[]
+  unlinked_survey_ids: number[]
+}
+
+export interface PmMarketingActivity {
+  activity_id: string
+  client_id: string | null
+  project_id: string | null
+  activity_type: string
+  title: string
+  status: string
+  owner_name: string | null
+  due_date: string | null
+  notes: string | null
+}
+
+export interface PmAgentBrief {
+  agent: string
+  configured: boolean
+  summary: string
+  actions: string[]
+  risks: string[]
+}
+
+export interface PmAgentDraftSection {
+  heading: string
+  body: string
+}
+
+export interface PmAgentDraft {
+  agent: string
+  configured: boolean
+  title: string
+  draft_markdown: string
+  sections: PmAgentDraftSection[]
+  actions: string[]
+}
+
+export interface PmSurveyInstrument {
+  instrument_id: string
+  project_id: string
+  version: number
+  limesurvey_survey_id: number | null
+  pilot_status: string | null
+}
+
 export const api = {
   login: (username: string, password: string) =>
-    fetchJson<{ token: string; username: string }>('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    }),
+    fetchJson<{ token: string; username: string }>(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      },
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
   logout: () =>
     fetchJson<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
-  getMe: () => fetchJson<{ username: string; login_at: number; role?: GlobalRole }>('/api/auth/me'),
+  getMe: () =>
+    fetchJson<{
+      username: string
+      login_at: number
+      role?: GlobalRole
+      email?: string | null
+      is_super_admin?: boolean
+    }>(
+      '/api/auth/me',
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
   getActiveSessions: () =>
     fetchJson<{ sessions: { username: string; login_at: number; last_seen: number }[] }>(
       '/api/auth/sessions',
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
     ),
   getAuthUsers: () => fetchJson<{ users: string[] }>('/api/auth/users'),
+  getGoogleAuthConfigured: () =>
+    fetchJson<{ configured: boolean }>('/api/auth/google/configured', undefined, BOOTSTRAP_TIMEOUT_MS),
+  getGoogleAuthUrl: () =>
+    fetchJson<{ url: string }>('/api/auth/google/url', undefined, BOOTSTRAP_TIMEOUT_MS),
   getTeamRegistry: () => fetchJson<TeamRegistry>('/api/team/registry'),
   setTeamRegistry: (body: TeamRegistry) =>
     fetchJson<TeamRegistry>('/api/team/registry', {
@@ -1119,7 +1389,18 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),
     }),
-  getMyTasks: () => fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/me/tasks'),
+  getMyTasks: () =>
+    fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/me/tasks', undefined, BOOTSTRAP_TIMEOUT_MS),
+  getUnassignedTasks: () =>
+    fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/tasks/unassigned', undefined, BOOTSTRAP_TIMEOUT_MS),
+  getUserPreferences: () =>
+    fetchJson<UserPreferences>('/api/me/preferences', undefined, BOOTSTRAP_TIMEOUT_MS),
+  updateUserPreferences: (body: Partial<UserPreferences>) =>
+    fetchJson<UserPreferences>('/api/me/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   getQualAssets: (id: number) =>
     fetchJson<{ assets: QualAsset[] }>(`/api/projects/${id}/qual/assets`),
   createQualAsset: (id: number, body: QualAssetInput) =>
@@ -1167,7 +1448,8 @@ export const api = {
     a.click()
     URL.revokeObjectURL(url)
   },
-  getPinnedSurveys: () => fetchJson<{ survey_ids: number[] }>('/api/me/pinned-surveys'),
+  getPinnedSurveys: () =>
+    fetchJson<{ survey_ids: number[] }>('/api/me/pinned-surveys', undefined, BOOTSTRAP_TIMEOUT_MS),
   setPinnedSurveys: (surveyIds: number[]) =>
     fetchJson<{ survey_ids: number[] }>('/api/me/pinned-surveys', {
       method: 'PUT',
@@ -1214,12 +1496,34 @@ export const api = {
       },
       ANALYSIS_TIMEOUT_MS,
     ),
-  getProjects: (opts?: { limit?: number; includeStats?: boolean }) => {
+  runReportWritingAgent: (
+    id: number,
+    body: {
+      deck_title?: string
+      sections: ReportSectionPayload[]
+      client_context?: string
+    },
+  ) =>
+    fetchJson<PmAgentDraft>(
+      `/api/projects/${id}/analysis/report-writing-agent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      ANALYSIS_TIMEOUT_MS,
+    ),
+  getProjects: (opts?: { limit?: number; includeStats?: boolean; cachedOnly?: boolean }) => {
     const params = new URLSearchParams()
     if (opts?.limit != null) params.set('limit', String(opts.limit))
     if (opts?.includeStats) params.set('include_stats', 'true')
+    if (opts?.cachedOnly) params.set('cached_only', 'true')
     const qs = params.toString()
-    return fetchJson<{ projects: Project[] }>(`/api/projects${qs ? `?${qs}` : ''}`, undefined, LIMESURVEY_TIMEOUT_MS)
+    return fetchJson<{ projects: Project[]; from_cache?: boolean }>(
+      `/api/projects${qs ? `?${qs}` : ''}`,
+      undefined,
+      opts?.cachedOnly ? API_TIMEOUT_MS : LIMESURVEY_TIMEOUT_MS,
+    )
   },
   getProjectStats: (ids: number[]) =>
     fetchJson<{
@@ -1708,4 +2012,224 @@ export const api = {
     a.click()
     URL.revokeObjectURL(url)
   },
+  getPmStatus: () =>
+    fetchJson<{ enabled: boolean; ready: boolean; failed?: boolean; error?: string | null }>(
+      '/api/pm/status',
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  listPmProjects: () => fetchJson<PmProject[]>('/api/pm/projects', undefined, BOOTSTRAP_TIMEOUT_MS),
+  getPmProject: (projectId: string) =>
+    fetchJson<PmProject>(`/api/pm/projects/${projectId}`, undefined, BOOTSTRAP_TIMEOUT_MS),
+  createPmProject: (body: {
+    project_name: string
+    project_type: 'quant' | 'qual' | 'mixed'
+    engagement_type: 'tracking' | 'ad-hoc'
+    owner_name?: string
+    limesurvey_survey_id?: number
+    stage?: string
+  }) =>
+    fetchJson<PmProject>(
+      '/api/pm/projects',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  getPmFieldworkDashboard: (projectId: string) =>
+    fetchJson<PmFieldworkDashboard>(
+      `/api/pm/projects/${projectId}/fieldwork/dashboard`,
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  createPmFieldworkEntry: (
+    projectId: string,
+    body: {
+      entry_date: string
+      completes_today: number
+      target_completes?: number
+      quota_cell?: Record<string, unknown>
+      rejects_today?: number
+      reject_reason?: string
+      flagged_for_qc?: boolean
+    },
+  ) =>
+    fetchJson<PmFieldworkEntry>(
+      `/api/pm/projects/${projectId}/fieldwork`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  updatePmProject: (projectId: string, body: Partial<PmProject>) =>
+    fetchJson<PmProject>(`/api/pm/projects/${projectId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updatePmProjectRequirements: (projectId: string, requirements: ProjectRequirements) =>
+    fetchJson<PmProject>(`/api/pm/projects/${projectId}/requirements`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requirements),
+    }),
+  getPmPipeline: () =>
+    fetchJson<PmPipelineOverview>('/api/pm/pipeline', undefined, BOOTSTRAP_TIMEOUT_MS),
+  listPmSurveyLinks: () =>
+    fetchJson<PmSurveyLink[]>('/api/pm/survey-links', undefined, BOOTSTRAP_TIMEOUT_MS),
+  linkPmSurvey: (projectId: string, limesurvey_survey_id: number | null) =>
+    fetchJson<PmProject>(`/api/pm/projects/${projectId}/link-survey`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limesurvey_survey_id }),
+    }),
+  listPmClients: () => fetchJson<PmClient[]>('/api/pm/clients', undefined, BOOTSTRAP_TIMEOUT_MS),
+  createPmClient: (body: {
+    client_name: string
+    sector?: string
+    contact_person?: string
+    contact_email?: string
+    repeat_client?: boolean
+    notes?: string
+  }) =>
+    fetchJson<PmClient>('/api/pm/clients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  createPmProposal: (body: {
+    project_id: string
+    methodology_summary?: string
+    sample_size?: number
+    status?: string
+  }) =>
+    fetchJson<PmProposal>('/api/pm/proposals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  listPmProposals: (projectId?: string) =>
+    fetchJson<PmProposal[]>(
+      `/api/pm/proposals${projectId ? `?project_id=${projectId}` : ''}`,
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  getPmFinance: (projectId: string) =>
+    fetchJson<PmFinanceSummary>(`/api/pm/projects/${projectId}/finance`, undefined, BOOTSTRAP_TIMEOUT_MS),
+  createPmBudgetLine: (body: {
+    project_id: string
+    category: string
+    estimated_cost?: number
+    actual_cost?: number
+  }) =>
+    fetchJson('/api/pm/budget-lines', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  createPmInvoice: (body: {
+    project_id: string
+    amount: number
+    client_id?: string
+    due_date?: string
+  }) =>
+    fetchJson('/api/pm/invoices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  runFinanceAgent: (projectId: string) =>
+    fetchJson<PmAgentBrief>('/api/pm/agents/finance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId }),
+    }),
+  runCrmAgent: (body: { project_id?: string; client_id?: string; context?: string }) =>
+    fetchJson<PmAgentBrief>('/api/pm/agents/crm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  runProposalWritingAgent: (body: { project_id: string; context?: string }) =>
+    fetchJson<PmAgentDraft>('/api/pm/agents/proposal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  listPmMarketing: () =>
+    fetchJson<PmMarketingActivity[]>('/api/pm/marketing', undefined, BOOTSTRAP_TIMEOUT_MS),
+  createPmMarketing: (body: {
+    title: string
+    activity_type: string
+    client_id?: string
+    project_id?: string
+    status?: string
+    due_date?: string
+    notes?: string
+  }) =>
+    fetchJson<PmMarketingActivity>('/api/pm/marketing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  createPmInstrument: (body: {
+    project_id: string
+    limesurvey_survey_id?: number
+    pilot_status?: string
+  }) =>
+    fetchJson<PmSurveyInstrument>('/api/pm/instruments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  getGmailStatus: () =>
+    fetchJson<GmailConnectionStatus>('/api/gmail/status', undefined, BOOTSTRAP_TIMEOUT_MS),
+  getGmailOAuthUrl: () =>
+    fetchJson<{ url: string }>('/api/gmail/oauth/url', undefined, BOOTSTRAP_TIMEOUT_MS),
+  disconnectGmail: () =>
+    fetchJson<{ ok: boolean }>('/api/gmail/disconnect', { method: 'POST' }, BOOTSTRAP_TIMEOUT_MS),
+  getGmailInbox: (sync = false) =>
+    fetchJson<GmailMessageSummary[]>(
+      `/api/gmail/inbox?sync=${sync ? 'true' : 'false'}`,
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  getGmailTaskSuggestion: (messageId: string) =>
+    fetchJson<GmailTaskSuggestion>(
+      `/api/gmail/messages/${messageId}/suggestion`,
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  createTaskFromEmail: (
+    messageId: string,
+    body: {
+      survey_id: number
+      title?: string
+      description?: string
+      category?: TaskCategory
+      assignee?: string | null
+      priority?: TaskPriority
+      due_date?: string | null
+    },
+  ) =>
+    fetchJson<{
+      survey_id: number
+      task_id: string
+      task_title: string
+      assignee: string | null
+      gmail_message_id: string
+      survey_title: string
+    }>(
+      `/api/gmail/messages/${messageId}/task`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
 }

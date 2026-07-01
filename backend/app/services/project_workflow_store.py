@@ -15,7 +15,7 @@ from app.models.project_workflow import (
     TranslationRow,
     normalize_module_ids,
 )
-from app.models.team_registry import PROJECT_MODULES
+from app.models.project_requirements import requirements_from_raw
 from app.services.team_registry_store import get_global_role, is_global_admin, is_global_manager_or_above
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "project_workflow"
@@ -107,6 +107,11 @@ def _normalize_task(raw: dict[str, Any]) -> ProjectTask | None:
         priority = "medium"
     assignee = str(raw.get("assignee") or "").strip() or None
     due_date = str(raw.get("due_date") or "").strip() or None
+    source = str(raw.get("source") or "manual").strip().lower()
+    if source not in {"manual", "email", "pilot"}:
+        source = "manual"
+    gmail_message_id = str(raw.get("gmail_message_id") or "").strip() or None
+    gmail_thread_id = str(raw.get("gmail_thread_id") or "").strip() or None
     comments: list[TaskComment] = []
     for item in raw.get("comments") or []:
         if isinstance(item, dict):
@@ -126,6 +131,9 @@ def _normalize_task(raw: dict[str, Any]) -> ProjectTask | None:
         created_at=float(raw["created_at"]) if raw.get("created_at") is not None else None,
         updated_at=float(raw["updated_at"]) if raw.get("updated_at") is not None else None,
         comments=comments,
+        source=source,  # type: ignore[arg-type]
+        gmail_message_id=gmail_message_id,
+        gmail_thread_id=gmail_thread_id,
     )
 
 
@@ -214,6 +222,7 @@ def _normalize_workflow(raw: dict[str, Any] | None) -> ProjectWorkflow:
         activities=activities,
         translations=translations,
         pilot_tasks_seeded=bool(raw.get("pilot_tasks_seeded")),
+        requirements=requirements_from_raw(raw.get("requirements")),
     )
 
 
@@ -327,6 +336,45 @@ def add_task_comment(
     return updated
 
 
+def add_task_to_workflow(
+    survey_id: int,
+    task: ProjectTask,
+    *,
+    editor: str,
+) -> tuple[ProjectWorkflow, ProjectTask]:
+    from app.services.workflow_activity import _new_activity, append_activities
+
+    workflow = get_project_workflow(survey_id)
+    if task.gmail_message_id:
+        for existing in workflow.tasks:
+            if existing.gmail_message_id == task.gmail_message_id:
+                raise ValueError("A task already exists for this email on this project.")
+
+    created = touch_task(task, editor=editor, is_new=True)
+    data = workflow.model_dump()
+    data["tasks"] = [*(t.model_dump() for t in workflow.tasks), created.model_dump()]
+    interim = ProjectWorkflow(**data)
+    updated = append_activities(
+        interim,
+        [
+            _new_activity(
+                "task_created",
+                f"Task created: “{created.title}”"
+                + (f" → {created.assignee}" if created.assignee else "")
+                + (" (from email)" if created.source == "email" else ""),
+                actor=editor,
+                task_id=created.id,
+            )
+        ],
+    )
+    _path(survey_id).write_text(
+        json.dumps(updated.model_dump(), indent=2),
+        encoding="utf-8",
+    )
+    saved_task = next(t for t in updated.tasks if t.id == created.id)
+    return updated, saved_task
+
+
 def list_my_tasks(username: str) -> list[dict[str, Any]]:
     if not username:
         return []
@@ -342,15 +390,7 @@ def list_my_tasks(username: str) -> list[dict[str, Any]]:
         for task in workflow.tasks:
             if task.assignee != username or task.status == "done":
                 continue
-            out.append(
-                {
-                    "survey_id": survey_id,
-                    "task": task.model_dump(),
-                    "phase": workflow.phase,
-                    "client_name": workflow.client_name,
-                    "project_code": workflow.project_code,
-                }
-            )
+            out.append(_task_row(survey_id, workflow, task))
     out.sort(
         key=lambda row: (
             row["task"].get("due_date") or "9999",
@@ -358,6 +398,40 @@ def list_my_tasks(username: str) -> list[dict[str, Any]]:
         )
     )
     return out
+
+
+def list_unassigned_tasks() -> list[dict[str, Any]]:
+    """Open tasks with no assignee — team inbox for new work."""
+    out: list[dict[str, Any]] = []
+    if not _DATA_DIR.is_dir():
+        return []
+    for path in sorted(_DATA_DIR.glob("*.json")):
+        try:
+            survey_id = int(path.stem)
+        except ValueError:
+            continue
+        workflow = get_project_workflow(survey_id)
+        for task in workflow.tasks:
+            if task.assignee or task.status == "done":
+                continue
+            out.append(_task_row(survey_id, workflow, task))
+    out.sort(
+        key=lambda row: (
+            -(row["task"].get("created_at") or 0),
+            row["task"].get("title", "").lower(),
+        )
+    )
+    return out
+
+
+def _task_row(survey_id: int, workflow: ProjectWorkflow, task: ProjectTask) -> dict[str, Any]:
+    return {
+        "survey_id": survey_id,
+        "task": task.model_dump(),
+        "phase": workflow.phase,
+        "client_name": workflow.client_name,
+        "project_code": workflow.project_code,
+    }
 
 
 def _find_member(workflow: ProjectWorkflow, username: str | None) -> ProjectMember | None:

@@ -65,6 +65,7 @@ function defaultQcConfig(): QcConfig {
       min_array_items_straight_line: 4,
       min_text_length_gibberish: 3,
       interviewer_duplicate_similarity_pct: 85,
+      interviewer_duplicate_min_cluster: 4,
       interviewer_gps_proximity_meters: 10,
       interviewer_gps_proximity_min_cluster: 2,
       interviewer_gps_proximity_flag_all_in_cluster: false,

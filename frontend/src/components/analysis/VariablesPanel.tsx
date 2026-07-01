@@ -25,19 +25,21 @@ import {
   saveCustomVariableBackup,
 } from '../../lib/customVariableBackup'
 import { EmptyState, ErrorState } from '../States'
-import { QuestionSetupPanel, buildVariableFormFromSource } from './QuestionSetupPanel'
 import { WeightingPanel } from './WeightingPanel'
+
+export { buildVariableFormFromSource } from './QuestionSetupPanel'
 
 interface Props {
   surveyId: number
   schema: SurveySchema | null
   completionStatus: string
   username?: string | null
-  focusQuestionId?: string | null
-  onFocusQuestionConsumed?: () => void
+  variableFormBootstrap?: Partial<CustomVariableInput> | null
+  variableEditBootstrap?: CustomVariable | null
+  onVariableBootstrapConsumed?: () => void
   onChanged?: () => void
-  pageTab?: 'questions' | 'custom' | 'weighting'
-  onPageTabChange?: (tab: 'questions' | 'custom' | 'weighting') => void
+  pageTab?: 'custom' | 'weighting'
+  onPageTabChange?: (tab: 'custom' | 'weighting') => void
   hideSubNav?: boolean
 }
 
@@ -134,14 +136,15 @@ export function VariablesPanel({
   schema,
   completionStatus,
   username,
-  focusQuestionId,
-  onFocusQuestionConsumed,
+  variableFormBootstrap,
+  variableEditBootstrap,
+  onVariableBootstrapConsumed,
   onChanged,
   pageTab: pageTabProp,
   onPageTabChange,
   hideSubNav = false,
 }: Props) {
-  const [internalTab, setInternalTab] = useState<'questions' | 'custom' | 'weighting'>('questions')
+  const [internalTab, setInternalTab] = useState<'custom' | 'weighting'>('custom')
   const pageTab = pageTabProp ?? internalTab
   const setPageTab = onPageTabChange ?? setInternalTab
   const [variables, setVariables] = useState<CustomVariable[]>([])
@@ -234,14 +237,6 @@ export function VariablesPanel({
     setCreating(true)
     setEditing(null)
     setForm(EMPTY_FORM)
-    setPreview(null)
-  }
-
-  function openCreateFromQuestion(type: CustomVariableType, source: SurveyVariable) {
-    setPageTab('custom')
-    setCreating(true)
-    setEditing(null)
-    setForm({ ...EMPTY_FORM, ...buildVariableFormFromSource(type, source) })
     setPreview(null)
   }
 
@@ -408,10 +403,20 @@ export function VariablesPanel({
   }
 
   useEffect(() => {
-    if (focusQuestionId) {
-      setPageTab('questions')
+    if (variableEditBootstrap) {
+      openEdit(variableEditBootstrap)
+      onVariableBootstrapConsumed?.()
+      return
     }
-  }, [focusQuestionId])
+    if (variableFormBootstrap) {
+      setPageTab('custom')
+      setCreating(true)
+      setEditing(null)
+      setForm({ ...EMPTY_FORM, ...variableFormBootstrap })
+      setPreview(null)
+      onVariableBootstrapConsumed?.()
+    }
+  }, [variableEditBootstrap, variableFormBootstrap, onVariableBootstrapConsumed])
 
   if (loading) {
     return (
@@ -429,23 +434,14 @@ export function VariablesPanel({
         <div className="mx-auto max-w-5xl space-y-6 p-4 pb-16 sm:p-6 sm:pb-20">
         <div className="et-panel flex flex-wrap items-start justify-between gap-4 p-5">
           <div>
-            <h2 className="et-section-title">Data Setup</h2>
+            <h2 className="et-section-title">Data setup</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Set analysis types per question, create recodes and nets, and configure weighting.
+              Create recodes and nets, and configure survey weighting. Per-question setup lives under Questions.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {!hideSubNav && (
             <div className="et-segment">
-              <button
-                type="button"
-                onClick={() => setPageTab('questions')}
-                className={`et-segment-btn text-xs ${
-                  pageTab === 'questions' ? 'et-segment-btn-active' : 'et-segment-btn-inactive'
-                }`}
-              >
-                Questions
-              </button>
               <button
                 type="button"
                 onClick={() => setPageTab('custom')}
@@ -479,21 +475,6 @@ export function VariablesPanel({
         </div>
 
         {error && <ErrorState message={error} />}
-
-        {pageTab === 'questions' && (
-          <QuestionSetupPanel
-            surveyId={surveyId}
-            variables={schema?.variables ?? []}
-            groups={schema?.groups ?? []}
-            customVariables={variables}
-            focusQuestionId={focusQuestionId}
-            onFocusQuestionConsumed={onFocusQuestionConsumed}
-            username={username}
-            onCreateVariable={openCreateFromQuestion}
-            onEditVariable={openEdit}
-            onChanged={onChanged}
-          />
-        )}
 
         {pageTab === 'weighting' && (
           <WeightingPanel surveyId={surveyId} variables={schema?.variables ?? []} />

@@ -182,7 +182,11 @@ export function InterviewerQcTab({
         {duplicateStats?.available && (duplicateStats.by_interviewer?.length ?? 0) > 0 && (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 p-3">
             <p className="text-xs font-semibold text-amber-900">
-              Duplicate answer patterns (≥{duplicateStats.threshold_pct ?? 85}% match)
+              Duplicate answer patterns (≥{duplicateStats.threshold_pct ?? 85}% match
+              {(duplicateStats.min_cluster ?? 4) > 2
+                ? `, min ${duplicateStats.min_cluster} interviews`
+                : ''}
+              )
             </p>
             <ul className="mt-2 space-y-1 text-xs text-amber-900/90">
               {duplicateStats.by_interviewer?.map((row) => (

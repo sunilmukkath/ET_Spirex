@@ -5,6 +5,7 @@ import {
   type AiStatus,
   type AnalysisBookmark,
   type BannerRequest,
+  type PmAgentDraft,
   type ReportSectionPayload,
   type SlidePlanItem,
   type SurveyVariable,
@@ -53,6 +54,8 @@ export function ReportBuilderPanel({
   const [slidePlan, setSlidePlan] = useState<Record<string, SlidePlanItem>>({})
   const [planReady, setPlanReady] = useState(false)
   const [generatingPlan, setGeneratingPlan] = useState(false)
+  const [generatingReport, setGeneratingReport] = useState(false)
+  const [reportDraft, setReportDraft] = useState<PmAgentDraft | null>(null)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -175,6 +178,27 @@ export function ReportBuilderPanel({
       setError(err instanceof Error ? err.message : 'Slide plan generation failed')
     } finally {
       setGeneratingPlan(false)
+    }
+  }
+
+  async function handleGenerateReportDraft() {
+    const payloads = buildSectionPayloads()
+    if (payloads.length === 0) {
+      setError('Configure at least one section before drafting the report')
+      return
+    }
+    setGeneratingReport(true)
+    setError(null)
+    try {
+      const draft = await api.runReportWritingAgent(surveyId, {
+        deck_title: `${deckTitle} — Research report`,
+        sections: payloads,
+      })
+      setReportDraft(draft)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Report writing agent failed')
+    } finally {
+      setGeneratingReport(false)
     }
   }
 
@@ -320,10 +344,74 @@ export function ReportBuilderPanel({
               )}
               Generate AI slide plan
             </button>
+            <button
+              type="button"
+              onClick={() => void handleGenerateReportDraft()}
+              disabled={generatingReport || configuredCount === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/40 bg-white px-3 py-1.5 text-xs font-semibold text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)]/20 disabled:opacity-50"
+            >
+              {generatingReport ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <FileText size={14} />
+              )}
+              Report writing agent
+            </button>
             {planReady && (
               <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 ring-1 ring-emerald-200">
                 Plan ready — edit below before export
               </span>
+            )}
+          </div>
+        )}
+
+        {!aiReady && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleGenerateReportDraft()}
+              disabled={generatingReport || configuredCount === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {generatingReport ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <FileText size={14} />
+              )}
+              Report writing agent (template)
+            </button>
+          </div>
+        )}
+
+        {reportDraft && (
+          <div className="rounded-xl border border-[var(--et-teal)]/25 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[var(--et-teal-dark)]">
+                Report draft {reportDraft.configured ? '(AI)' : '(template)'}
+              </div>
+              <button
+                type="button"
+                onClick={() => void navigator.clipboard.writeText(reportDraft.draft_markdown)}
+                className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+              >
+                Copy markdown
+              </button>
+            </div>
+            <h3 className="mt-2 font-display text-lg font-semibold text-slate-900">{reportDraft.title}</h3>
+            <div className="mt-3 max-h-80 space-y-3 overflow-y-auto et-scroll">
+              {reportDraft.sections.map((s) => (
+                <section key={s.heading}>
+                  <h4 className="text-sm font-semibold text-slate-800">{s.heading}</h4>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{s.body}</p>
+                </section>
+              ))}
+            </div>
+            {reportDraft.actions.length > 0 && (
+              <ul className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-xs text-slate-600">
+                {reportDraft.actions.map((a) => (
+                  <li key={a}>• {a}</li>
+                ))}
+              </ul>
             )}
           </div>
         )}

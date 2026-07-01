@@ -24,6 +24,42 @@ class Settings(BaseSettings):
 
     lime_rpc_timeout: float = 30.0
 
+    # Postgres spine for full project lifecycle (optional — ET Scout works without it)
+    database_url: str = ""
+
+    # Google Workspace / Gmail (optional)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/api/gmail/oauth/callback"
+    google_oauth_success_url: str = "http://localhost:5173/my-work?gmail=connected"
+    google_auth_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
+    google_auth_success_url: str = "http://localhost:5173/"
+    app_public_url: str = "http://localhost:5173"
+    gmail_inbox_query: str = "in:inbox newer_than:14d"
+    # Optional: sunil@elastictree.com:Sunil,ambika@elastictree.com:Ambika
+    gmail_team_email_map: str = ""
+
+    # Company owner / super admin (always full edit rights)
+    super_admin_username: str = "Sunil"
+    super_admin_email: str = "sunilmukkath@elastictree.com"
+    workspace_domain: str = "elastictree.com"
+
+    @property
+    def resolved_gmail_team_email_map(self) -> str:
+        """Gmail address → ET Scout username, with super admin always mapped."""
+        extra: dict[str, str] = {}
+        if self.super_admin_email.strip() and self.super_admin_username.strip():
+            extra[self.super_admin_email.strip().lower()] = self.super_admin_username.strip()
+        for pair in self.gmail_team_email_map.split(","):
+            if ":" not in pair:
+                continue
+            email, name = pair.split(":", 1)
+            email = email.strip().lower()
+            name = name.strip()
+            if email and name:
+                extra[email] = name
+        return ",".join(f"{email}:{name}" for email, name in sorted(extra.items()))
+
     @property
     def resolved_ai_provider(self) -> str | None:
         pref = (self.ai_provider or "auto").lower()

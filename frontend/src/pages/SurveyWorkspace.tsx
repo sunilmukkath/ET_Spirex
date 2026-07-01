@@ -27,6 +27,8 @@ import {
   type AnalysisBookmark,
   type BannerResult,
   type CustomVariable,
+  type CustomVariableInput,
+  type CustomVariableType,
   type FilterGroup,
   type FilterPreset,
   type FilterSpec,
@@ -43,7 +45,7 @@ import { BrandLogo } from '../components/BrandLogo'
 import { ExplorePanel } from '../components/analysis/ExplorePanel'
 import { CrosstabsPanel } from '../components/analysis/CrosstabsPanel'
 import { QuestionNavigator } from '../components/analysis/QuestionNavigator'
-import { VariablesPanel, customVariableToSurvey } from '../components/analysis/VariablesPanel'
+import { VariablesPanel, customVariableToSurvey, buildVariableFormFromSource } from '../components/analysis/VariablesPanel'
 import { StatusBadge } from '../components/StatusBadge'
 import { ErrorState } from '../components/States'
 import { FieldOperationsPanel, type FieldView } from '../components/analysis/FieldOperationsPanel'
@@ -53,9 +55,9 @@ import { QualPanel } from '../components/analysis/QualPanel'
 import { ReportBuilderPanel } from '../components/analysis/ReportBuilderPanel'
 import { filterPayload, treeToFlatFilters } from '../lib/filterTree'
 import type { ChartTypeId } from '../lib/chartTypes'
+import type { CrosstabHeatmapMetric } from '../lib/crosstabHeatmap'
 import {
   captureCrosstabDefaults,
-  loadSurveyLayout,
   loadUserFieldDefaults,
   resolveIdsFromCodes,
   resolveLayersFromCodes,
@@ -79,10 +81,8 @@ import {
 } from '../components/workspace/WorkspaceSidebar'
 import {
   loadSurveySession,
-  mergeSessionIntoSearch,
   saveSurveySession,
   saveUserAppSession,
-  surveyEntryUsesDefaults,
 } from '../lib/workspaceSession'
 
 const DataPanel = lazy(() =>
@@ -201,6 +201,8 @@ export function SurveyWorkspace() {
   const [showCounts, setShowCounts] = useState(true)
   const [showColPct, setShowColPct] = useState(true)
   const [showRowPct, setShowRowPct] = useState(false)
+  const [heatmapEnabled, setHeatmapEnabled] = useState(false)
+  const [heatmapMetric, setHeatmapMetric] = useState<CrosstabHeatmapMetric>('col_pct')
   const [confidenceLevel, setConfidenceLevel] = useState(0.95)
   const [sigEnabled, setSigEnabled] = useState(true)
   const [filters, setFilters] = useState<FilterSpec[]>([])
@@ -208,7 +210,10 @@ export function SurveyWorkspace() {
   const [tableFilters, setTableFilters] = useState<Record<string, FilterSpec[]>>({})
   const [refreshingTableId, setRefreshingTableId] = useState<string | null>(null)
   const [customVariables, setCustomVariables] = useState<CustomVariable[]>([])
-  const [focusQuestionId, setFocusQuestionId] = useState<string | null>(null)
+  const [variableFormBootstrap, setVariableFormBootstrap] = useState<Partial<CustomVariableInput> | null>(
+    null,
+  )
+  const [variableEditBootstrap, setVariableEditBootstrap] = useState<CustomVariable | null>(null)
   const [exportingReport, setExportingReport] = useState(false)
   const [schemaVersion, setSchemaVersion] = useState(0)
   const [qcSummary, setQcSummary] = useState<{
@@ -245,31 +250,10 @@ export function SurveyWorkspace() {
 
   useEffect(() => {
     if (!user?.username || !Number.isFinite(surveyId)) return
-
-    const qs = searchParams.toString()
-    if (!surveyEntryUsesDefaults(qs ? `?${qs}` : '')) return
-
     const saved = loadSurveySession(user.username, surveyId)
-    if (saved) {
-      setSearchParams((prev) => mergeSessionIntoSearch(prev, saved), { replace: true })
-      if (saved.selectedQuestionId) setSelectedId(saved.selectedQuestionId)
-      if (saved.metric) setMetric(saved.metric)
-      return
-    }
-
-    const layout = loadSurveyLayout(user.username, surveyId)
-    if (!layout?.mode) return
-
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.set('mode', layout.mode!)
-      if (layout.analyzeView) next.set('view', layout.analyzeView)
-      else if (layout.fieldView) next.set('view', layout.fieldView)
-      else if (layout.setupView) next.set('view', layout.setupView)
-      else next.delete('view')
-      return next
-    }, { replace: true })
-  }, [user?.username, surveyId, setSearchParams])
+    if (saved?.selectedQuestionId) setSelectedId(saved.selectedQuestionId)
+    if (saved?.metric) setMetric(saved.metric)
+  }, [user?.username, surveyId])
 
   useEffect(() => {
     if (!user?.username || !Number.isFinite(surveyId)) return
@@ -352,6 +336,18 @@ export function SurveyWorkspace() {
       return prev
     }, { replace: true })
   }, [workflowAccess, workflowAccessLoaded, mode, analyzeView, fieldView, setupView, studyType, setSearchParams])
+
+  useEffect(() => {
+    if (mode !== 'variables') return
+    const view = searchParams.get('view')
+    if (!view || view === 'questions') {
+      setSearchParams((prev) => {
+        prev.set('mode', 'explore')
+        prev.delete('view')
+        return prev
+      }, { replace: true })
+    }
+  }, [mode, searchParams, setSearchParams])
 
   useCommandPaletteHotkey(() => setCommandOpen(true))
 
@@ -517,11 +513,13 @@ export function SurveyWorkspace() {
           prev.set('mode', 'fields')
           prev.set('view', 'quality')
         } else if (targetMode === 'variables') {
-          if (view === 'custom' || view === 'weighting' || view === 'questions') {
-            prev.set('view', view === 'questions' ? '' : view)
-            if (view === 'questions') prev.delete('view')
-          } else {
+          if (view === 'custom' || view === 'weighting') {
+            prev.set('view', view)
+          } else if (view === 'questions' || view === 'profile') {
+            prev.set('mode', 'explore')
             prev.delete('view')
+          } else {
+            prev.set('view', 'custom')
           }
         } else if (view === 'compare' || view === 'crosstabs') {
           prev.set('mode', 'explore')
@@ -542,12 +540,29 @@ export function SurveyWorkspace() {
     (view: SetupView) => {
       setSearchParams((prev) => {
         prev.set('mode', 'variables')
-        if (view === 'questions') prev.delete('view')
-        else prev.set('view', view)
+        prev.set('view', view)
         return prev
       }, { replace: true })
     },
     [setSearchParams],
+  )
+
+  const openCreateVariableFromQuestion = useCallback(
+    (type: CustomVariableType, source: SurveyVariable) => {
+      setVariableEditBootstrap(null)
+      setVariableFormBootstrap({ ...buildVariableFormFromSource(type, source) })
+      setSetupView('custom')
+    },
+    [setSetupView],
+  )
+
+  const openEditVariable = useCallback(
+    (variable: CustomVariable) => {
+      setVariableFormBootstrap(null)
+      setVariableEditBootstrap(variable)
+      setSetupView('custom')
+    },
+    [setSetupView],
   )
 
   const compareCurrentQuestion = useCallback(() => {
@@ -555,16 +570,6 @@ export function SurveyWorkspace() {
     setSideRowIds([selectedId])
     setAnalyzeView('compare')
   }, [selectedId, setAnalyzeView])
-
-  const configureCurrentQuestion = useCallback(() => {
-    if (!selectedId) return
-    setFocusQuestionId(selectedId)
-    setSearchParams((prev) => {
-      prev.set('mode', 'variables')
-      prev.delete('view')
-      return prev
-    }, { replace: true })
-  }, [selectedId, setSearchParams])
 
   const openQuestionChart = useCallback(
     (chartType: ChartTypeId) => {
@@ -596,6 +601,15 @@ export function SurveyWorkspace() {
     if (typeof cfg.show_counts === 'boolean') setShowCounts(cfg.show_counts)
     if (typeof cfg.show_col_pct === 'boolean') setShowColPct(cfg.show_col_pct)
     if (typeof cfg.show_row_pct === 'boolean') setShowRowPct(cfg.show_row_pct)
+    if (typeof cfg.heatmap_enabled === 'boolean') setHeatmapEnabled(cfg.heatmap_enabled)
+    if (
+      cfg.heatmap_metric === 'col_pct' ||
+      cfg.heatmap_metric === 'row_pct' ||
+      cfg.heatmap_metric === 'count' ||
+      cfg.heatmap_metric === 'value'
+    ) {
+      setHeatmapMetric(cfg.heatmap_metric)
+    }
     if (typeof cfg.sig_enabled === 'boolean') setSigEnabled(cfg.sig_enabled)
     if (typeof cfg.confidence_level === 'number') setConfidenceLevel(cfg.confidence_level)
     if (cfg.filter_tree) {
@@ -613,13 +627,6 @@ export function SurveyWorkspace() {
   const profileAbort = useRef<AbortController | null>(null)
   const bannerAbort = useRef<AbortController | null>(null)
   const initialized = useRef(false)
-
-  const setMode = (m: Mode) => {
-    setSearchParams((prev) => {
-      prev.set('mode', m)
-      return prev
-    }, { replace: true })
-  }
 
   function handleFiltersChange(next: FilterSpec[]) {
     setFilters(next)
@@ -1282,7 +1289,7 @@ export function SurveyWorkspace() {
                   onClick={() => setAnalyzeView('profile')}
                   icon={<Layers size={14} />}
                 >
-                  Profile
+                  Questions
                 </AnalyzeViewButton>
                 <AnalyzeViewButton
                   active={analyzeView === 'compare'}
@@ -1301,7 +1308,7 @@ export function SurveyWorkspace() {
               )}
               <p className="hidden min-w-0 flex-1 text-xs text-slate-500 sm:block">
                 {analyzeView === 'profile'
-                  ? 'Single-question distribution and summary'
+                  ? 'Distributions, summary stats, and analysis setup'
                   : 'Crosstab rows against banner columns'}
               </p>
             </div>
@@ -1397,8 +1404,14 @@ export function SurveyWorkspace() {
               profileResult={profileResult}
               schemaLoading={schemaLoading}
               enriching={enriching}
+              customVariables={customVariables}
+              onSetupChanged={() => {
+                invalidateProfileCache(surveyId)
+                void reloadCustomVariables()
+              }}
+              onCreateVariable={openCreateVariableFromQuestion}
+              onEditVariable={openEditVariable}
               onCompareQuestion={compareCurrentQuestion}
-              onConfigureQuestion={configureCurrentQuestion}
               onOpenChart={openQuestionChart}
               exportingReport={exportingReport}
               onExportReport={async (format) => {
@@ -1447,8 +1460,12 @@ export function SurveyWorkspace() {
               schema={schema}
               completionStatus={completionStatus}
               username={user?.username ?? null}
-              focusQuestionId={focusQuestionId}
-              onFocusQuestionConsumed={() => setFocusQuestionId(null)}
+              variableFormBootstrap={variableFormBootstrap}
+              variableEditBootstrap={variableEditBootstrap}
+              onVariableBootstrapConsumed={() => {
+                setVariableFormBootstrap(null)
+                setVariableEditBootstrap(null)
+              }}
               onChanged={reloadCustomVariables}
               pageTab={setupView}
               onPageTabChange={setSetupView}
@@ -1464,7 +1481,7 @@ export function SurveyWorkspace() {
                 completionStatus={completionStatus}
                 username={user?.username ?? null}
                 onVariablesChanged={reloadCustomVariables}
-                onOpenVariables={() => setMode('variables')}
+                onOpenVariables={() => setSetupView('custom')}
               />
             </Suspense>
           )}
@@ -1502,6 +1519,10 @@ export function SurveyWorkspace() {
               onShowColPctChange={setShowColPct}
               showRowPct={showRowPct}
               onShowRowPctChange={setShowRowPct}
+              heatmapEnabled={heatmapEnabled}
+              onHeatmapEnabledChange={setHeatmapEnabled}
+              heatmapMetric={heatmapMetric}
+              onHeatmapMetricChange={setHeatmapMetric}
               sigEnabled={sigEnabled}
               onSigEnabledChange={setSigEnabled}
               confidenceLevel={confidenceLevel}
@@ -1533,6 +1554,8 @@ export function SurveyWorkspace() {
                     show_counts: showCounts,
                     show_col_pct: showColPct,
                     show_row_pct: showRowPct,
+                    heatmap_enabled: heatmapEnabled,
+                    heatmap_metric: heatmapMetric,
                     sig_enabled: sigEnabled,
                     confidence_level: confidenceLevel,
                     table_filters: tableFilters,

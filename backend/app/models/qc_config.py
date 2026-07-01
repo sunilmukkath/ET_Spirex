@@ -11,6 +11,7 @@ class QcThresholds(BaseModel):
     min_array_items_straight_line: int = 4
     min_text_length_gibberish: int = 3
     interviewer_duplicate_similarity_pct: float = 85.0
+    interviewer_duplicate_min_cluster: int = 4
     interviewer_gps_proximity_meters: float = 10.0
     interviewer_gps_proximity_min_cluster: int = 2
     interviewer_gps_proximity_flag_all_in_cluster: bool = False

@@ -5,7 +5,7 @@ export const ET_PRODUCT_NAME = 'ET Scout'
 export const ET_LIMESURVEY_LABEL = 'Elastic Tree LimeSurvey'
 
 export const ET_LANDING_BADGE = 'Quant + qual research workspace'
-export const ET_LANDING_TITLE = 'One hub for fieldwork, qual, and client delivery.'
+export const ET_LANDING_TITLE = 'One hub for fieldwork, research, and client satisfaction.'
 export const ET_LANDING_SUBTITLE =
   'ET Scout connects LimeSurvey quant with a qual library — upload transcripts, search sessions, run AI thematic summaries, and ship decks from the same Elastic Tree project hub.'
 

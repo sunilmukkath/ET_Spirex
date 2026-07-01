@@ -1,4 +1,7 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
+import logging
+import threading
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,12 +9,36 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.db.session import ensure_database_ready
 from app.routes.api import router
+from app.routes.google_auth import router as google_auth_router
+from app.routes.gmail import router as gmail_router
+from app.routes.pm import router as pm_router
+
+logger = logging.getLogger(__name__)
+
+
+def _init_database_background() -> None:
+    try:
+        ensure_database_ready()
+    except Exception:
+        logger.exception("PM database init failed — ET Scout will run without Postgres spine")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    from app.db.session import database_enabled
+
+    if database_enabled():
+        threading.Thread(target=_init_database_background, daemon=True).start()
+    yield
+
 
 app = FastAPI(
     title="ET Scout API",
     description="Elastic Tree survey analytics API (ET Scout)",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -23,6 +50,9 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(pm_router, prefix="/api")
+app.include_router(gmail_router, prefix="/api")
+app.include_router(google_auth_router, prefix="/api")
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 

@@ -44,6 +44,7 @@ import {
   canManageTeam,
 } from '../../lib/workflowAccess'
 import { ET_WORKFLOW_TAGLINE } from '../../lib/etCopy'
+import { ProjectRequirementsEditor, emptyProjectRequirements } from '../ProjectRequirementsEditor'
 
 const TASK_CATEGORIES: TaskCategory[] = [
   'programming',
@@ -531,6 +532,20 @@ export function ProjectWorkflowPanel({ surveyId, currentUser, globalRole }: Prop
                 />
               </label>
             </div>
+
+            <section className="mt-4 rounded-xl border border-[var(--et-teal)]/20 bg-[var(--et-teal-light)]/10 p-4">
+              <h3 className="text-sm font-semibold text-slate-900">Project requirements</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Client brief and delivery spec — used by proposal and report agents.
+              </p>
+              <div className="mt-3">
+                <ProjectRequirementsEditor
+                  value={workflow.requirements ?? emptyProjectRequirements()}
+                  disabled={!canEdit}
+                  onChange={(requirements) => updateWorkflow({ requirements })}
+                />
+              </div>
+            </section>
           </div>
         </section>
 

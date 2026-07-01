@@ -6,11 +6,12 @@ from typing import Any
 
 from app.models.team_registry import GlobalRole, TeamRegistry, TeamUser
 from app.services.auth import VALID_USERS
+from app.services.super_admin import is_super_admin, super_admin_username
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "team"
 _REGISTRY_PATH = _DATA_DIR / "registry.json"
 
-_DEFAULT_ADMINS = frozenset({"Sunil"})
+_DEFAULT_ADMINS = frozenset({super_admin_username()})
 
 
 def _default_registry() -> TeamRegistry:
@@ -40,7 +41,18 @@ def _normalize_registry(raw: dict[str, Any] | None) -> TeamRegistry:
             role = "member"
         merged[username] = TeamUser(username=username, role=role)  # type: ignore[arg-type]
 
-    return TeamRegistry(users=sorted(merged.values(), key=lambda u: u.username.lower()))
+    return _enforce_super_admin(TeamRegistry(users=sorted(merged.values(), key=lambda u: u.username.lower())))
+
+
+def _enforce_super_admin(registry: TeamRegistry) -> TeamRegistry:
+    owner = super_admin_username()
+    users: list[TeamUser] = []
+    for user in registry.users:
+        if user.username == owner:
+            users.append(TeamUser(username=user.username, role="admin"))
+        else:
+            users.append(user)
+    return TeamRegistry(users=users)
 
 
 def get_team_registry() -> TeamRegistry:
@@ -54,7 +66,7 @@ def get_team_registry() -> TeamRegistry:
 
 
 def set_team_registry(registry: TeamRegistry) -> TeamRegistry:
-    normalized = _normalize_registry(registry.model_dump())
+    normalized = _enforce_super_admin(_normalize_registry(registry.model_dump()))
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     _REGISTRY_PATH.write_text(
         json.dumps(normalized.model_dump(), indent=2),
@@ -64,6 +76,8 @@ def set_team_registry(registry: TeamRegistry) -> TeamRegistry:
 
 
 def get_global_role(username: str | None) -> GlobalRole:
+    if is_super_admin(username):
+        return "admin"
     if not username:
         return "member"
     for user in get_team_registry().users:
@@ -75,8 +89,12 @@ def get_global_role(username: str | None) -> GlobalRole:
 
 
 def is_global_admin(username: str | None) -> bool:
+    if is_super_admin(username):
+        return True
     return get_global_role(username) == "admin"
 
 
 def is_global_manager_or_above(username: str | None) -> bool:
+    if is_super_admin(username):
+        return True
     return get_global_role(username) in {"admin", "manager"}

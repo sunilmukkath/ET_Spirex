@@ -97,6 +97,27 @@ body {
   animation: fade-in 0.45s ease-out both;
 }
 
+.animate-fade-in-delay-1 {
+  animation: fade-in 0.45s ease-out 0.08s both;
+}
+
+.animate-fade-in-delay-2 {
+  animation: fade-in 0.45s ease-out 0.16s both;
+}
+
+.animate-fade-in-delay-3 {
+  animation: fade-in 0.45s ease-out 0.24s both;
+}
+
+@keyframes landing-glow {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.04); }
+}
+
+.landing-glow {
+  animation: landing-glow 8s ease-in-out infinite;
+}
+
 @keyframes pulse-soft {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

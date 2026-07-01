@@ -20,6 +20,8 @@ interface AuthState {
   username: string
   token: string
   role?: GlobalRole
+  email?: string | null
+  is_super_admin?: boolean
 }
 
 interface AuthContextValue {
@@ -30,6 +32,7 @@ interface AuthContextValue {
   logout: () => Promise<void>
   refreshSessions: () => Promise<void>
   isAdmin: boolean
+  isSuperAdmin: boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -51,6 +54,26 @@ function loadStored(): AuthState | null {
     /* ignore */
   }
   return null
+}
+
+function parseGoogleOAuthCallback(): { token: string; username: string } | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  const token = params.get('token')
+  if (params.get('auth') !== 'google' || !token) return null
+  return { token, username: params.get('username') ?? '' }
+}
+
+function clearOAuthQueryParams() {
+  if (typeof window === 'undefined') return
+  const params = new URLSearchParams(window.location.search)
+  if (!params.has('auth') && !params.has('token')) return
+  const next = new URL(window.location.href)
+  next.searchParams.delete('auth')
+  next.searchParams.delete('token')
+  next.searchParams.delete('username')
+  next.searchParams.delete('reason')
+  window.history.replaceState({}, '', `${next.pathname}${next.search}${next.hash}`)
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -77,6 +100,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false
 
     async function bootstrap() {
+      const oauth = parseGoogleOAuthCallback()
+      if (oauth) {
+        setAuthToken(oauth.token)
+        try {
+          const me = await api.getMe()
+          if (!cancelled) {
+            const state = {
+              token: oauth.token,
+              username: me.username || oauth.username,
+              role: me.role,
+              email: me.email,
+              is_super_admin: me.is_super_admin,
+            }
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+            setUser(state)
+          }
+        } catch {
+          localStorage.removeItem(STORAGE_KEY)
+          setAuthToken(null)
+          if (!cancelled) setUser(null)
+        } finally {
+          clearOAuthQueryParams()
+          if (!cancelled) setLoading(false)
+        }
+        return
+      }
+
       const stored = loadStored()
       if (!stored) {
         setAuthToken(null)
@@ -86,7 +136,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthToken(stored.token)
       try {
         const me = await api.getMe()
-        if (!cancelled) setUser({ token: stored.token, username: me.username, role: me.role })
+        if (!cancelled) {
+          setUser({
+            token: stored.token,
+            username: me.username,
+            role: me.role,
+            email: me.email,
+            is_super_admin: me.is_super_admin,
+          })
+        }
       } catch {
         localStorage.removeItem(STORAGE_KEY)
         setAuthToken(null)
@@ -110,7 +168,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await api.login(username, password)
     setAuthToken(result.token)
     const me = await api.getMe()
-    const state = { token: result.token, username: result.username, role: me.role }
+    const state = {
+      token: result.token,
+      username: result.username,
+      role: me.role,
+      email: me.email,
+      is_super_admin: me.is_super_admin,
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     setUser(state)
   }, [])
@@ -135,7 +199,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       refreshSessions,
-      isAdmin: user?.role === 'admin',
+      isAdmin: user?.role === 'admin' || user?.is_super_admin === true,
+      isSuperAdmin: user?.is_super_admin === true,
     }),
     [user, loading, activeSessions, login, logout, refreshSessions],
   )

@@ -13,6 +13,7 @@ from app.lime_client import (
     get_survey_questions,
     is_stale_session_error,
     list_projects,
+    list_projects_cached,
 )
 from app.models.analysis import (
     AdvancedAnalysisRequest,
@@ -21,8 +22,8 @@ from app.models.analysis import (
     ProfileRequest,
     ProjectStatsRequest,
 )
-from app.models.auth import LoginRequest, LoginResponse
 from app.models.pinned_surveys import PinnedSurveys
+from app.models.pm import AgentDraftResponse
 from app.models.project_workflow import (
     ProjectActivityCreate,
     ProjectWorkflow,
@@ -30,7 +31,7 @@ from app.models.project_workflow import (
 )
 from app.models.team_registry import TeamRegistry, PROJECT_MODULES
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
-from app.services.auth import VALID_USERS, authenticate, get_session, list_active_sessions, logout
+from app.services.auth import get_session, list_active_sessions, logout
 from app.services.banner_analysis import run_banner_table, run_chart_data, run_question_profile, get_filter_options
 from app.services.advanced_analysis import run_advanced_analysis
 from app.services.custom_variable_store import (
@@ -74,6 +75,7 @@ from app.models.workspace_prefs import (
     ReportNarrativeRequest,
     ReportSlidePlanRequest,
     ReportSectionInput,
+    ReportWritingRequest,
     SlidePlanItem,
     WeightConfig,
 )
@@ -85,6 +87,7 @@ from app.services.report_export import (
     profile_to_pdf,
     profile_to_pptx,
 )
+from app.services.report_agent import run_report_writing_agent
 from app.services.ai_narrative import (
     ai_status,
     banner_context,
@@ -101,6 +104,7 @@ from app.services.project_workflow_store import (
     can_manage_project_team,
     get_project_workflow,
     list_my_tasks,
+    list_unassigned_tasks,
     set_project_workflow,
     workflow_access_summary,
 )
@@ -122,12 +126,15 @@ from app.services.qual_store import (
 )
 from app.services.qual_analysis import generate_qual_summary
 from app.services.pinned_survey_store import get_pinned_survey_ids, set_pinned_survey_ids
+from app.services.user_preferences_store import get_user_preferences, set_user_preferences
+from app.models.user_preferences import UserPreferences, UserPreferencesUpdate
 from app.services.team_registry_store import (
     get_global_role,
     get_team_registry,
     is_global_admin,
     set_team_registry,
 )
+from app.services.super_admin import is_super_admin, super_admin_email, super_admin_username, email_for_username
 
 router = APIRouter(prefix="/api")
 
@@ -156,6 +163,8 @@ def health():
         "git_commit": commit,
         "features": {
             "pinned_surveys": True,
+            "user_preferences": True,
+            "project_requirements": True,
             "project_workflow": True,
             "crosstabs_total_only": True,
         },
@@ -164,16 +173,12 @@ def health():
 
 @router.get("/auth/users")
 def auth_users():
-    return {"users": sorted(VALID_USERS)}
+    return {"users": []}
 
 
-@router.post("/auth/login", response_model=LoginResponse)
-def auth_login(body: LoginRequest):
-    token = authenticate(body.username, body.password)
-    if not token:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    username = str(body.username or "").strip()
-    return LoginResponse(token=token, username=username)
+@router.post("/auth/login")
+def auth_login():
+    raise HTTPException(status_code=410, detail="Password sign-in has been disabled. Use Google sign-in.")
 
 
 @router.post("/auth/logout")
@@ -192,6 +197,8 @@ def auth_me(authorization: str | None = Header(default=None)):
         "username": record.username,
         "login_at": record.login_at,
         "role": get_global_role(record.username),
+        "email": email_for_username(record.username) or (super_admin_email() if is_super_admin(record.username) else None),
+        "is_super_admin": is_super_admin(record.username),
     }
 
 
@@ -233,6 +240,25 @@ def pinned_surveys_update(
         raise HTTPException(status_code=401, detail="Not signed in")
     saved = set_pinned_survey_ids(record.username, body.survey_ids)
     return {"survey_ids": saved}
+
+
+@router.get("/me/preferences", response_model=UserPreferences)
+def user_preferences_get(authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return get_user_preferences(record.username)
+
+
+@router.put("/me/preferences", response_model=UserPreferences)
+def user_preferences_update(
+    body: UserPreferencesUpdate,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return set_user_preferences(record.username, body)
 
 
 @router.get("/team/registry")
@@ -348,29 +374,44 @@ def my_tasks_route(authorization: str | None = Header(default=None)):
     if not record:
         raise HTTPException(status_code=401, detail="Not signed in")
     rows = list_my_tasks(record.username)
-    title_by_id: dict[int, str] = {}
-    try:
-        for project in list_projects(include_stats=False):
-            sid = int(project.get("id") or 0)
-            if sid:
-                title_by_id[sid] = str(project.get("title") or f"Survey {sid}")
-    except Exception:
-        pass
+    return {"tasks": _format_task_rows(rows), "count": len(rows)}
+
+
+@router.get("/tasks/unassigned")
+def unassigned_tasks_route(authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    rows = list_unassigned_tasks()
+    return {"tasks": _format_task_rows(rows), "count": len(rows)}
+
+
+def _format_task_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     tasks = []
     for row in rows:
         sid = int(row["survey_id"])
         task = row["task"]
+        client = str(row.get("client_name") or "").strip()
+        code = str(row.get("project_code") or "").strip()
+        if client and code:
+            survey_title = f"{client} — {code}"
+        elif client:
+            survey_title = client
+        elif code:
+            survey_title = code
+        else:
+            survey_title = f"Survey {sid}"
         tasks.append(
             {
                 "survey_id": sid,
-                "survey_title": title_by_id.get(sid) or f"Survey {sid}",
+                "survey_title": survey_title,
                 "phase": row.get("phase"),
-                "client_name": row.get("client_name") or "",
-                "project_code": row.get("project_code") or "",
+                "client_name": client,
+                "project_code": code,
                 "task": task,
             }
         )
-    return {"tasks": tasks, "count": len(tasks)}
+    return tasks
 
 
 @router.get("/connection")
@@ -379,8 +420,11 @@ def connection():
 
 
 @router.get("/projects")
-def projects(limit: int | None = None, include_stats: bool = False):
+def projects(limit: int | None = None, include_stats: bool = False, cached_only: bool = False):
     try:
+        if cached_only:
+            cached = list_projects_cached(limit=limit)
+            return {"projects": cached or [], "from_cache": cached is not None}
         return {"projects": list_projects(include_stats=include_stats, limit=limit)}
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
@@ -1132,6 +1176,23 @@ def preview_report_slide_plan(
         raise HTTPException(status_code=502, detail=f"AI slide plan failed: {exc}") from exc
 
     return {"slides": slides, "deck_title": body.deck_title or f"Survey {survey_id}"}
+
+
+@router.post("/projects/{survey_id}/analysis/report-writing-agent", response_model=AgentDraftResponse)
+def report_writing_agent(
+    survey_id: int,
+    body: ReportWritingRequest,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    if not body.sections:
+        raise HTTPException(status_code=400, detail="At least one section required")
+    return run_report_writing_agent(
+        survey_id,
+        body.sections,
+        deck_title=body.deck_title,
+        client_context=body.client_context,
+    )
 
 
 @router.post("/projects/{survey_id}/analysis/report-deck")

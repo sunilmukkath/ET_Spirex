@@ -21,6 +21,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import { api, type ConnectionStatus, type MyTaskRow, type Project } from '../api/client'
 import { usePinnedSurveys } from '../hooks/usePinnedSurveys'
+import { useUserPreferences } from '../hooks/useUserPreferences'
 import {
   loadUserAppSession,
   resolveSurveyHref,
@@ -142,6 +143,7 @@ function mergeStats(projects: Project[], stats: Record<string, { completed: numb
 
 export function DashboardPage() {
   const { user } = useAuth()
+  const { prefs, loading: prefsLoading, savePrefs } = useUserPreferences(user?.username)
   const appSession = useMemo(
     () => (user?.username ? loadUserAppSession(user.username) : null),
     [user?.username],
@@ -154,35 +156,50 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [sortKey, setSortKey] = useState<SortKey>(
-    () => (appSession?.dashboardSortKey as SortKey | undefined) ?? 'newest',
-  )
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    const saved = appSession?.dashboardViewMode as string | undefined
-    if (saved === 'table') return 'table'
-    return 'strips'
-  })
+  const [sortKey, setSortKey] = useState<SortKey>('newest')
+  const [viewMode, setViewMode] = useState<ViewMode>('strips')
   const { pinnedIds, pinnedSet, toggle: togglePinned } = usePinnedSurveys()
   const pinnedIdsRef = useRef(pinnedIds)
   pinnedIdsRef.current = pinnedIds
   const [showPinnedOnly, setShowPinnedOnly] = useState(false)
+  const [prefsApplied, setPrefsApplied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [myTasks, setMyTasks] = useState<MyTaskRow[]>([])
   const [myTasksLoading, setMyTasksLoading] = useState(true)
   const loadGeneration = useRef(0)
+  const skipPrefsSave = useRef(true)
 
   useEffect(() => {
-    if (!user?.username) return
+    if (prefsLoading || prefsApplied) return
+    const sort = (prefs.dashboard_sort_key as SortKey) || 'newest'
+    setSortKey(sort)
+    setViewMode(prefs.dashboard_view_mode === 'table' ? 'table' : 'strips')
+    setShowPinnedOnly(prefs.pinned_only_default)
+    setPrefsApplied(true)
+    skipPrefsSave.current = true
+  }, [prefs, prefsLoading, prefsApplied])
+
+  useEffect(() => {
+    if (!user?.username || !prefsApplied) return
+    if (skipPrefsSave.current) {
+      skipPrefsSave.current = false
+      return
+    }
     saveUserAppSession(user.username, {
       dashboardViewMode: viewMode,
       dashboardSortKey: sortKey,
     })
-  }, [user?.username, viewMode, sortKey])
+    void savePrefs({
+      dashboard_view_mode: viewMode,
+      dashboard_sort_key: sortKey,
+      pinned_only_default: showPinnedOnly,
+    })
+  }, [user?.username, viewMode, sortKey, showPinnedOnly, prefsApplied, savePrefs])
 
   const resumePath = useMemo(() => {
     if (!user?.username || !appSession?.lastSurveyId) return null
-    return resolveSurveyHref(user.username, appSession.lastSurveyId)
-  }, [user?.username, appSession?.lastSurveyId])
+    return appSession.lastPath || `/projects/${appSession.lastSurveyId}`
+  }, [user?.username, appSession?.lastSurveyId, appSession?.lastPath])
 
   const loadProjects = useCallback(async (generation: number) => {
     const data = await api.getProjects()
@@ -254,20 +271,33 @@ export function DashboardPage() {
     let cancelled = false
 
     async function init() {
+      setLoading(true)
+      setError(null)
+      void loadConnection(generation)
+
+      // Show dashboard shell immediately; hydrate projects when LimeSurvey responds.
+      setLoading(false)
+
       try {
-        setLoading(true)
-        setError(null)
-        void loadConnection(generation)
+        const cached = await api.getProjects({ cachedOnly: true }).catch(() => null)
+        if (cancelled) return
+        if (cached?.projects?.length) {
+          setProjects(cached.projects)
+          void loadStats(cached.projects, generation, pinnedIdsRef.current)
+        }
+      } catch {
+        /* ignore cache miss */
+      }
+
+      try {
         const list = await loadProjects(generation)
         if (cancelled || !list) return
-        setLoading(false)
         void loadStats(list, generation, pinnedIdsRef.current)
       } catch (err) {
         if (!cancelled) {
           const msg = err instanceof Error ? err.message : 'Failed to load projects'
           setError(msg)
         }
-        if (!cancelled) setLoading(false)
       }
     }
 
@@ -451,6 +481,9 @@ export function DashboardPage() {
                 {myTasks.length}
               </span>
             </div>
+            <Link to="/my-work" className="text-xs font-medium text-[var(--et-teal)] hover:underline">
+              My work & Gmail
+            </Link>
           </div>
           <ul className="divide-y divide-slate-100">
             {myTasks.slice(0, 8).map((row) => (

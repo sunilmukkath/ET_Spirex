@@ -12,6 +12,7 @@ const DEFAULT_THRESHOLDS: QcConfig['thresholds'] = {
   min_array_items_straight_line: 4,
   min_text_length_gibberish: 3,
   interviewer_duplicate_similarity_pct: 85,
+  interviewer_duplicate_min_cluster: 4,
   interviewer_gps_proximity_meters: 10,
   interviewer_gps_proximity_min_cluster: 2,
   interviewer_gps_proximity_flag_all_in_cluster: false,
@@ -542,7 +543,32 @@ export function QcSettingsPanel({
                 />
                 <span className="mt-1 block text-[10px] text-slate-400">
                   Flag when {thresholds.interviewer_duplicate_similarity_pct ?? 85}% or more of
-                  comparable answers match an earlier record by the same interviewer
+                  comparable answers match across interviews by the same interviewer
+                </span>
+              </label>
+              <label className="block max-w-xs text-xs">
+                <span className="mb-1 block font-medium text-slate-600">
+                  Min respondents with similar answers
+                </span>
+                <input
+                  type="number"
+                  min={2}
+                  max={20}
+                  step={1}
+                  value={thresholds.interviewer_duplicate_min_cluster ?? 4}
+                  onChange={(e) =>
+                    updateThresholds({
+                      interviewer_duplicate_min_cluster: Math.min(
+                        20,
+                        Math.max(2, Number(e.target.value) || 4),
+                      ),
+                    })
+                  }
+                  className="et-input w-full"
+                />
+                <span className="mt-1 block text-[10px] text-slate-400">
+                  Require at least {thresholds.interviewer_duplicate_min_cluster ?? 4} interviews
+                  with matching answer patterns before flagging
                 </span>
               </label>
               <div className="grid gap-3 sm:grid-cols-2">

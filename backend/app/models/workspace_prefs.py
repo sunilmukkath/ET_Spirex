@@ -79,6 +79,12 @@ class ReportSlidePlanRequest(BaseModel):
     deck_title: str = ""
 
 
+class ReportWritingRequest(BaseModel):
+    sections: list[ReportSectionInput]
+    deck_title: str = ""
+    client_context: str | None = None
+
+
 class ReportDeckExportRequest(BaseModel):
     sections: list[ReportSectionInput]
     format: str = "pptx"

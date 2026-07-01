@@ -1,9 +1,61 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutGrid, LogOut, Menu, Settings, Users, X } from 'lucide-react'
+import { BarChart3, ClipboardList, Home, LayoutGrid, LogOut, Menu, Settings, Users, X } from 'lucide-react'
+import type { CommandPaletteItem } from './workspace/CommandPalette'
 import { useAuth } from '../auth/AuthContext'
 import { BrandLogo } from './BrandLogo'
 import { CommandPalette, useCommandPaletteHotkey } from './workspace/CommandPalette'
+
+const APP_NAV_ITEMS: CommandPaletteItem[] = [
+  {
+    id: 'app-home',
+    label: 'Home',
+    description: 'Tasks, projects, proposals, CRM, and finance overview',
+    group: 'App',
+    href: '/home',
+    keywords: ['landing', 'dashboard', 'start', 'hub'],
+  },
+  {
+    id: 'app-dashboard',
+    label: 'Projects',
+    description: 'LimeSurvey studies and workspace hub',
+    group: 'App',
+    href: '/dashboard',
+    keywords: ['home', 'surveys', 'limesurvey'],
+  },
+  {
+    id: 'app-my-work',
+    label: 'My work',
+    description: 'Assigned tasks and Gmail inbox → create tasks',
+    group: 'App',
+    href: '/my-work',
+    keywords: ['tasks', 'gmail', 'inbox', 'email', 'assigned'],
+  },
+  {
+    id: 'app-operations',
+    label: 'Operations',
+    description: 'Proposal-to-closure pipeline, finance, CRM, survey links',
+    group: 'App',
+    href: '/operations',
+    keywords: ['pm', 'pipeline', 'finance', 'crm', 'marketing', 'proposal', 'clients'],
+  },
+  {
+    id: 'app-fieldwork',
+    label: 'Fieldwork',
+    description: 'PM fieldwork tracker — completes vs quota',
+    group: 'App',
+    href: '/fieldwork',
+    keywords: ['quota', 'pm', 'tracking'],
+  },
+  {
+    id: 'app-settings',
+    label: 'Settings',
+    description: 'Connection, AI, and team configuration',
+    group: 'App',
+    href: '/settings',
+    keywords: ['admin', 'config'],
+  },
+]
 
 function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString(undefined, {
@@ -47,18 +99,46 @@ export function AppShell() {
             >
               <Menu size={20} />
             </button>
-            <Link to="/dashboard" className="rounded-lg transition hover:opacity-90">
+            <Link to="/home" className="rounded-lg transition hover:opacity-90">
               <BrandLogo size="sm" />
             </Link>
           </div>
 
           <nav className="hidden items-center gap-1 sm:flex">
             <Link
+              to="/home"
+              className={`et-chip ${location.pathname === '/home' ? 'et-chip-active' : 'et-chip-inactive'}`}
+            >
+              <Home size={14} />
+              Home
+            </Link>
+            <Link
               to="/dashboard"
               className={`et-chip ${location.pathname === '/dashboard' ? 'et-chip-active' : 'et-chip-inactive'}`}
             >
               <LayoutGrid size={14} />
               Projects
+            </Link>
+            <Link
+              to="/my-work"
+              className={`et-chip ${location.pathname === '/my-work' ? 'et-chip-active' : 'et-chip-inactive'}`}
+            >
+              <ClipboardList size={14} />
+              My work
+            </Link>
+            <Link
+              to="/operations"
+              className={`et-chip ${location.pathname === '/operations' ? 'et-chip-active' : 'et-chip-inactive'}`}
+            >
+              <LayoutGrid size={14} />
+              Operations
+            </Link>
+            <Link
+              to="/fieldwork"
+              className={`et-chip ${location.pathname === '/fieldwork' ? 'et-chip-active' : 'et-chip-inactive'}`}
+            >
+              <BarChart3 size={14} />
+              Fieldwork
             </Link>
             <Link
               to="/settings"
@@ -141,6 +221,16 @@ export function AppShell() {
             </div>
             <nav className="space-y-1">
               <Link
+                to="/home"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
+                  location.pathname === '/home' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Home size={16} />
+                Home
+              </Link>
+              <Link
                 to="/dashboard"
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
@@ -149,6 +239,36 @@ export function AppShell() {
               >
                 <LayoutGrid size={16} />
                 Projects
+              </Link>
+              <Link
+                to="/my-work"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
+                  location.pathname === '/my-work' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <ClipboardList size={16} />
+                My work
+              </Link>
+              <Link
+                to="/operations"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
+                  location.pathname === '/operations' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <LayoutGrid size={16} />
+                Operations
+              </Link>
+              <Link
+                to="/fieldwork"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
+                  location.pathname === '/fieldwork' ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <BarChart3 size={16} />
+                Fieldwork
               </Link>
               <Link
                 to="/settings"
@@ -179,7 +299,11 @@ export function AppShell() {
         <Outlet />
       </main>
 
-      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
+      <CommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        extraItems={APP_NAV_ITEMS}
+      />
     </div>
   )
 }

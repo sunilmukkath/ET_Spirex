@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutGrid, Search, Settings, X } from 'lucide-react'
+import { BarChart3, ClipboardList, LayoutGrid, Search, Settings, X } from 'lucide-react'
 import type { StudyType, WorkflowAccess } from '../../api/client'
 import { NAV_GROUP_LABELS } from '../../lib/etCopy'
 import { searchNavItems, type WorkspaceNavItem } from '../../lib/workspaceNav'
@@ -161,7 +161,15 @@ export function CommandPalette({ open, onClose, surveyId, access, studyType = 'q
                     >
                       <span className="mt-0.5 text-[var(--et-teal-dark)]">
                         {item.group === 'App' ? (
-                          item.label === 'Settings' ? <Settings size={16} /> : <LayoutGrid size={16} />
+                          item.label === 'Settings' ? (
+                            <Settings size={16} />
+                          ) : item.label === 'Fieldwork' ? (
+                            <BarChart3 size={16} />
+                          ) : item.label === 'My work' ? (
+                            <ClipboardList size={16} />
+                          ) : (
+                            <LayoutGrid size={16} />
+                          )
                         ) : (
                           <Search size={16} className="opacity-0" />
                         )}
