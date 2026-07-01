@@ -5,6 +5,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { AppShell } from './components/AppShell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LandingPage } from './pages/LandingPage'
+import { GoogleCallbackPage } from './pages/GoogleCallbackPage'
 
 const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
@@ -36,6 +37,7 @@ function App() {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<LandingPage />} />
+            <Route path="auth/google/callback" element={<GoogleCallbackPage />} />
             <Route
               element={
                 <ProtectedRoute>
