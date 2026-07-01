@@ -429,12 +429,9 @@ def pipeline_overview(session: Session, linked_survey_ids: list[int] | None = No
     project_ids = [row.project_id for row in rows]
     fieldwork_latest = _latest_fieldwork_by_project(session, project_ids)
 
-    all_survey_ids: list[int] = []
     survey_ids_by_project: dict[UUID, list[int]] = {}
     for row in rows:
-        sids = linked_survey_ids_for_project(row)
-        survey_ids_by_project[row.project_id] = sids
-        all_survey_ids.extend(sids)
+        survey_ids_by_project[row.project_id] = linked_survey_ids_for_project(row)
 
     from app.services.project_workflow_store import count_open_tasks_for_pm_projects
 

@@ -120,46 +120,109 @@ export function AccountingPage() {
   const [createKind, setCreateKind] = useState<CreateKind | null>(null)
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const tabsLoaded = useRef(new Set<Tab>())
 
-  const load = useCallback(async () => {
+  const refreshDashboard = useCallback(async () => {
+    const dash = await api.getAcctDashboard()
+    setDashboard(dash)
+  }, [])
+
+  const loadTab = useCallback(async (t: Tab, force = false) => {
+    if (!force && tabsLoaded.current.has(t)) return
     setLoading(true)
     setError(null)
     try {
-      const [dash, inv, billList, estList, srList, poList, contactList, acctList, payList, mods, rpt] =
-        await Promise.all([
-          api.getAcctDashboard(),
-          api.listAcctInvoices(),
-          api.listAcctBills(),
-          api.listAcctEstimates(),
-          api.listAcctSalesReceipts(),
-          api.listAcctPurchaseOrders(),
-          api.listAcctContacts(),
-          api.listAcctAccounts(),
-          api.listAcctPayments(),
-          api.listZohoModules(),
-          api.getAcctSummaryReports(),
-        ])
-      setDashboard(dash)
-      setInvoices(inv)
-      setBills(billList)
-      setEstimates(estList)
-      setSalesReceipts(srList)
-      setPurchaseOrders(poList)
-      setContacts(contactList)
-      setAccounts(acctList)
-      setPayments(payList)
-      setZohoModules(mods)
-      setReports(rpt)
+      switch (t) {
+        case 'overview': {
+          await refreshDashboard()
+          break
+        }
+        case 'sales': {
+          const [inv, estList, srList, payList] = await Promise.all([
+            api.listAcctInvoices(),
+            api.listAcctEstimates(),
+            api.listAcctSalesReceipts(),
+            api.listAcctPayments(),
+          ])
+          setInvoices(inv)
+          setEstimates(estList)
+          setSalesReceipts(srList)
+          setPayments(payList)
+          break
+        }
+        case 'purchases': {
+          const [billList, poList, payList] = await Promise.all([
+            api.listAcctBills(),
+            api.listAcctPurchaseOrders(),
+            api.listAcctPayments(),
+          ])
+          setBills(billList)
+          setPurchaseOrders(poList)
+          setPayments(payList)
+          break
+        }
+        case 'reports': {
+          const rpt = await api.getAcctSummaryReports()
+          setReports(rpt)
+          break
+        }
+        case 'contacts': {
+          const contactList = await api.listAcctContacts()
+          setContacts(contactList)
+          break
+        }
+        case 'accounts': {
+          const acctList = await api.listAcctAccounts()
+          setAccounts(acctList)
+          break
+        }
+        case 'migrate': {
+          const mods = await api.listZohoModules()
+          setZohoModules(mods)
+          break
+        }
+      }
+      tabsLoaded.current.add(t)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load accounting')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [refreshDashboard])
+
+  const reloadCurrentTab = useCallback(async () => {
+    tabsLoaded.current.delete(tab)
+    await loadTab(tab, true)
+    if (tab !== 'overview') {
+      try {
+        await refreshDashboard()
+      } catch {
+        /* overview is best-effort after mutations */
+      }
+    }
+  }, [loadTab, refreshDashboard, tab])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    void loadTab(tab)
+  }, [tab, loadTab])
+
+  useEffect(() => {
+    if (!createKind) return
+    void (async () => {
+      try {
+        const tasks: Promise<void>[] = []
+        if (contacts.length === 0) {
+          tasks.push(api.listAcctContacts().then((rows) => setContacts(rows)).then(() => {}))
+        }
+        if (accounts.length === 0 && (createKind === 'payment_receipt' || createKind === 'payment_made')) {
+          tasks.push(api.listAcctAccounts().then((rows) => setAccounts(rows)).then(() => {}))
+        }
+        await Promise.all(tasks)
+      } catch {
+        /* create form can still open; user may retry refresh */
+      }
+    })()
+  }, [accounts.length, contacts.length, createKind])
 
   function setTab(next: Tab) {
     setSearchParams({ tab: next })
@@ -184,7 +247,15 @@ export function AccountingPage() {
       const result = await api.importZohoData(zohoModule, file)
       setZohoResult(result)
       setZohoPreview(null)
-      await load()
+      tabsLoaded.current.clear()
+      await loadTab(tab, true)
+      if (tab !== 'overview') {
+        try {
+          await refreshDashboard()
+        } catch {
+          /* ignore */
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed')
     } finally {
@@ -224,7 +295,7 @@ export function AccountingPage() {
           break
       }
       setCreateKind(null)
-      await load()
+      await reloadCurrentTab()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed')
     } finally {
@@ -250,7 +321,7 @@ export function AccountingPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={() => void load()} className="et-btn-secondary inline-flex items-center gap-1 text-sm">
+          <button type="button" onClick={() => void reloadCurrentTab()} className="et-btn-secondary inline-flex items-center gap-1 text-sm">
             <RefreshCw size={14} />
             Refresh
           </button>

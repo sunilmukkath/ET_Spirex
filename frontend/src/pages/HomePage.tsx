@@ -20,7 +20,6 @@ import {
   api,
   type MyTaskRow,
   type PmClient,
-  type PmFinanceSummary,
   type PmPipelineProject,
   type PmProposal,
 } from '../api/client'
@@ -31,6 +30,11 @@ import { taskWorkflowHref } from '../lib/pmWorkflowLinks'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
 const PROJECT_PREVIEW = 6
+
+function formatInr(value: number): string {
+  if (value <= 0) return '—'
+  return value.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })
+}
 
 const QUICK_LINK_TOOLS = [
   {
@@ -244,7 +248,6 @@ export function HomePage() {
   const [pmProjects, setPmProjects] = useState<PmPipelineProject[]>([])
   const [proposals, setProposals] = useState<PmProposal[]>([])
   const [clients, setClients] = useState<PmClient[]>([])
-  const [financeSnapshots, setFinanceSnapshots] = useState<PmFinanceSummary[]>([])
 
   const [showNewTask, setShowNewTask] = useState(false)
   const [showQuickLinkPicker, setShowQuickLinkPicker] = useState(false)
@@ -284,23 +287,10 @@ export function HomePage() {
         setPmProjects(pipe)
         setClients(clientsRes.status === 'fulfilled' ? clientsRes.value : [])
         setProposals(proposalsRes.status === 'fulfilled' ? proposalsRes.value : [])
-
-        const owned = pipe
-          .filter((p) => !user?.username || p.owner_name === user.username)
-          .slice(0, 3)
-        const finances = await Promise.allSettled(
-          owned.map((p) => api.getPmFinance(p.project_id)),
-        )
-        setFinanceSnapshots(
-          finances
-            .filter((r): r is PromiseFulfilledResult<PmFinanceSummary> => r.status === 'fulfilled')
-            .map((r) => r.value),
-        )
       } else {
         setPmProjects([])
         setClients([])
         setProposals([])
-        setFinanceSnapshots([])
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load home')
@@ -373,10 +363,12 @@ export function HomePage() {
     [activePmProjectsList],
   )
 
-  const totalOutstanding = useMemo(
-    () => financeSnapshots.reduce((sum, f) => sum + (f.total_outstanding ?? 0), 0),
-    [financeSnapshots],
-  )
+  const portfolioValueInr = useMemo(() => {
+    const pool = user?.username
+      ? activePmProjectsList.filter((p) => p.owner_name === user.username)
+      : activePmProjectsList
+    return pool.reduce((sum, p) => sum + (p.project_value_inr ?? 0), 0)
+  }, [activePmProjectsList, user?.username])
 
   const quickLinks = useMemo(
     () =>
@@ -611,7 +603,7 @@ export function HomePage() {
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <SectionHeader title="CRM" href="/operations?tab=clients" badge={clients.length} />
+            <SectionHeader title="CRM" href="/crm-marketing" badge={clients.length} />
             {clients.length > 0 ? (
               <ul className="space-y-2">
                 {clients.slice(0, 3).map((c) => (
@@ -630,12 +622,10 @@ export function HomePage() {
 
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <SectionHeader title="Finance" href="/operations?tab=finance" />
-            {financeSnapshots.length > 0 ? (
+            {pmEnabled ? (
               <div className="space-y-2">
-                <p className="text-2xl font-semibold text-slate-900">
-                  {totalOutstanding > 0 ? `£${totalOutstanding.toLocaleString()}` : '—'}
-                </p>
-                <p className="text-[10px] font-semibold uppercase text-slate-400">Outstanding (sample)</p>
+                <p className="text-2xl font-semibold text-slate-900">{formatInr(portfolioValueInr)}</p>
+                <p className="text-[10px] font-semibold uppercase text-slate-400">Portfolio value (your projects)</p>
                 <Link to="/accounting" className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline">
                   Open accounting →
                 </Link>

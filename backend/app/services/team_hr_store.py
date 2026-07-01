@@ -19,14 +19,13 @@ from app.models.team_hr import (
 from app.models.team_registry import GlobalRole
 from app.services.auth import VALID_USERS
 from app.services.personal_tasks_store import list_personal_tasks
-from app.services.project_workflow_store import get_project_workflow
 from app.services.super_admin import email_for_username
 from app.services.team_registry_store import get_global_role, get_team_registry
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "team"
 _STAFF_PATH = _DATA_DIR / "staff.json"
 
-_WORKFLOW_DIR = Path(__file__).resolve().parents[2] / "data" / "workflows"
+_WORKFLOW_DIR = Path(__file__).resolve().parents[2] / "data" / "project_workflow"
 
 _DEFAULT_TITLES: dict[str, str] = {
     "Sunil": "Founder & Director",

@@ -770,21 +770,6 @@ def list_unassigned_tasks() -> list[dict[str, Any]]:
     return out
 
 
-def count_open_tasks_for_surveys(survey_ids: list[int]) -> dict[int, int]:
-    """Count open (non-done) workflow tasks for each of the given survey ids."""
-    counts: dict[int, int] = {}
-    for sid in survey_ids:
-        try:
-            survey_id = int(sid)
-        except (TypeError, ValueError):
-            continue
-        if survey_id in counts:
-            continue
-        workflow = get_project_workflow(survey_id)
-        counts[survey_id] = sum(1 for task in workflow.tasks if task.status != "done")
-    return counts
-
-
 def count_open_tasks_for_pm_projects(project_ids: list[str]) -> dict[str, int]:
     """Count open workflow tasks keyed by PM project id."""
     counts: dict[str, int] = {}
@@ -816,10 +801,6 @@ def list_team_assigned_tasks(viewer_username: str | None) -> list[dict[str, Any]
         )
     )
     return out
-
-
-def _task_row(survey_id: int, workflow: ProjectWorkflow, task: ProjectTask) -> dict[str, Any]:
-    return _task_row_from_ref(WorkflowRef(survey_id=survey_id), workflow, task, survey_id=survey_id)
 
 
 def _task_row_from_ref(

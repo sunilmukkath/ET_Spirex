@@ -30,6 +30,7 @@ import {
 import { SurveyHomePanel } from '../components/analysis/SurveyHomePanel'
 import { ProjectWorkflowPanel } from '../components/analysis/ProjectWorkflowPanel'
 import { ProjectRequirementsEditor, emptyProjectRequirements } from '../components/ProjectRequirementsEditor'
+import { AgentBriefPanel } from '../components/pm/AgentBriefPanel'
 import { useUserPreferences } from '../hooks/useUserPreferences'
 import { buildSurveyWorkspaceHref } from '../lib/workspaceNav'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
@@ -118,41 +119,6 @@ function projectToEditForm(p: PmPipelineProject): ProjectEditForm {
     target_close_date: p.target_close_date ?? '',
     status_notes: p.status_notes ?? '',
   }
-}
-
-function AgentPanel({ brief, loading }: { brief: PmAgentBrief | null; loading: boolean }) {
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-        <Loader2 size={16} className="animate-spin text-[var(--et-teal)]" />
-        Agent thinking…
-      </div>
-    )
-  }
-  if (!brief) return null
-  return (
-    <div className="rounded-xl border border-[var(--et-teal)]/25 bg-[var(--et-teal-light)]/30 p-4">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--et-teal-dark)]">
-        <Bot size={14} />
-        {brief.agent} agent {brief.configured ? '(AI)' : '(rules)'}
-      </div>
-      <p className="mt-2 text-sm text-slate-800">{brief.summary}</p>
-      {brief.actions.length > 0 && (
-        <ul className="mt-3 space-y-1 text-sm text-slate-700">
-          {brief.actions.map((a) => (
-            <li key={a}>• {a}</li>
-          ))}
-        </ul>
-      )}
-      {brief.risks.length > 0 && (
-        <ul className="mt-2 space-y-1 text-sm text-amber-800">
-          {brief.risks.map((r) => (
-            <li key={r}>⚠ {r}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
 }
 
 function DraftAgentPanel({ draft, loading }: { draft: PmAgentDraft | null; loading: boolean }) {
@@ -351,12 +317,8 @@ export function OperationsHubPage() {
         setPipeline(null)
         return
       }
-      const [pipe, clientRows] = await Promise.all([
-        api.getPmPipeline(),
-        api.listPmClients(),
-      ])
+      const [pipe] = await Promise.all([api.getPmPipeline()])
       setPipeline(pipe)
-      setClients(clientRows)
       const first = pipe.projects[0]?.project_id ?? ''
       const financeProject = searchParams.get('project')
       setSelectedProjectId((cur) => {
@@ -487,6 +449,9 @@ export function OperationsHubPage() {
   function openEditProject(p: PmPipelineProject) {
     setEditProjectId(p.project_id)
     setEditForm(projectToEditForm(p))
+    if (clients.length === 0) {
+      void api.listPmClients().then(setClients).catch(() => {})
+    }
   }
 
   async function saveEditProject(e: FormEvent) {
@@ -1410,7 +1375,7 @@ export function OperationsHubPage() {
             <Bot size={16} />
             Run finance agent
           </button>
-          <AgentPanel brief={financeAgent} loading={agentLoading} />
+          <AgentBriefPanel brief={financeAgent} loading={agentLoading} />
         </div>
       )}
 
