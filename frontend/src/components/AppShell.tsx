@@ -33,14 +33,6 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
     keywords: ['pm', 'pipeline', 'finance', 'proposal', 'fieldwork'],
   },
   {
-    id: 'app-crm-marketing',
-    label: 'CRM & marketing',
-    description: 'Clients, nurture follow-ups, campaigns, and CRM agent',
-    group: 'App',
-    href: '/crm-marketing',
-    keywords: ['crm', 'marketing', 'clients', 'outreach', 'nurture'],
-  },
-  {
     id: 'app-quantitative',
     label: 'Quantitative',
     description: 'LimeSurvey studies, programming, survey links, and Survey Studio',
@@ -51,10 +43,18 @@ const APP_NAV_ITEMS: CommandPaletteItem[] = [
   {
     id: 'app-qualitative',
     label: 'Qualitative',
-    description: 'Transcript upload, qual library, search, and thematic reporting',
+    description: 'Project transcripts, qual analysis, compare tables, and reporting',
     group: 'App',
     href: '/qualitative',
-    keywords: ['qual', 'transcript', 'fgd', 'idi', 'thematic', 'coding'],
+    keywords: ['qual', 'transcript', 'fgd', 'idi', 'thematic', 'coding', 'compare'],
+  },
+  {
+    id: 'app-crm-marketing',
+    label: 'CRM & marketing',
+    description: 'Clients, nurture follow-ups, campaigns, and CRM agent',
+    group: 'App',
+    href: '/crm-marketing',
+    keywords: ['crm', 'marketing', 'clients', 'outreach', 'nurture'],
   },
   {
     id: 'app-accounting',
@@ -93,7 +93,6 @@ const NAV_LINKS: NavLinkDef[] = [
   { module: 'home', label: 'Home', icon: Home, isActive: (p) => p === '/home' },
   { module: 'my_work', label: 'My work', icon: ClipboardList, isActive: (p) => p === '/my-work' },
   { module: 'operations', label: 'Operations', icon: LayoutGrid, isActive: (p) => p === '/operations' },
-  { module: 'crm_marketing', label: 'CRM & marketing', icon: Megaphone, isActive: (p) => p === '/crm-marketing' },
   {
     module: 'quantitative',
     label: 'Quantitative',
@@ -101,6 +100,7 @@ const NAV_LINKS: NavLinkDef[] = [
     isActive: (_, isQuantitative) => isQuantitative,
   },
   { module: 'qualitative', label: 'Qualitative', icon: Mic, isActive: (p) => p === '/qualitative' },
+  { module: 'crm_marketing', label: 'CRM & marketing', icon: Megaphone, isActive: (p) => p === '/crm-marketing' },
   { module: 'accounting', label: 'Accounting', icon: Landmark, isActive: (p) => p === '/accounting' },
   { module: 'team', label: 'Team', icon: Users, isActive: (p) => p === '/team' },
   { module: 'settings', label: 'Settings', icon: Settings, isActive: (p) => p === '/settings' },

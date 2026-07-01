@@ -51,7 +51,7 @@ import { ErrorState } from '../components/States'
 import { FieldOperationsPanel, type FieldView } from '../components/analysis/FieldOperationsPanel'
 import { SurveyHomePanel } from '../components/analysis/SurveyHomePanel'
 import { ProjectWorkflowPanel } from '../components/analysis/ProjectWorkflowPanel'
-import { QualPanel } from '../components/analysis/QualPanel'
+import { QualPanelForSurvey } from '../components/analysis/QualPanel'
 import { ReportBuilderPanel } from '../components/analysis/ReportBuilderPanel'
 import { filterPayload, treeToFlatFilters } from '../lib/filterTree'
 import type { ChartTypeId } from '../lib/chartTypes'
@@ -1342,7 +1342,7 @@ export function SurveyWorkspace() {
             />
           )}
 
-          {mode === 'qual' && <QualPanel surveyId={surveyId} />}
+          {mode === 'qual' && <QualPanelForSurvey surveyId={surveyId} />}
 
           {mode === 'fields' && (
             <FieldOperationsPanel

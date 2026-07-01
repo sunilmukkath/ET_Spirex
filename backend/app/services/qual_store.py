@@ -14,13 +14,31 @@ _SNIPPET_RADIUS = 80
 _MAX_CONTENT_CHARS = 500_000
 
 
-def _path(survey_id: int) -> Path:
+def survey_scope(survey_id: int) -> str:
+    return str(int(survey_id))
+
+
+def pm_scope(project_id: str) -> str:
+    return f"pm_{project_id.strip()}"
+
+
+def _path(scope: str) -> Path:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return _DATA_DIR / f"{survey_id}.json"
+    safe = re.sub(r"[^a-zA-Z0-9._-]", "_", scope)
+    return _DATA_DIR / f"{safe}.json"
 
 
-def _load_raw(survey_id: int) -> list[dict[str, Any]]:
-    path = _path(survey_id)
+def _scope_ids(scope: str) -> tuple[int, str | None]:
+    if scope.startswith("pm_"):
+        return 0, scope[3:]
+    try:
+        return int(scope), None
+    except (TypeError, ValueError):
+        return 0, None
+
+
+def _load_raw(scope: str) -> list[dict[str, Any]]:
+    path = _path(scope)
     if not path.is_file():
         return []
     try:
@@ -30,15 +48,16 @@ def _load_raw(survey_id: int) -> list[dict[str, Any]]:
         return []
 
 
-def _save_raw(survey_id: int, rows: list[dict[str, Any]]) -> None:
-    _path(survey_id).write_text(json.dumps(rows, indent=2), encoding="utf-8")
+def _save_raw(scope: str, rows: list[dict[str, Any]]) -> None:
+    _path(scope).write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
 
 def _word_count(text: str) -> int:
     return len(re.findall(r"\b\w+\b", text))
 
 
-def _normalize_asset(row: dict[str, Any], survey_id: int) -> QualAsset:
+def _normalize_asset(row: dict[str, Any], scope: str) -> QualAsset:
+    survey_id, project_id = _scope_ids(scope)
     content = str(row.get("content") or "")
     if len(content) > _MAX_CONTENT_CHARS:
         content = content[:_MAX_CONTENT_CHARS]
@@ -52,9 +71,19 @@ def _normalize_asset(row: dict[str, Any], survey_id: int) -> QualAsset:
     status = str(row.get("status") or "draft")
     if status not in {"draft", "reviewed", "coded"}:
         status = "draft"
+    row_project_id = row.get("project_id")
+    if row_project_id:
+        project_id = str(row_project_id)
+    row_survey_id = row.get("survey_id")
+    if row_survey_id is not None:
+        try:
+            survey_id = int(row_survey_id)
+        except (TypeError, ValueError):
+            pass
     return QualAsset(
         id=str(row.get("id") or f"qa_{uuid.uuid4().hex[:12]}"),
         survey_id=survey_id,
+        project_id=project_id,
         title=str(row.get("title") or "Untitled").strip() or "Untitled",
         asset_type=asset_type,  # type: ignore[arg-type]
         content=content,
@@ -70,19 +99,31 @@ def _normalize_asset(row: dict[str, Any], survey_id: int) -> QualAsset:
     )
 
 
+def list_qual_assets_scope(scope: str) -> list[QualAsset]:
+    return [_normalize_asset(row, scope) for row in _load_raw(scope)]
+
+
 def list_qual_assets(survey_id: int) -> list[QualAsset]:
-    return [_normalize_asset(row, survey_id) for row in _load_raw(survey_id)]
+    return list_qual_assets_scope(survey_scope(survey_id))
 
 
-def get_qual_asset(survey_id: int, asset_id: str) -> QualAsset | None:
-    for row in _load_raw(survey_id):
+def list_qual_assets_pm(project_id: str) -> list[QualAsset]:
+    return list_qual_assets_scope(pm_scope(project_id))
+
+
+def get_qual_asset_scope(scope: str, asset_id: str) -> QualAsset | None:
+    for row in _load_raw(scope):
         if str(row.get("id")) == asset_id:
-            return _normalize_asset(row, survey_id)
+            return _normalize_asset(row, scope)
     return None
 
 
-def create_qual_asset(
-    survey_id: int,
+def get_qual_asset(survey_id: int, asset_id: str) -> QualAsset | None:
+    return get_qual_asset_scope(survey_scope(survey_id), asset_id)
+
+
+def create_qual_asset_scope(
+    scope: str,
     body: QualAssetCreate,
     *,
     username: str | None = None,
@@ -91,9 +132,11 @@ def create_qual_asset(
     content = body.content.strip()
     if not content:
         raise ValueError("Content is required")
+    survey_id, project_id = _scope_ids(scope)
     asset = QualAsset(
         id=f"qa_{uuid.uuid4().hex[:12]}",
         survey_id=survey_id,
+        project_id=project_id,
         title=body.title.strip() or "Untitled",
         asset_type=body.asset_type,
         content=content[:_MAX_CONTENT_CHARS],
@@ -107,23 +150,41 @@ def create_qual_asset(
         created_at=now,
         updated_at=now,
     )
-    rows = _load_raw(survey_id)
+    rows = _load_raw(scope)
     rows.append(asset.model_dump())
-    _save_raw(survey_id, rows)
+    _save_raw(scope, rows)
     return asset
 
 
-def update_qual_asset(
+def create_qual_asset(
     survey_id: int,
+    body: QualAssetCreate,
+    *,
+    username: str | None = None,
+) -> QualAsset:
+    return create_qual_asset_scope(survey_scope(survey_id), body, username=username)
+
+
+def create_qual_asset_pm(
+    project_id: str,
+    body: QualAssetCreate,
+    *,
+    username: str | None = None,
+) -> QualAsset:
+    return create_qual_asset_scope(pm_scope(project_id), body, username=username)
+
+
+def update_qual_asset_scope(
+    scope: str,
     asset_id: str,
     body: QualAssetUpdate,
 ) -> QualAsset | None:
-    rows = _load_raw(survey_id)
+    rows = _load_raw(scope)
     updated: QualAsset | None = None
     for i, row in enumerate(rows):
         if str(row.get("id")) != asset_id:
             continue
-        asset = _normalize_asset(row, survey_id)
+        asset = _normalize_asset(row, scope)
         data = asset.model_dump()
         if body.title is not None:
             data["title"] = body.title.strip() or asset.title
@@ -148,17 +209,41 @@ def update_qual_asset(
         break
     if updated is None:
         return None
-    _save_raw(survey_id, rows)
+    _save_raw(scope, rows)
     return updated
 
 
-def delete_qual_asset(survey_id: int, asset_id: str) -> bool:
-    rows = _load_raw(survey_id)
+def update_qual_asset(
+    survey_id: int,
+    asset_id: str,
+    body: QualAssetUpdate,
+) -> QualAsset | None:
+    return update_qual_asset_scope(survey_scope(survey_id), asset_id, body)
+
+
+def update_qual_asset_pm(
+    project_id: str,
+    asset_id: str,
+    body: QualAssetUpdate,
+) -> QualAsset | None:
+    return update_qual_asset_scope(pm_scope(project_id), asset_id, body)
+
+
+def delete_qual_asset_scope(scope: str, asset_id: str) -> bool:
+    rows = _load_raw(scope)
     next_rows = [r for r in rows if str(r.get("id")) != asset_id]
     if len(next_rows) == len(rows):
         return False
-    _save_raw(survey_id, next_rows)
+    _save_raw(scope, next_rows)
     return True
+
+
+def delete_qual_asset(survey_id: int, asset_id: str) -> bool:
+    return delete_qual_asset_scope(survey_scope(survey_id), asset_id)
+
+
+def delete_qual_asset_pm(project_id: str, asset_id: str) -> bool:
+    return delete_qual_asset_scope(pm_scope(project_id), asset_id)
 
 
 def _snippet(text: str, query: str) -> tuple[str, int]:
@@ -180,12 +265,12 @@ def _snippet(text: str, query: str) -> tuple[str, int]:
     return snippet, len(matches)
 
 
-def search_qual_assets(survey_id: int, query: str) -> list[QualSearchHit]:
+def search_qual_assets_scope(scope: str, query: str) -> list[QualSearchHit]:
     q = query.strip()
     if not q:
         return []
     hits: list[QualSearchHit] = []
-    for asset in list_qual_assets(survey_id):
+    for asset in list_qual_assets_scope(scope):
         snippet, count = _snippet(asset.content, q)
         title_hit = q.lower() in asset.title.lower()
         tag_hit = any(q.lower() in t.lower() for t in asset.tags)
@@ -202,3 +287,7 @@ def search_qual_assets(survey_id: int, query: str) -> list[QualSearchHit]:
             )
     hits.sort(key=lambda h: (-h.match_count, h.title.lower()))
     return hits
+
+
+def search_qual_assets(survey_id: int, query: str) -> list[QualSearchHit]:
+    return search_qual_assets_scope(survey_scope(survey_id), query)

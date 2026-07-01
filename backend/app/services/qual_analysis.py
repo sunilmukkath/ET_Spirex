@@ -145,3 +145,74 @@ def _parse_theme_headings(text: str) -> list[str]:
         elif stripped.startswith("### "):
             themes.append(stripped[4:].strip())
     return themes[:12]
+
+
+QUAL_ASK_SYSTEM = """You are a qualitative research analyst helping a researcher interact with interview transcripts.
+Rules:
+- Answer ONLY from the excerpts provided.
+- Cite session titles or respondent IDs when referencing evidence.
+- If the material does not contain enough evidence, say so clearly.
+- Use British English, concise professional tone."""
+
+
+def ask_qual_question(
+    assets: list[QualAsset],
+    *,
+    question: str,
+) -> dict[str, Any]:
+    q = question.strip()
+    if not q:
+        return {"answer": "Please enter a question.", "sources": [], "ai_used": False}
+    if not assets:
+        return {"answer": "No qual material uploaded yet.", "sources": [], "ai_used": False}
+
+    lower_q = q.lower()
+    ranked: list[tuple[int, QualAsset]] = []
+    for asset in assets:
+        score = 0
+        if lower_q in asset.content.lower():
+            score += asset.content.lower().count(lower_q) * 2
+        if lower_q in asset.title.lower():
+            score += 3
+        for tag in asset.tags:
+            if lower_q in tag.lower():
+                score += 2
+        if score > 0:
+            ranked.append((score, asset))
+    ranked.sort(key=lambda pair: (-pair[0], pair[1].title.lower()))
+    selected = [a for _, a in ranked[:6]] or assets[:3]
+    excerpts = _excerpt_chunks(selected, max_chars=10_000)
+
+    context = {
+        "type": "qual_ask",
+        "question": q,
+        "excerpts": excerpts,
+    }
+
+    answer: str | None = None
+    ai_used = False
+    try:
+        prompt = (
+            f"Researcher question: {q}\n\n"
+            f"```json\n{json.dumps(context, ensure_ascii=False, indent=2)}\n```"
+        )
+        answer = complete_custom(prompt, system=QUAL_ASK_SYSTEM, max_tokens=1200)
+        ai_used = bool(answer)
+    except Exception as exc:
+        logger.warning("Qual ask failed, using fallback: %s", exc)
+
+    if not answer:
+        lines = [f"**Question:** {q}", ""]
+        if excerpts:
+            lines.append("**Relevant excerpts:**")
+            for chunk in excerpts[:4]:
+                lines.append(f"- *{chunk['title']}*: {chunk['excerpt'][:280].strip()}…")
+        else:
+            lines.append("No close matches found in uploaded material.")
+        answer = "\n".join(lines)
+
+    sources = [
+        {"asset_id": chunk["asset_id"], "title": chunk["title"], "respondent_id": chunk.get("respondent_id")}
+        for chunk in excerpts
+    ]
+    return {"answer": answer.strip(), "sources": sources, "ai_used": ai_used}

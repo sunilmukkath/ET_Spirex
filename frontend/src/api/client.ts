@@ -669,6 +669,7 @@ export type QualSessionStatus = 'draft' | 'reviewed' | 'coded'
 export interface QualAsset {
   id: string
   survey_id: number
+  project_id?: string | null
   title: string
   asset_type: QualAssetType
   content: string
@@ -708,6 +709,60 @@ export interface QualSummaryResult {
   top_terms: { term: string; count: number }[]
   ai_used: boolean
   asset_count: number
+}
+
+export type QualRowDimension = 'tags' | 'asset_type' | 'status' | 'moderator' | 'top_terms'
+export type QualBannerField = 'tags' | 'asset_type' | 'status' | 'moderator' | 'respondent_id'
+
+export interface QualSessionFilter {
+  tags: string[]
+  statuses: QualSessionStatus[]
+  asset_types: QualAssetType[]
+  query: string
+}
+
+export interface QualComparePreset {
+  id: string
+  name: string
+  row_dimension: QualRowDimension
+  banner_layers: QualBannerField[][]
+  session_filter: QualSessionFilter
+  table_filters: Record<string, string[]>
+  show_col_pct: boolean
+  show_row_pct: boolean
+  created_at: number
+  created_by: string | null
+}
+
+export interface QualReportSection {
+  id: string
+  heading: string
+  section_type:
+    | 'executive_summary'
+    | 'methodology'
+    | 'themes'
+    | 'verbatims'
+    | 'recommendations'
+    | 'custom'
+  enabled: boolean
+  body: string
+}
+
+export interface QualWorkspaceMeta {
+  compare_presets: QualComparePreset[]
+  report_template: { sections: QualReportSection[] }
+  reports: Array<QualReportSave & { id: string; created_at: number; created_by: string | null }>
+}
+
+export interface QualReportSave {
+  title: string
+  sections: QualReportSection[]
+}
+
+export interface QualAskResult {
+  answer: string
+  sources: { asset_id: string; title: string; respondent_id?: string }[]
+  ai_used: boolean
 }
 
 export interface ProjectWorkflow {
@@ -2069,6 +2124,77 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body ?? {}),
+    }),
+  askQual: (id: number, body: { question: string; asset_ids?: string[] }) =>
+    fetchJson<QualAskResult>(`/api/projects/${id}/qual/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  getPmQualAssets: (projectId: string) =>
+    fetchJson<{ assets: QualAsset[] }>(`/api/pm/projects/${projectId}/qual/assets`),
+  createPmQualAsset: (projectId: string, body: QualAssetInput) =>
+    fetchJson<QualAsset>(`/api/pm/projects/${projectId}/qual/assets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updatePmQualAsset: (projectId: string, assetId: string, body: Partial<QualAssetInput>) =>
+    fetchJson<QualAsset>(`/api/pm/projects/${projectId}/qual/assets/${assetId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deletePmQualAsset: (projectId: string, assetId: string) =>
+    fetchJson<{ ok: boolean }>(`/api/pm/projects/${projectId}/qual/assets/${assetId}`, {
+      method: 'DELETE',
+    }),
+  searchPmQualAssets: (projectId: string, q: string) =>
+    fetchJson<{ hits: QualSearchHit[]; query: string }>(
+      `/api/pm/projects/${projectId}/qual/search?q=${encodeURIComponent(q)}`,
+    ),
+  generatePmQualSummary: (projectId: string, body?: { asset_ids?: string[]; focus?: string }) =>
+    fetchJson<QualSummaryResult>(`/api/pm/projects/${projectId}/qual/summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    }),
+  askPmQual: (projectId: string, body: { question: string; asset_ids?: string[] }) =>
+    fetchJson<QualAskResult>(`/api/pm/projects/${projectId}/qual/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  getPmQualMeta: (projectId: string) =>
+    fetchJson<QualWorkspaceMeta>(`/api/pm/projects/${projectId}/qual/meta`),
+  createPmQualComparePreset: (projectId: string, body: Omit<QualComparePreset, 'id' | 'created_at' | 'created_by'>) =>
+    fetchJson<QualComparePreset>(`/api/pm/projects/${projectId}/qual/compare-presets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deletePmQualComparePreset: (projectId: string, presetId: string) =>
+    fetchJson<{ ok: boolean }>(`/api/pm/projects/${projectId}/qual/compare-presets/${presetId}`, {
+      method: 'DELETE',
+    }),
+  setPmQualReportTemplate: (projectId: string, sections: QualReportSection[]) =>
+    fetchJson<{ sections: QualReportSection[] }>(`/api/pm/projects/${projectId}/qual/report-template`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sections }),
+    }),
+  savePmQualReport: (projectId: string, body: QualReportSave) =>
+    fetchJson<QualReportSave & { id: string; created_at: number; created_by: string | null }>(
+      `/api/pm/projects/${projectId}/qual/reports`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+  deletePmQualReport: (projectId: string, reportId: string) =>
+    fetchJson<{ ok: boolean }>(`/api/pm/projects/${projectId}/qual/reports/${reportId}`, {
+      method: 'DELETE',
     }),
   exportQuestionnaireSpec: async (
     id: number,

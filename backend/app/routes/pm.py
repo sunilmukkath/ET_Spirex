@@ -789,3 +789,176 @@ def pm_create_marketing(
     out = pm_ops_store.create_marketing(session, body)
     session.commit()
     return out
+
+
+# --- Qualitative (PM project library) ---
+
+
+from app.models.qual_asset import (
+    QualAskRequest,
+    QualAssetCreate,
+    QualAssetUpdate,
+    QualComparePresetCreate,
+    QualReportSave,
+    QualReportTemplate,
+    QualSummaryRequest,
+)
+from app.services.qual_analysis import ask_qual_question, generate_qual_summary
+from app.services.qual_meta_store import (
+    create_compare_preset_scope,
+    delete_compare_preset_scope,
+    delete_qual_report_scope,
+    get_qual_meta_pm,
+    pm_scope,
+    save_qual_report_scope,
+    set_report_template_scope,
+)
+from app.services.qual_store import (
+    create_qual_asset_pm,
+    delete_qual_asset_pm,
+    list_qual_assets_pm,
+    search_qual_assets_scope,
+    update_qual_asset_pm,
+)
+
+
+@router.get("/projects/{project_id}/qual/assets")
+def pm_qual_assets(
+    project_id: UUID,
+    username: str = Depends(require_auth),
+):
+    assets = list_qual_assets_pm(str(project_id))
+    return {"assets": [a.model_dump() for a in assets]}
+
+
+@router.post("/projects/{project_id}/qual/assets", status_code=201)
+def pm_create_qual_asset(
+    project_id: UUID,
+    body: QualAssetCreate,
+    username: str = Depends(require_auth),
+):
+    try:
+        asset = create_qual_asset_pm(str(project_id), body, username=username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return asset.model_dump()
+
+
+@router.put("/projects/{project_id}/qual/assets/{asset_id}")
+def pm_update_qual_asset(
+    project_id: UUID,
+    asset_id: str,
+    body: QualAssetUpdate,
+    _: str = Depends(require_auth),
+):
+    updated = update_qual_asset_pm(str(project_id), asset_id, body)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Qual asset not found")
+    return updated.model_dump()
+
+
+@router.delete("/projects/{project_id}/qual/assets/{asset_id}")
+def pm_delete_qual_asset(
+    project_id: UUID,
+    asset_id: str,
+    _: str = Depends(require_auth),
+):
+    if not delete_qual_asset_pm(str(project_id), asset_id):
+        raise HTTPException(status_code=404, detail="Qual asset not found")
+    return {"ok": True}
+
+
+@router.get("/projects/{project_id}/qual/search")
+def pm_qual_search(
+    project_id: UUID,
+    q: str = "",
+    _: str = Depends(require_auth),
+):
+    hits = search_qual_assets_scope(pm_scope(str(project_id)), q)
+    return {"hits": [h.model_dump() for h in hits], "query": q}
+
+
+@router.post("/projects/{project_id}/qual/summary")
+def pm_qual_summary(
+    project_id: UUID,
+    body: QualSummaryRequest,
+    _: str = Depends(require_auth),
+):
+    assets = list_qual_assets_pm(str(project_id))
+    if body.asset_ids:
+        allowed = {a.id for a in assets}
+        assets = [a for a in assets if a.id in body.asset_ids and a.id in allowed]
+    return generate_qual_summary(assets, focus=body.focus)
+
+
+@router.post("/projects/{project_id}/qual/ask")
+def pm_qual_ask(
+    project_id: UUID,
+    body: QualAskRequest,
+    _: str = Depends(require_auth),
+):
+    assets = list_qual_assets_pm(str(project_id))
+    if body.asset_ids:
+        allowed = {a.id for a in assets}
+        assets = [a for a in assets if a.id in body.asset_ids and a.id in allowed]
+    return ask_qual_question(assets, question=body.question)
+
+
+@router.get("/projects/{project_id}/qual/meta")
+def pm_qual_meta(
+    project_id: UUID,
+    _: str = Depends(require_auth),
+):
+    return get_qual_meta_pm(str(project_id)).model_dump()
+
+
+@router.post("/projects/{project_id}/qual/compare-presets", status_code=201)
+def pm_create_qual_compare_preset(
+    project_id: UUID,
+    body: QualComparePresetCreate,
+    username: str = Depends(require_auth),
+):
+    preset = create_compare_preset_scope(pm_scope(str(project_id)), body, username=username)
+    return preset.model_dump()
+
+
+@router.delete("/projects/{project_id}/qual/compare-presets/{preset_id}")
+def pm_delete_qual_compare_preset(
+    project_id: UUID,
+    preset_id: str,
+    _: str = Depends(require_auth),
+):
+    if not delete_compare_preset_scope(pm_scope(str(project_id)), preset_id):
+        raise HTTPException(status_code=404, detail="Preset not found")
+    return {"ok": True}
+
+
+@router.put("/projects/{project_id}/qual/report-template")
+def pm_set_qual_report_template(
+    project_id: UUID,
+    body: QualReportTemplate,
+    _: str = Depends(require_auth),
+):
+    return set_report_template_scope(pm_scope(str(project_id)), body).model_dump()
+
+
+@router.post("/projects/{project_id}/qual/reports", status_code=201)
+def pm_save_qual_report(
+    project_id: UUID,
+    body: QualReportSave,
+    username: str = Depends(require_auth),
+):
+    report = save_qual_report_scope(pm_scope(str(project_id)), body, username=username)
+    return report.model_dump()
+
+
+@router.delete("/projects/{project_id}/qual/reports/{report_id}")
+def pm_delete_qual_report(
+    project_id: UUID,
+    report_id: str,
+    _: str = Depends(require_auth),
+):
+    if not delete_qual_report_scope(pm_scope(str(project_id)), report_id):
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"ok": True}
+

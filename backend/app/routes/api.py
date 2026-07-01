@@ -119,7 +119,7 @@ from app.services.project_workflow_store import (
     workflow_access_summary,
 )
 from app.models.task_manager import TaskAssignRequest, TaskManagerAgentRequest, TaskManagerAgentResponse
-from app.models.qual_asset import QualAssetCreate, QualAssetUpdate, QualSummaryRequest
+from app.models.qual_asset import QualAssetCreate, QualAssetUpdate, QualSummaryRequest, QualAskRequest
 from app.services.team_preset_store import (
     apply_team_preset,
     create_team_preset,
@@ -134,7 +134,7 @@ from app.services.qual_store import (
     search_qual_assets,
     update_qual_asset,
 )
-from app.services.qual_analysis import generate_qual_summary
+from app.services.qual_analysis import generate_qual_summary, ask_qual_question
 from app.services.pinned_survey_store import get_pinned_survey_ids, set_pinned_survey_ids
 from app.services.user_preferences_store import get_user_preferences, set_user_preferences
 from app.models.user_preferences import UserPreferences, UserPreferencesUpdate
@@ -1113,6 +1113,20 @@ def qual_summary(
         assets = [a for a in assets if a.id in body.asset_ids and a.id in allowed]
     result = generate_qual_summary(assets, focus=body.focus)
     return result
+
+
+@router.post("/projects/{survey_id}/qual/ask")
+def qual_ask(
+    survey_id: int,
+    body: QualAskRequest,
+    authorization: str | None = Header(default=None),
+):
+    _require_qual_access(_optional_username(authorization), survey_id)
+    assets = list_qual_assets(survey_id)
+    if body.asset_ids:
+        allowed = {a.id for a in assets}
+        assets = [a for a in assets if a.id in body.asset_ids and a.id in allowed]
+    return ask_qual_question(assets, question=body.question)
 
 
 @router.get("/projects/{survey_id}/weight-config")

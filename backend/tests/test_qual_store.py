@@ -1,11 +1,35 @@
 from app.models.qual_asset import QualAssetCreate, QualAssetUpdate
 from app.services.qual_store import (
     create_qual_asset,
+    create_qual_asset_pm,
     delete_qual_asset,
+    delete_qual_asset_pm,
     list_qual_assets,
     search_qual_assets,
     update_qual_asset,
 )
+
+
+def test_qual_asset_crud_pm(tmp_path, monkeypatch):
+    from app.services import qual_store
+
+    monkeypatch.setattr(qual_store, "_DATA_DIR", tmp_path)
+
+    created = qual_store.create_qual_asset_pm(
+        "proj-abc",
+        QualAssetCreate(
+            title="IDI 1",
+            content="The packaging stood out on shelf and felt premium.",
+            tags=["packaging"],
+        ),
+        username="Sunil",
+    )
+    assert created.project_id == "proj-abc"
+    assert created.survey_id == 0
+
+    assets = qual_store.list_qual_assets_pm("proj-abc")
+    assert len(assets) == 1
+    assert delete_qual_asset_pm("proj-abc", created.id) is True
 
 
 def test_qual_asset_crud(tmp_path, monkeypatch):

@@ -31,6 +31,7 @@ import { SurveyHomePanel } from '../components/analysis/SurveyHomePanel'
 import { ProjectWorkflowPanel } from '../components/analysis/ProjectWorkflowPanel'
 import { ProjectRequirementsEditor, emptyProjectRequirements } from '../components/ProjectRequirementsEditor'
 import { AgentBriefPanel } from '../components/pm/AgentBriefPanel'
+import { PmWorkspaceLinks, primarySurveyId } from '../components/pm/PmWorkspaceLinks'
 import { useUserPreferences } from '../hooks/useUserPreferences'
 import { buildSurveyWorkspaceHref } from '../lib/workspaceNav'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
@@ -362,10 +363,10 @@ export function OperationsHubPage() {
   )
 
   const surveyHrefBuilder = useMemo(() => {
-    const surveyId = overviewProject?.limesurvey_survey_id
+    const surveyId = overviewProject ? primarySurveyId(overviewProject) : null
     if (!surveyId) return undefined
     return (mode: string, view?: string) => buildSurveyWorkspaceHref(surveyId, mode, view)
-  }, [overviewProject?.limesurvey_survey_id])
+  }, [overviewProject])
 
   async function handleAddBudgetLine(e: FormEvent) {
     e.preventDefault()
@@ -769,6 +770,7 @@ export function OperationsHubPage() {
                   <th className="px-4 py-3">Pending</th>
                   <th className="px-4 py-3">Data collection</th>
                   <th className="px-4 py-3">Survey</th>
+                  <th className="px-4 py-3">Workspace</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
@@ -890,7 +892,10 @@ export function OperationsHubPage() {
                         Add link
                       </button>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 align-top">
+                      <PmWorkspaceLinks project={p} />
+                    </td>
+                    <td className="px-4 py-3 align-top">
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
@@ -1008,13 +1013,16 @@ export function OperationsHubPage() {
                       Workflow
                     </button>
                   </div>
-                  {overviewProject.limesurvey_survey_id && (
+                  {overviewProject && primarySurveyId(overviewProject) && (
                     <Link
-                      to={`/projects/${overviewProject.limesurvey_survey_id}`}
+                      to={`/projects/${primarySurveyId(overviewProject)}`}
                       className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                     >
                       Open workspace
                     </Link>
+                  )}
+                  {overviewProject && primarySurveyId(overviewProject) && (
+                    <PmWorkspaceLinks project={overviewProject} variant="inline" />
                   )}
                   <button
                     type="button"
@@ -1029,13 +1037,13 @@ export function OperationsHubPage() {
               {overviewView === 'workflow' && user ? (
                 <ProjectWorkflowPanel
                   projectId={overviewProject.project_id}
-                  surveyId={overviewProject.limesurvey_survey_id ?? undefined}
+                  surveyId={primarySurveyId(overviewProject) ?? undefined}
                   currentUser={user.username}
                   globalRole={user.role}
                 />
-              ) : overviewProject.limesurvey_survey_id ? (
+              ) : primarySurveyId(overviewProject) ? (
                 <SurveyHomePanel
-                  surveyId={overviewProject.limesurvey_survey_id}
+                  surveyId={primarySurveyId(overviewProject)!}
                   onNavigate={() => {}}
                   buildHref={surveyHrefBuilder}
                   projectLabel={

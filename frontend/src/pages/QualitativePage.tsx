@@ -1,41 +1,33 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { FileText, Mic, RefreshCw } from 'lucide-react'
-import { api, type PmPipelineOverview, type Project } from '../api/client'
+import { Briefcase, FileText, RefreshCw } from 'lucide-react'
+import { api, type PmPipelineOverview } from '../api/client'
 import { QualPanel } from '../components/analysis/QualPanel'
 import { EmptyState, LoadingState } from '../components/States'
+import type { QualWorkspaceScope } from '../lib/qualScope'
 
-type StudyOption = {
-  surveyId: number
+type ProjectOption = {
+  projectId: string
   label: string
-  source: 'lime' | 'pm'
-  projectId?: string
+  clientName: string | null
+  surveyIds: number[]
 }
 
 export function QualitativePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [limeSurveys, setLimeSurveys] = useState<Project[]>([])
   const [pipeline, setPipeline] = useState<PmPipelineOverview | null>(null)
   const [pmEnabled, setPmEnabled] = useState(false)
 
-  const surveyParam = searchParams.get('survey')
-  const [selectedSurveyId, setSelectedSurveyId] = useState<number | null>(() => {
-    const n = Number(surveyParam)
-    return Number.isFinite(n) && n > 0 ? n : null
-  })
+  const projectParam = searchParams.get('project')
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(projectParam)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [surveysRaw, pmStatus] = await Promise.all([
-        api.getProjects().catch(() => [] as Project[]),
-        api.getPmStatus().catch(() => ({ enabled: false, ready: false })),
-      ])
-      const surveys = Array.isArray(surveysRaw) ? surveysRaw : surveysRaw.projects
-      setLimeSurveys(surveys)
+      const pmStatus = await api.getPmStatus().catch(() => ({ enabled: false, ready: false }))
       setPmEnabled(Boolean(pmStatus.enabled && pmStatus.ready))
       if (pmStatus.enabled && pmStatus.ready) {
         setPipeline(await api.getPmPipeline())
@@ -43,7 +35,7 @@ export function QualitativePage() {
         setPipeline(null)
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load studies')
+      setError(e instanceof Error ? e.message : 'Failed to load projects')
     } finally {
       setLoading(false)
     }
@@ -53,72 +45,52 @@ export function QualitativePage() {
     void load()
   }, [load])
 
-  const studyOptions = useMemo(() => {
-    const out: StudyOption[] = []
-    const seen = new Set<number>()
-
-    if (pipeline?.projects) {
-      for (const p of pipeline.projects) {
-        if (p.project_type === 'quant') continue
-        for (const sid of p.linked_survey_ids ?? []) {
-          if (seen.has(sid)) continue
-          seen.add(sid)
-          out.push({
-            surveyId: sid,
-            label: `${p.project_name} · #${sid}`,
-            source: 'pm',
-            projectId: p.project_id,
-          })
-        }
-        if (p.limesurvey_survey_id && !seen.has(p.limesurvey_survey_id)) {
-          seen.add(p.limesurvey_survey_id)
-          out.push({
-            surveyId: p.limesurvey_survey_id,
-            label: `${p.project_name} · #${p.limesurvey_survey_id}`,
-            source: 'pm',
-            projectId: p.project_id,
-          })
-        }
-      }
-    }
-
-    for (const s of limeSurveys) {
-      if (seen.has(s.id)) continue
-      seen.add(s.id)
+  const projectOptions = useMemo(() => {
+    const out: ProjectOption[] = []
+    for (const p of pipeline?.projects ?? []) {
+      if (p.project_type === 'quant') continue
+      const surveyIds = [
+        ...(p.linked_survey_ids ?? []),
+        ...(p.limesurvey_survey_id ? [p.limesurvey_survey_id] : []),
+      ].filter((id, idx, arr) => arr.indexOf(id) === idx)
       out.push({
-        surveyId: s.id,
-        label: s.title ? `${s.title} (#${s.id})` : `Study #${s.id}`,
-        source: 'lime',
+        projectId: p.project_id,
+        label: p.project_name,
+        clientName: p.client_name ?? null,
+        surveyIds,
       })
     }
-
     out.sort((a, b) => a.label.localeCompare(b.label))
     return out
-  }, [pipeline, limeSurveys])
+  }, [pipeline])
 
   useEffect(() => {
-    if (selectedSurveyId != null) return
-    const first = studyOptions[0]?.surveyId
-    if (first) setSelectedSurveyId(first)
-  }, [studyOptions, selectedSurveyId])
+    if (selectedProjectId) return
+    const first = projectOptions[0]?.projectId
+    if (first) setSelectedProjectId(first)
+  }, [projectOptions, selectedProjectId])
 
   useEffect(() => {
-    const n = Number(surveyParam)
-    if (Number.isFinite(n) && n > 0) setSelectedSurveyId(n)
-  }, [surveyParam])
+    if (projectParam) setSelectedProjectId(projectParam)
+  }, [projectParam])
 
-  function selectStudy(surveyId: number) {
-    setSelectedSurveyId(surveyId)
+  function selectProject(projectId: string) {
+    setSelectedProjectId(projectId)
     setSearchParams(
       (prev) => {
-        prev.set('survey', String(surveyId))
+        prev.set('project', projectId)
+        prev.delete('survey')
         return prev
       },
       { replace: true },
     )
   }
 
-  const selectedOption = studyOptions.find((o) => o.surveyId === selectedSurveyId) ?? null
+  const selectedOption = projectOptions.find((o) => o.projectId === selectedProjectId) ?? null
+
+  const scope: QualWorkspaceScope | null = selectedProjectId
+    ? { type: 'pm', projectId: selectedProjectId }
+    : null
 
   if (loading) return <LoadingState message="Loading qualitative workspace…" />
 
@@ -129,7 +101,7 @@ export function QualitativePage() {
           <div>
             <h1 className="font-display text-2xl font-semibold text-slate-900">Qualitative</h1>
             <p className="mt-1 max-w-2xl text-sm text-slate-500">
-              Upload transcripts and session notes, search across material, and generate thematic summaries for reporting.
+              Upload project-wise transcripts and session notes, interact with your qual data, run thematic analysis, build compare tables, and structure client reports.
             </p>
           </div>
           <button
@@ -146,64 +118,72 @@ export function QualitativePage() {
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div>
         )}
 
+        {!pmEnabled && (
+          <p className="text-sm text-amber-800">
+            Operations PM is not available — enable the project database to use project-wise qual libraries.
+          </p>
+        )}
+
         <div className="flex flex-wrap items-end gap-3">
-          <label className="block min-w-[240px] flex-1 text-sm text-slate-700">
+          <label className="block min-w-[280px] flex-1 text-sm text-slate-700">
             <span className="mb-1 flex items-center gap-1.5 font-medium">
-              <Mic size={14} className="text-[var(--et-teal)]" />
-              Study / project
+              <Briefcase size={14} className="text-[var(--et-teal)]" />
+              PM project
             </span>
             <select
-              value={selectedSurveyId ?? ''}
-              onChange={(e) => selectStudy(Number(e.target.value))}
+              value={selectedProjectId ?? ''}
+              onChange={(e) => selectProject(e.target.value)}
               className="et-select w-full"
+              disabled={!pmEnabled}
             >
-              {studyOptions.length === 0 && <option value="">No studies available</option>}
-              {studyOptions.map((o) => (
-                <option key={o.surveyId} value={o.surveyId}>
+              {projectOptions.length === 0 && <option value="">No qual / mixed projects</option>}
+              {projectOptions.map((o) => (
+                <option key={o.projectId} value={o.projectId}>
                   {o.label}
+                  {o.clientName ? ` · ${o.clientName}` : ''}
                 </option>
               ))}
             </select>
           </label>
-          {selectedSurveyId != null && (
+          {selectedOption && selectedOption.surveyIds[0] != null && (
             <Link
-              to={`/projects/${selectedSurveyId}?mode=qual`}
+              to={`/projects/${selectedOption.surveyIds[0]}?mode=qual`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
               <FileText size={14} />
-              Open in survey workspace
+              Open linked survey workspace
             </Link>
           )}
-          {selectedOption?.projectId && (
+          {selectedProjectId && (
             <Link
-              to={`/operations?tab=pipeline&project=${selectedOption.projectId}`}
+              to={`/operations?tab=pipeline&project=${selectedProjectId}`}
               className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
             >
-              View PM project
+              View in Operations
             </Link>
           )}
         </div>
 
-        {pmEnabled && studyOptions.length === 0 && (
+        {pmEnabled && projectOptions.length === 0 && (
           <p className="text-xs text-amber-800">
-            Link qual or mixed PM projects to surveys in{' '}
+            Create a qual or mixed project in{' '}
             <Link to="/operations" className="font-medium underline">
               Operations
             </Link>{' '}
-            to prioritise them here, or pick any LimeSurvey study from the list once loaded.
+            to start uploading transcripts.
           </p>
         )}
       </div>
 
-      {selectedSurveyId == null ? (
+      {!scope ? (
         <div className="et-page et-page-wide flex flex-1 items-center justify-center py-16">
           <EmptyState
-            title="Select a study"
-            description="Choose a study above to upload transcripts and run qual reporting."
+            title="Select a project"
+            description="Choose a qual or mixed PM project above to upload transcripts, run analysis, and build reports."
           />
         </div>
       ) : (
-        <QualPanel surveyId={selectedSurveyId} />
+        <QualPanel scope={scope} />
       )}
     </div>
   )

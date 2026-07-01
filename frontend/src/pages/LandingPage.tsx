@@ -16,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
+import { firstAccessiblePath } from '../lib/appModules'
 import { BrandLockup } from '../components/BrandLockup'
 import { ElasticTreeLogo } from '../components/ElasticTreeLogo'
 import { SignInForm } from '../components/SignInForm'
@@ -132,7 +133,7 @@ export function LandingPage() {
   }
 
   if (user) {
-    return <Navigate to="/quantitative" replace />
+    return <Navigate to={firstAccessiblePath(user.modules)} replace />
   }
 
   return (
@@ -244,7 +245,7 @@ export function LandingPage() {
                 </ul>
               </div>
               <div className="p-4 sm:p-5">
-                <SignInForm onSuccess={() => navigate('/quantitative')} />
+                <SignInForm onSuccess={() => navigate('/home')} />
               </div>
             </div>
           </aside>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   FileText,
+  GitCompare,
   Loader2,
   MessageSquare,
   Plus,
@@ -9,16 +10,13 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import {
-  api,
-  type QualAsset,
-  type QualAssetInput,
-  type QualSearchHit,
-  type QualSummaryResult,
-} from '../../api/client'
+import type { QualAsset, QualAssetInput, QualSearchHit, QualSummaryResult } from '../../api/client'
+import { qualWorkspaceApi, type QualWorkspaceScope } from '../../lib/qualScope'
+import { QualComparePanel } from './QualComparePanel'
+import { QualReportsPanel } from './QualReportsPanel'
 import { EmptyState, ErrorState } from '../States'
 
-type Tab = 'library' | 'search' | 'summary'
+type Tab = 'library' | 'interact' | 'analysis' | 'compare' | 'reports'
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -37,10 +35,10 @@ const EMPTY_FORM: QualAssetInput = {
 }
 
 interface Props {
-  surveyId: number
+  scope: QualWorkspaceScope
 }
 
-export function QualPanel({ surveyId }: Props) {
+export function QualPanel({ scope }: Props) {
   const [tab, setTab] = useState<Tab>('library')
   const [assets, setAssets] = useState<QualAsset[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,6 +53,9 @@ export function QualPanel({ surveyId }: Props) {
   const [summary, setSummary] = useState<QualSummaryResult | null>(null)
   const [summaryFocus, setSummaryFocus] = useState('')
   const [summarizing, setSummarizing] = useState(false)
+  const [question, setQuestion] = useState('')
+  const [answer, setAnswer] = useState<string | null>(null)
+  const [asking, setAsking] = useState(false)
 
   const selected = useMemo(
     () => assets.find((a) => a.id === selectedId) ?? null,
@@ -65,15 +66,16 @@ export function QualPanel({ surveyId }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.getQualAssets(surveyId)
+      const res = await qualWorkspaceApi.getAssets(scope)
       setAssets(res.assets)
-      if (res.assets.length && !selectedId) setSelectedId(res.assets[0].id)
+      if (res.assets.length) setSelectedId((cur) => cur ?? res.assets[0].id)
+      else setSelectedId(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load qual library')
     } finally {
       setLoading(false)
     }
-  }, [surveyId, selectedId])
+  }, [scope])
 
   useEffect(() => {
     void load()
@@ -85,7 +87,7 @@ export function QualPanel({ surveyId }: Props) {
     setError(null)
     try {
       const tags = (form.tags ?? []).filter(Boolean)
-      const created = await api.createQualAsset(surveyId, { ...form, tags })
+      const created = await qualWorkspaceApi.createAsset(scope, { ...form, tags })
       setAssets((prev) => [created, ...prev])
       setSelectedId(created.id)
       setForm(EMPTY_FORM)
@@ -100,7 +102,7 @@ export function QualPanel({ surveyId }: Props) {
   async function handleDelete(assetId: string) {
     if (!window.confirm('Delete this qual document?')) return
     try {
-      await api.deleteQualAsset(surveyId, assetId)
+      await qualWorkspaceApi.deleteAsset(scope, assetId)
       setAssets((prev) => prev.filter((a) => a.id !== assetId))
       if (selectedId === assetId) setSelectedId(null)
     } catch (err) {
@@ -110,7 +112,7 @@ export function QualPanel({ surveyId }: Props) {
 
   async function handleStatusChange(assetId: string, status: QualAsset['status']) {
     try {
-      const updated = await api.updateQualAsset(surveyId, assetId, { status })
+      const updated = await qualWorkspaceApi.updateAsset(scope, assetId, { status })
       setAssets((prev) => prev.map((a) => (a.id === assetId ? updated : a)))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update status')
@@ -125,8 +127,9 @@ export function QualPanel({ surveyId }: Props) {
     }
     setSearching(true)
     try {
-      const res = await api.searchQualAssets(surveyId, q)
+      const res = await qualWorkspaceApi.search(scope, q)
       setSearchHits(res.hits)
+      setTab('interact')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed')
     } finally {
@@ -138,12 +141,12 @@ export function QualPanel({ surveyId }: Props) {
     setSummarizing(true)
     setError(null)
     try {
-      const res = await api.generateQualSummary(surveyId, {
+      const res = await qualWorkspaceApi.summary(scope, {
         focus: summaryFocus.trim() || undefined,
         asset_ids: selectedId ? [selectedId] : undefined,
       })
       setSummary(res)
-      setTab('summary')
+      setTab('analysis')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Summary failed')
     } finally {
@@ -151,12 +154,32 @@ export function QualPanel({ surveyId }: Props) {
     }
   }
 
+  async function runAsk() {
+    const q = question.trim()
+    if (!q) return
+    setAsking(true)
+    setError(null)
+    try {
+      const res = await qualWorkspaceApi.ask(scope, {
+        question: q,
+        asset_ids: selectedId ? [selectedId] : undefined,
+      })
+      setAnswer(res.answer)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Question failed')
+    } finally {
+      setAsking(false)
+    }
+  }
+
   function handleFileUpload(file: File) {
     const reader = new FileReader()
     reader.onload = () => {
       const text = String(reader.result ?? '')
+      const assetType = file.name.toLowerCase().includes('note') ? 'session_note' : 'transcript'
       setForm((f) => ({
         ...f,
+        asset_type: assetType,
         title: f.title || file.name.replace(/\.[^.]+$/, ''),
         content: text.slice(0, 500_000),
       }))
@@ -164,6 +187,14 @@ export function QualPanel({ surveyId }: Props) {
     }
     reader.readAsText(file)
   }
+
+  const tabs: { id: Tab; label: string; icon: typeof FileText }[] = [
+    { id: 'library', label: 'Library', icon: FileText },
+    { id: 'interact', label: 'Interact', icon: MessageSquare },
+    { id: 'analysis', label: 'Analysis', icon: Sparkles },
+    { id: 'compare', label: 'Compare', icon: GitCompare },
+    { id: 'reports', label: 'Reports', icon: FileText },
+  ]
 
   if (loading) {
     return (
@@ -180,19 +211,19 @@ export function QualPanel({ surveyId }: Props) {
           <div className="flex items-start gap-2">
             <MessageSquare size={22} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
             <div>
-              <h2 className="font-display text-lg font-semibold text-slate-900">Qual library</h2>
+              <h2 className="font-display text-lg font-semibold text-slate-900">Qual workspace</h2>
               <p className="text-xs text-slate-500">
-                Upload transcripts and session notes, search across sessions, and generate thematic summaries.
+                Upload transcripts and notes, interact with your material, run thematic analysis, compare segments, and build reports.
               </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
               <Upload size={14} />
-              Import .txt
+              Import file
               <input
                 type="file"
-                accept=".txt,.vtt,.srt,.md,text/plain"
+                accept=".txt,.vtt,.srt,.md,.doc,.docx,text/plain"
                 className="sr-only"
                 onChange={(e) => {
                   const file = e.target.files?.[0]
@@ -214,17 +245,18 @@ export function QualPanel({ surveyId }: Props) {
             </button>
           </div>
         </div>
-        <div className="mt-3 flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-          {(['library', 'search', 'summary'] as const).map((key) => (
+        <div className="mt-3 flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+          {tabs.map(({ id, label, icon: Icon }) => (
             <button
-              key={key}
+              key={id}
               type="button"
-              onClick={() => setTab(key)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize transition ${
-                tab === key ? 'bg-white text-[var(--et-teal-dark)] shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              onClick={() => setTab(id)}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                tab === id ? 'bg-white text-[var(--et-teal-dark)] shadow-sm' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              {key}
+              <Icon size={13} />
+              {label}
             </button>
           ))}
         </div>
@@ -309,7 +341,7 @@ export function QualPanel({ surveyId }: Props) {
               {assets.length === 0 ? (
                 <EmptyState
                   title="No qual material yet"
-                  description="Import a .txt transcript or add a session manually to get started."
+                  description="Import a transcript or session note to get started."
                 />
               ) : (
                 assets.map((asset) => (
@@ -370,15 +402,6 @@ export function QualPanel({ surveyId }: Props) {
                   <pre className="mt-4 max-h-[min(28rem,60vh)] overflow-y-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-4 text-xs leading-relaxed text-slate-700 et-scroll">
                     {selected.content}
                   </pre>
-                  <button
-                    type="button"
-                    onClick={() => void runSummary()}
-                    disabled={summarizing}
-                    className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/30 bg-[var(--et-teal-light)]/20 px-3 py-2 text-xs font-medium text-[var(--et-teal-dark)]"
-                  >
-                    {summarizing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                    Summarise this session
-                  </button>
                 </>
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 text-center text-sm text-slate-500">
@@ -390,7 +413,7 @@ export function QualPanel({ surveyId }: Props) {
           </div>
         )}
 
-        {tab === 'search' && (
+        {tab === 'interact' && (
           <div className="mx-auto max-w-3xl space-y-4">
             <div className="flex gap-2">
               <div className="relative min-w-0 flex-1">
@@ -412,9 +435,8 @@ export function QualPanel({ surveyId }: Props) {
                 {searching ? '…' : 'Search'}
               </button>
             </div>
-            {searchHits.length === 0 && searchQuery.trim() ? (
-              <p className="text-sm text-slate-500">No matches.</p>
-            ) : (
+
+            {searchHits.length > 0 && (
               <ul className="space-y-3">
                 {searchHits.map((hit) => (
                   <li key={hit.asset_id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -433,10 +455,40 @@ export function QualPanel({ surveyId }: Props) {
                 ))}
               </ul>
             )}
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <label className="text-xs">
+                <span className="mb-1 block font-medium text-slate-600">Ask your qual data</span>
+                <textarea
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  rows={3}
+                  className="et-input w-full"
+                  placeholder="e.g. What did respondents say about packaging convenience?"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void runAsk()}
+                disabled={asking || !question.trim() || assets.length === 0}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-teal)] px-4 py-2 text-xs font-medium text-white disabled:opacity-50"
+              >
+                {asking ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />}
+                {selectedId ? 'Ask about selected session' : `Ask across ${assets.length} sessions`}
+              </button>
+            </div>
+
+            {answer && (
+              <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="prose prose-sm max-w-none whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                  {answer}
+                </div>
+              </article>
+            )}
           </div>
         )}
 
-        {tab === 'summary' && (
+        {tab === 'analysis' && (
           <div className="mx-auto max-w-3xl space-y-4">
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <label className="text-xs">
@@ -487,13 +539,30 @@ export function QualPanel({ surveyId }: Props) {
               </article>
             ) : (
               <EmptyState
-                title="No summary yet"
+                title="No analysis yet"
                 description="Generate a thematic summary across all uploaded sessions, or select one session in the library tab."
               />
             )}
           </div>
         )}
+
+        {tab === 'compare' && <QualComparePanel scope={scope} assets={assets} />}
+
+        {tab === 'reports' && (
+          <QualReportsPanel
+            scope={scope}
+            assets={assets}
+            summary={summary}
+            onGenerateSummary={runSummary}
+            summarizing={summarizing}
+          />
+        )}
       </div>
     </div>
   )
+}
+
+/** @deprecated Use scope-based QualPanel — kept for survey workspace compatibility. */
+export function QualPanelForSurvey({ surveyId }: { surveyId: number }) {
+  return <QualPanel scope={{ type: 'survey', surveyId }} />
 }

@@ -73,7 +73,7 @@ function App() {
             >
               <Route path="home" element={<ModuleGate module="home"><HomePage /></ModuleGate>} />
               <Route path="quantitative" element={<ModuleGate module="quantitative"><QuantitativePage /></ModuleGate>} />
-              <Route path="dashboard" element={<Navigate to="/quantitative" replace />} />
+              <Route path="dashboard" element={<Navigate to="/home" replace />} />
               <Route path="my-work" element={<ModuleGate module="my_work"><MyWorkPage /></ModuleGate>} />
               <Route path="operations" element={<ModuleGate module="operations"><OperationsHubPage /></ModuleGate>} />
               <Route path="crm-marketing" element={<ModuleGate module="crm_marketing"><CrmMarketingPage /></ModuleGate>} />

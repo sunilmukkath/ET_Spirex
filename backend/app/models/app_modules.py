@@ -16,10 +16,10 @@ AppModule = Literal[
 
 APP_MODULES: tuple[AppModule, ...] = (
     "home",
-    "quantitative",
-    "qualitative",
     "my_work",
     "operations",
+    "quantitative",
+    "qualitative",
     "crm_marketing",
     "accounting",
     "team",
@@ -30,10 +30,10 @@ DEFAULT_MODULES_BY_ROLE: dict[str, tuple[AppModule, ...]] = {
     "admin": APP_MODULES,
     "manager": (
         "home",
-        "quantitative",
-        "qualitative",
         "my_work",
         "operations",
+        "quantitative",
+        "qualitative",
         "crm_marketing",
         "accounting",
         "team",
