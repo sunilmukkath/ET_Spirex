@@ -583,6 +583,36 @@ function QuestionEditor({
           Respondents see one sub-question at a time with Previous / Next navigation — ideal for mobile.
         </p>
       )}
+      {question.type === 'photo' && (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={Boolean(question.camera_only)}
+            onChange={(e) => onChange({ camera_only: e.target.checked })}
+          />
+          Camera only (no gallery on supported devices)
+        </label>
+      )}
+      {question.type === 'audio' && (
+        <label className="block text-xs text-slate-500">
+          Max recording length (seconds)
+          <input
+            type="number"
+            min={10}
+            max={600}
+            value={question.max_recording_seconds ?? 120}
+            onChange={(e) => onChange({ max_recording_seconds: Number(e.target.value) })}
+            className="et-input mt-1 w-full"
+          />
+        </label>
+      )}
+      {(question.type === 'gps' || question.type === 'photo' || question.type === 'audio') && (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          {question.type === 'gps' && 'Stores latitude/longitude for maps and QC proximity checks in the workspace.'}
+          {question.type === 'photo' && 'Respondents capture or upload an image; files are stored with the response.'}
+          {question.type === 'audio' && 'Respondents record audio in the browser; playback is available in exported data.'}
+        </p>
+      )}
     </div>
   )
 }

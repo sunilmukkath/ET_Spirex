@@ -11,31 +11,19 @@ from typing import Any
 
 import pandas as pd
 from openpyxl import Workbook, load_workbook
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import Client, Project
 from app.models.pm import PmImportResult, PmImportRowResult, PmProjectCreate
 from app.services import pm_ops_store, pm_store
+from app.services.pm_stage import normalize_stage
 from app.services.project_import_config import (
     import_config_info,
     load_column_mapping,
     save_column_mapping,
     save_master_template,
 )
-
-VALID_STAGES: set[str] = {
-    "Proposal",
-    "Budgeting",
-    "Vendor Setup",
-    "Deployment Prep",
-    "Fieldwork/Data Collection",
-    "QC",
-    "Analysis",
-    "Reporting",
-    "Close-out",
-    "Delivered",
-}
 
 HEADER_ALIASES: dict[str, str] = {
     "projectname": "project_name",
@@ -80,7 +68,8 @@ HEADER_ALIASES: dict[str, str] = {
     "owner": "owner_name",
     "ownername": "owner_name",
     "pm": "owner_name",
-    "startdate": "start_date",
+    "startdatetargetclosedate": "start_date",
+    "startdate/targetclosedate": "start_date",
     "targetclosedate": "target_close_date",
     "closedate": "target_close_date",
     "duedate": "target_close_date",
@@ -484,6 +473,86 @@ def _get_or_create_client(session: Session, name: str | None) -> Client | None:
     return session.get(Client, out.client_id)
 
 
+def _find_existing_project(session: Session, row: dict[str, str]) -> Project | None:
+    code = (row.get("project_code") or "").strip()
+    if code:
+        found = session.scalar(select(Project).where(Project.project_code == code))
+        if found:
+            return found
+    name = (row.get("project_name") or "").strip()
+    if not name:
+        return None
+    return session.scalar(
+        select(Project).where(func.lower(Project.project_name) == name.lower())
+    )
+
+
+def _sync_project_from_row(
+    session: Session,
+    project: Project,
+    row: dict[str, str],
+    *,
+    survey_id: int | None,
+    survey_note: str | None,
+) -> list[str]:
+    """Update an existing project from import row. Returns change notes."""
+    notes: list[str] = []
+
+    raw_stage = row.get("stage")
+    if raw_stage and str(raw_stage).strip().lower() not in ("", "nan"):
+        stage = normalize_stage(raw_stage)
+        if project.stage != stage:
+            project.stage = stage
+            notes.append(f"stage → {stage}")
+
+    for field, attr in (
+        ("fiscal_year", "fiscal_year"),
+        ("billing_month", "billing_month"),
+        ("project_code", "project_code"),
+        ("status_notes", "status_notes"),
+    ):
+        val = (row.get(field) or "").strip()
+        if val and getattr(project, attr) != val:
+            setattr(project, attr, val)
+            notes.append(attr)
+
+    project_value_inr = _parse_decimal(row.get("project_value_inr"))
+    budget_estimate = _parse_decimal(row.get("budget_estimate")) or project_value_inr
+    if project_value_inr is not None and project.project_value_inr != project_value_inr:
+        project.project_value_inr = project_value_inr
+        notes.append("project_value_inr")
+    if budget_estimate is not None and project.budget_estimate != budget_estimate:
+        project.budget_estimate = budget_estimate
+        notes.append("budget")
+
+    start = _parse_date(row.get("start_date"))
+    if start and project.start_date != start:
+        project.start_date = start
+        notes.append("start_date")
+    target = _parse_date(row.get("target_close_date"))
+    if target and project.target_close_date != target:
+        project.target_close_date = target
+        notes.append("target_close_date")
+
+    owner_name = (row.get("owner_name") or "").strip()
+    if owner_name:
+        from app.services.pm_store import _resolve_owner_id
+
+        owner_id = _resolve_owner_id(session, None, owner_name)
+        if owner_id and project.owner_id != owner_id:
+            project.owner_id = owner_id
+            notes.append(f"owner → {owner_name}")
+
+    if survey_id is not None and project.limesurvey_survey_id != survey_id:
+        pm_ops_store.link_survey(session, project.project_id, survey_id)
+        notes.append(f"linked survey #{survey_id}")
+    elif survey_note:
+        notes.append(survey_note)
+
+    session.flush()
+    return notes
+
+
 def _survey_already_linked(session: Session, survey_id: int) -> str | None:
     row = session.scalar(select(Project).where(Project.limesurvey_survey_id == survey_id))
     if row:
@@ -511,21 +580,10 @@ def import_projects_from_sheet(
     }
 
     results: list[PmImportRowResult] = []
-    created = skipped = errors = 0
+    created = skipped = updated = errors = 0
 
     for i, row in enumerate(rows, start=2):
         name = row["project_name"].strip()
-        if skip_duplicates and name.lower() in existing_names:
-            skipped += 1
-            results.append(
-                PmImportRowResult(
-                    row_number=i,
-                    project_name=name,
-                    status="skipped",
-                    message="Project with this name already exists",
-                )
-            )
-            continue
 
         survey_id, survey_note = _resolve_survey_id(row, by_id, by_title)
         if survey_note and survey_id is None:
@@ -552,7 +610,50 @@ def import_projects_from_sheet(
                     )
                 )
                 continue
-            # survey_name provided but no match — create project unlinked
+
+        if skip_duplicates:
+            existing = _find_existing_project(session, row)
+            if existing:
+                if survey_id is not None:
+                    linked_to = _survey_already_linked(session, survey_id)
+                    if linked_to and linked_to != existing.project_name:
+                        errors += 1
+                        results.append(
+                            PmImportRowResult(
+                                row_number=i,
+                                project_name=name,
+                                status="error",
+                                limesurvey_survey_id=survey_id,
+                                message=f"Survey {survey_id} already linked to '{linked_to}'",
+                            )
+                        )
+                        continue
+                change_notes = _sync_project_from_row(
+                    session, existing, row, survey_id=survey_id, survey_note=survey_note
+                )
+                if change_notes:
+                    updated += 1
+                    results.append(
+                        PmImportRowResult(
+                            row_number=i,
+                            project_name=name,
+                            status="updated",
+                            project_id=existing.project_id,
+                            limesurvey_survey_id=existing.limesurvey_survey_id,
+                            message="Updated: " + ", ".join(change_notes),
+                        )
+                    )
+                else:
+                    skipped += 1
+                    results.append(
+                        PmImportRowResult(
+                            row_number=i,
+                            project_name=name,
+                            status="skipped",
+                            message="Already up to date",
+                        )
+                    )
+                continue
 
         if survey_id is not None:
             linked_to = _survey_already_linked(session, survey_id)
@@ -577,9 +678,7 @@ def import_projects_from_sheet(
         etype = (row.get("engagement_type") or "ad-hoc").strip().lower()
         if etype not in ("tracking", "ad-hoc"):
             etype = "ad-hoc"
-        stage = (row.get("stage") or "Proposal").strip()
-        if stage not in VALID_STAGES:
-            stage = "Proposal"
+        stage = normalize_stage(row.get("stage"))
 
         try:
             client = _get_or_create_client(session, row.get("client_name"))
@@ -639,6 +738,7 @@ def import_projects_from_sheet(
     return PmImportResult(
         total_rows=len(rows),
         created=created,
+        updated=updated,
         skipped=skipped,
         errors=errors,
         rows=results,

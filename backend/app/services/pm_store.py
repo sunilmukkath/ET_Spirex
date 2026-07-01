@@ -20,6 +20,7 @@ from app.models.pm import (
     PmProjectUpdate,
     QuotaCellSummary,
 )
+from app.services.pm_project_sort import sort_projects
 
 
 def _resolve_owner_id(session: Session, owner_id: UUID | None, owner_name: str | None) -> UUID | None:
@@ -45,9 +46,9 @@ def project_to_out(project: Project) -> PmProjectOut:
 
 def list_projects(session: Session) -> list[PmProjectOut]:
     rows = session.scalars(
-        select(Project).options(joinedload(Project.owner)).order_by(Project.updated_at.desc())
+        select(Project).options(joinedload(Project.owner))
     ).all()
-    return [project_to_out(row) for row in rows]
+    return [project_to_out(row) for row in sort_projects(rows)]
 
 
 def get_project(session: Session, project_id: UUID) -> Project | None:

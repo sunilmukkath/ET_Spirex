@@ -105,3 +105,48 @@ class CreateTaskFromEmailResponse(BaseModel):
 class CreateTasksFromEmailBatchResponse(BaseModel):
     created: list[CreateTaskFromEmailResponse] = Field(default_factory=list)
     count: int = 0
+
+
+class GmailMessageDetail(BaseModel):
+    id: str
+    thread_id: str
+    subject: str
+    from_name: str
+    from_email: str
+    to_emails: list[str] = Field(default_factory=list)
+    cc_emails: list[str] = Field(default_factory=list)
+    body_text: str = ""
+    snippet: str = ""
+    internal_date: int | None = None
+    is_unread: bool = False
+    message_id_header: str = ""
+    has_task: bool = False
+    task_count: int = 0
+    email_url: str = ""
+
+
+class GmailSendEmailRequest(BaseModel):
+    to: str
+    subject: str
+    body_text: str
+    reply_to_message_id: str | None = None
+    scheduled_at: float | None = None
+
+
+class GmailSendEmailResponse(BaseModel):
+    ok: bool
+    scheduled: bool = False
+    scheduled_id: str | None = None
+    scheduled_at: float | None = None
+    gmail_message_id: str | None = None
+    thread_id: str | None = None
+    message: str = ""
+
+
+class GmailScheduledSend(BaseModel):
+    id: str
+    to: str
+    subject: str
+    body_text: str
+    scheduled_at: float
+    status: Literal["pending", "sent", "overdue"] = "pending"

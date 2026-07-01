@@ -140,3 +140,20 @@ def test_import_skips_duplicate_name(pm_session, monkeypatch):
     result = import_projects_from_sheet(pm_session, csv_data, filename="p.csv")
     assert result.created == 1
     assert result.skipped == 1
+
+
+def test_import_updates_existing_stage(pm_session, monkeypatch):
+    monkeypatch.setattr("app.services.pm_import._load_lime_surveys", lambda: [])
+    csv_data = (
+        "Project No,project_name,stage,FY,Month\n"
+        "P1,Tracker Alpha,Proposal,FY2025 - 2026,April\n"
+    ).encode()
+    import_projects_from_sheet(pm_session, csv_data, filename="p.csv")
+    update_csv = (
+        "Project No,project_name,stage,FY,Month\n"
+        "P1,Tracker Alpha,Delivered,FY2025 - 2026,April\n"
+    ).encode()
+    result = import_projects_from_sheet(pm_session, update_csv, filename="p.csv")
+    assert result.updated == 1
+    project = pm_session.query(Project).filter_by(project_name="Tracker Alpha").one()
+    assert project.stage == "Delivered"

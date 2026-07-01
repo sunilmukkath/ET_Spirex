@@ -6,8 +6,6 @@ import {
   Briefcase,
   Circle,
   ClipboardList,
-  DollarSign,
-  FileText,
   Landmark,
   Link2,
   Loader2,
@@ -29,10 +27,10 @@ import {
   type ProjectTask,
   type ProjectWorkflow,
 } from '../api/client'
+import { ET_HOME_SUBTITLE, ET_HOME_TAGLINE, ET_PRODUCT_NAME } from '../lib/etCopy'
 import { TASK_CATEGORY_LABELS, TASK_STATUS_LABELS } from '../lib/workflowAccess'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
-const TASK_PREVIEW = 5
 const PROJECT_PREVIEW = 6
 
 const QUICK_LINK_TOOLS = [
@@ -120,42 +118,78 @@ function saveQuickLinkSelection(ids: string[]) {
   localStorage.setItem(QUICK_LINK_STORAGE_KEY, JSON.stringify(ids))
 }
 
-function ModuleCard({
+function StageBadge({ stage }: { stage: string }) {
+  const tone =
+    stage === 'Delivered'
+      ? 'bg-slate-100 text-slate-500'
+      : stage === 'Proposal'
+        ? 'bg-sky-100 text-sky-800'
+        : stage.includes('Fieldwork') || stage === 'QC'
+          ? 'bg-[var(--et-teal-light)] text-[var(--et-teal-dark)]'
+          : stage === 'Analysis' || stage === 'Reporting'
+            ? 'bg-violet-100 text-violet-800'
+            : 'bg-amber-50 text-amber-900'
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${tone}`}>{stage}</span>
+  )
+}
+
+function StatChip({
+  label,
+  value,
+  href,
+  accent,
+}: {
+  label: string
+  value: number | string
+  href?: string
+  accent?: boolean
+}) {
+  const inner = (
+    <>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-white/60">{label}</p>
+      <p className={`text-xl font-semibold tabular-nums ${accent ? 'text-[var(--et-yellow)]' : 'text-white'}`}>
+        {value}
+      </p>
+    </>
+  )
+  if (href) {
+    return (
+      <Link
+        to={href}
+        className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 transition hover:border-white/25 hover:bg-white/10"
+      >
+        {inner}
+      </Link>
+    )
+  }
+  return <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">{inner}</div>
+}
+
+function SectionHeader({
   title,
-  icon: Icon,
   href,
   actionLabel,
-  children,
   badge,
 }: {
   title: string
-  icon: typeof ClipboardList
   href: string
   actionLabel?: string
-  children: React.ReactNode
   badge?: number
 }) {
   return (
-    <section className="flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--et-teal-light)]/50 text-[var(--et-teal-dark)]">
-            <Icon size={16} />
-          </span>
-          <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
-          {badge != null && badge > 0 && (
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-              {badge}
-            </span>
-          )}
-        </div>
-        <Link to={href} className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline">
-          {actionLabel ?? 'Open'}
-          <ArrowRight size={12} className="ml-0.5 inline" />
-        </Link>
+    <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+        {badge != null && badge > 0 && (
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{badge}</span>
+        )}
       </div>
-      <div className="flex-1 p-4">{children}</div>
-    </section>
+      <Link to={href} className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline">
+        {actionLabel ?? 'Open'}
+        <ArrowRight size={12} className="ml-0.5 inline" />
+      </Link>
+    </div>
   )
 }
 
@@ -346,24 +380,36 @@ export function HomePage() {
     }
   }
 
-  const myPmProjects = useMemo(() => {
-    if (!user?.username) return pmProjects.slice(0, PROJECT_PREVIEW)
-    const mine = pmProjects.filter((p) => p.owner_name === user.username)
-    return (mine.length ? mine : pmProjects).slice(0, PROJECT_PREVIEW)
-  }, [pmProjects, user?.username])
+  const openAssigned = assignedTasks.filter((t) => t.task.status !== 'done')
+  const openNew = newTasks.filter((t) => t.task.status !== 'done')
 
-  const proposalProjects = useMemo(
-    () => pmProjects.filter((p) => p.stage === 'Proposal').slice(0, PROJECT_PREVIEW),
+  const activePmProjects = useMemo(
+    () => pmProjects.filter((p) => p.stage !== 'Delivered'),
     [pmProjects],
   )
 
-  const totalOutstanding = useMemo(
-    () =>
-      financeSnapshots.reduce((sum, f) => sum + (f.total_outstanding ?? 0), 0),
-    [financeSnapshots],
+  const pipelineSpotlight = useMemo(() => {
+    if (!user?.username) return activePmProjects.slice(0, PROJECT_PREVIEW)
+    const mine = activePmProjects.filter((p) => p.owner_name === user.username)
+    return (mine.length ? mine : activePmProjects).slice(0, PROJECT_PREVIEW)
+  }, [activePmProjects, user?.username])
+
+  const deliveredCount = useMemo(
+    () => pmProjects.filter((p) => p.stage === 'Delivered').length,
+    [pmProjects],
   )
 
-  const openAssigned = assignedTasks.filter((t) => t.task.status !== 'done')
+  const myPmProjects = pipelineSpotlight
+
+  const proposalProjects = useMemo(
+    () => activePmProjects.filter((p) => p.stage === 'Proposal').slice(0, PROJECT_PREVIEW),
+    [activePmProjects],
+  )
+
+  const totalOutstanding = useMemo(
+    () => financeSnapshots.reduce((sum, f) => sum + (f.total_outstanding ?? 0), 0),
+    [financeSnapshots],
+  )
 
   const quickLinks = useMemo(
     () =>
@@ -384,67 +430,78 @@ export function HomePage() {
   if (loading) return <LoadingState message="Loading your workspace…" />
 
   return (
-    <div className="space-y-6 py-2 animate-fade-in">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--et-teal)]">
-            Elastic Tree Scout
-          </p>
-          <h1 className="font-display text-2xl font-bold text-slate-900 sm:text-3xl">
-            Welcome back{user?.username ? `, ${user.username}` : ''}
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-600">
-            PM projects, tasks, and finance live here. LimeSurvey and Survey Studio are under{' '}
-            <Link to="/quantitative" className="font-medium text-[var(--et-teal-dark)] hover:underline">
-              Quantitative
-            </Link>
-            .
-          </p>
+    <div className="mx-auto max-w-6xl space-y-8 py-2 animate-fade-in">
+      <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-[var(--et-navy)] via-[#0f2847] to-slate-900 px-5 py-7 text-white shadow-lg sm:px-8 sm:py-8">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-[var(--et-teal)]/20 blur-3xl" />
+        <div className="relative flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <p className="text-xs font-semibold uppercase tracking-widest text-[var(--et-yellow)]">
+              {ET_PRODUCT_NAME}
+            </p>
+            <h1 className="font-display mt-1 text-2xl font-bold leading-tight sm:text-3xl">
+              Welcome back{user?.username ? `, ${user.username}` : ''}
+            </h1>
+            <p className="mt-2 text-sm font-medium text-white/90">{ET_HOME_TAGLINE}</p>
+            <p className="mt-1 text-xs text-white/60">{ET_HOME_SUBTITLE}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleRefresh()}
+            disabled={refreshing}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white backdrop-blur hover:bg-white/15 disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            Refresh
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => void handleRefresh()}
-          disabled={refreshing}
-          className="et-btn-secondary"
-        >
-          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-          Refresh
-        </button>
-      </header>
+
+        <div className="relative mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+          <StatChip label="My tasks" value={openAssigned.length} href="/my-work" accent={openAssigned.length > 0} />
+          <StatChip label="New queue" value={openNew.length} href="/my-work" />
+          <StatChip
+            label="Active projects"
+            value={pmEnabled ? activePmProjects.length : '—'}
+            href="/operations?tab=pipeline"
+          />
+          <StatChip label="Proposals" value={pmEnabled ? proposalProjects.length : '—'} href="/operations?tab=pipeline" />
+        </div>
+
+        <div className="relative mt-5 flex flex-wrap gap-2">
+          <button type="button" onClick={() => setShowNewTask(true)} className="et-btn-accent inline-flex items-center gap-1.5">
+            <Plus size={16} />
+            New task
+          </button>
+          <Link
+            to="/my-work"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/15"
+          >
+            <ClipboardList size={16} />
+            My work & inbox
+          </Link>
+          <Link
+            to="/quantitative"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-transparent px-4 py-2 text-sm font-medium text-white/90 hover:bg-white/10"
+          >
+            <BarChart3 size={16} />
+            Quantitative
+          </Link>
+        </div>
+      </section>
 
       {error && <ErrorState message={error} />}
 
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => setShowNewTask(true)} className="et-btn-primary">
-          <Plus size={16} />
-          New task
-        </button>
-        <Link to="/my-work" className="et-btn-secondary">
-          <ClipboardList size={16} />
-          My work & inbox
-        </Link>
-        {pmEnabled && (
-          <Link to="/operations?tab=pipeline" className="et-btn-secondary">
-            <Sparkles size={16} />
-            Draft proposal
-          </Link>
-        )}
-      </div>
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Quick links</h2>
-            <p className="text-xs text-slate-500">
-              Jump to LimeSurvey, Studio, or operations tools — choose what appears below.
-            </p>
+            <p className="text-xs text-slate-500">Your pinned tools — customise anytime.</p>
           </div>
           <button
             type="button"
             onClick={() => setShowQuickLinkPicker((v) => !v)}
-            className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+            className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-[var(--et-teal-dark)] hover:bg-slate-50"
           >
-            {showQuickLinkPicker ? 'Done' : 'Choose tools'}
+            {showQuickLinkPicker ? 'Done' : 'Customise'}
           </button>
         </div>
 
@@ -460,7 +517,7 @@ export function HomePage() {
                   onClick={() => toggleQuickLink(tool.id)}
                   className={`flex items-start gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition ${
                     selected
-                      ? 'border-[var(--et-teal)] bg-[var(--et-teal-light)]/30'
+                      ? 'border-[var(--et-teal)] bg-[var(--et-teal-light)]/30 ring-1 ring-[var(--et-teal)]/20'
                       : 'border-slate-200 bg-slate-50/50 hover:border-slate-300'
                   }`}
                 >
@@ -474,21 +531,21 @@ export function HomePage() {
             })}
           </div>
         ) : quickLinks.length > 0 ? (
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="flex gap-2 overflow-x-auto pb-1 et-scroll sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-4">
             {quickLinks.map((tool) => {
               const Icon = tool.icon
               return (
                 <Link
                   key={tool.id}
                   to={tool.href}
-                  className="group flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-3 transition hover:border-[var(--et-teal)]/35 hover:bg-[var(--et-teal-light)]/15"
+                  className="group flex min-w-[10.5rem] shrink-0 items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-3 transition hover:border-[var(--et-teal)]/35 hover:bg-[var(--et-teal-light)]/15 sm:min-w-0"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--et-teal-dark)] shadow-sm ring-1 ring-slate-100 group-hover:ring-[var(--et-teal)]/30">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-[var(--et-teal-dark)] shadow-sm ring-1 ring-slate-100 group-hover:ring-[var(--et-teal)]/30">
                     <Icon size={18} />
                   </span>
                   <span className="min-w-0">
                     <span className="block text-sm font-semibold text-slate-900">{tool.label}</span>
-                    <span className="mt-0.5 block text-xs text-slate-500">{tool.description}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-500">{tool.description}</span>
                   </span>
                 </Link>
               )
@@ -496,7 +553,7 @@ export function HomePage() {
           </div>
         ) : (
           <p className="text-sm text-slate-500">
-            No quick links selected.{' '}
+            No quick links yet.{' '}
             <button
               type="button"
               className="font-medium text-[var(--et-teal-dark)] hover:underline"
@@ -508,41 +565,31 @@ export function HomePage() {
         )}
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ModuleCard
-          title="Assigned to me"
-          icon={ClipboardList}
-          href="/my-work"
-          actionLabel="My work"
-          badge={openAssigned.length}
-        >
-          <TaskList
-            rows={openAssigned.slice(0, TASK_PREVIEW)}
-            empty="No open tasks assigned to you."
+      <div className="grid gap-4 lg:grid-cols-5">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2">
+          <SectionHeader title="Your work" href="/my-work" actionLabel="Open My work" badge={openAssigned.length + openNew.length} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Assigned to me</p>
+              <TaskList rows={openAssigned.slice(0, 4)} empty="Nothing assigned — check My work." />
+            </div>
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">New queue</p>
+              <TaskList rows={openNew.slice(0, 4)} empty="No unassigned tasks." />
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-3">
+          <SectionHeader
+            title="Pipeline spotlight"
+            href="/operations?tab=pipeline"
+            actionLabel="All projects"
+            badge={activePmProjects.length}
           />
-        </ModuleCard>
-
-        <ModuleCard
-          title="New tasks"
-          icon={Circle}
-          href="/my-work"
-          actionLabel="View inbox"
-          badge={newTasks.length}
-        >
-          <p className="mb-3 text-xs text-slate-500">Unassigned tasks across studies — claim or assign from workflow.</p>
-          <TaskList rows={newTasks.slice(0, TASK_PREVIEW)} empty="No unassigned tasks in the queue." />
-        </ModuleCard>
-
-        <ModuleCard
-          title="My projects"
-          icon={Briefcase}
-          href="/operations?tab=pipeline"
-          actionLabel="Operations"
-          badge={myPmProjects.length}
-        >
           {!pmEnabled ? (
             <p className="text-sm text-slate-500">
-              PM projects (proposals, budgets, delivery) live in Operations — separate from LimeSurvey studies.
+              Connect Operations to see PM pipeline — proposals, budgets, and delivery stages.
             </p>
           ) : myPmProjects.length > 0 ? (
             <ul className="space-y-2">
@@ -550,126 +597,88 @@ export function HomePage() {
                 <li key={p.project_id}>
                   <Link
                     to="/operations?tab=pipeline"
-                    className="block rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 text-sm hover:border-[var(--et-teal)]/30"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5 transition hover:border-[var(--et-teal)]/30 hover:bg-[var(--et-teal-light)]/10"
                   >
-                    <span className="font-medium text-slate-900">{p.project_name}</span>
-                    <span className="mt-0.5 block text-xs text-slate-500">
-                      {p.client_name ?? 'No client'} · {p.stage}
-                      {p.project_code ? ` · ${p.project_code}` : ''}
-                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-slate-900">{p.project_name}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">
+                        {p.client_name ?? 'No client'}
+                        {p.billing_month ? ` · ${p.billing_month}` : ''}
+                        {p.fiscal_year ? ` · ${p.fiscal_year}` : ''}
+                      </p>
+                    </div>
+                    <StageBadge stage={p.stage} />
                   </Link>
                 </li>
               ))}
             </ul>
           ) : (
-            <EmptyState
-              title="No PM projects yet"
-              description="Add projects in Operations. Open LimeSurvey or Studio from Quantitative quick links."
-            />
+            <EmptyState title="No active projects" description="Delivered work is hidden here — open Operations for the full list." />
           )}
-        </ModuleCard>
-
-        <ModuleCard
-          title="Proposals"
-          icon={FileText}
-          href="/operations?tab=pipeline"
-          badge={proposalProjects.length || proposals.length}
-        >
-          {!pmEnabled ? (
-            <p className="text-sm text-slate-500">
-              Connect the operations database to track proposals and run the proposal writing agent.
+          {pmEnabled && deliveredCount > 0 && (
+            <p className="mt-3 text-[11px] text-slate-400">
+              {deliveredCount} delivered project{deliveredCount === 1 ? '' : 's'} — sorted to the bottom in Operations.
             </p>
-          ) : proposalProjects.length > 0 ? (
-            <ul className="space-y-2">
-              {proposalProjects.map((p) => (
-                <li key={p.project_id}>
-                  <Link
-                    to="/operations?tab=pipeline"
-                    className="block rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 text-sm hover:border-[var(--et-teal)]/30"
-                  >
-                    <span className="font-medium text-slate-900">{p.project_name}</span>
-                    <span className="mt-0.5 block text-xs text-slate-500">
-                      {p.client_name ?? 'Client TBC'} · {p.proposal_status ?? 'draft'}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : proposals.length > 0 ? (
-            <p className="text-sm text-slate-600">
-              {proposals.length} proposal version{proposals.length === 1 ? '' : 's'} on file across projects.
-            </p>
-          ) : (
-            <EmptyState title="No proposals in pipeline" description="Add a project at Proposal stage in Operations." />
           )}
-        </ModuleCard>
+        </section>
+      </div>
 
-        <ModuleCard
-          title="CRM"
-          icon={Users}
-          href="/operations?tab=clients"
-          badge={clients.length}
-        >
-          {!pmEnabled ? (
-            <p className="text-sm text-slate-500">CRM and marketing follow-ups live in Operations when DATABASE_URL is set.</p>
-          ) : clients.length > 0 ? (
-            <ul className="space-y-2">
-              {clients.slice(0, TASK_PREVIEW).map((c) => (
-                <li key={c.client_id} className="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 text-sm">
-                  <span className="font-medium text-slate-900">{c.client_name}</span>
-                  <span className="mt-0.5 block text-xs text-slate-500">
-                    {c.project_count ?? 0} project{(c.project_count ?? 0) === 1 ? '' : 's'}
-                    {c.repeat_client ? ' · Repeat client' : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyState title="No clients yet" description="Add clients in Operations → CRM & marketing." />
-          )}
-        </ModuleCard>
-
-        <ModuleCard
-          title="Finance"
-          icon={DollarSign}
-          href="/operations?tab=finance"
-        >
-          {!pmEnabled ? (
-            <p className="text-sm text-slate-500">Budget tracking and the finance agent require the operations database.</p>
-          ) : financeSnapshots.length > 0 ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg bg-slate-50 px-3 py-2">
-                  <p className="text-[10px] font-semibold uppercase text-slate-500">Outstanding</p>
-                  <p className="text-lg font-semibold text-slate-900">
-                    {totalOutstanding > 0 ? `£${totalOutstanding.toLocaleString()}` : '—'}
-                  </p>
-                </div>
-                <div className="rounded-lg bg-slate-50 px-3 py-2">
-                  <p className="text-[10px] font-semibold uppercase text-slate-500">Your projects</p>
-                  <p className="text-lg font-semibold text-slate-900">{myPmProjects.length}</p>
-                </div>
-              </div>
-              <ul className="space-y-1 text-sm text-slate-600">
-                {financeSnapshots.map((f) => (
-                  <li key={f.project_id}>
-                    {f.project_name}: budget{' '}
-                    {f.budget_estimate != null ? `£${f.budget_estimate.toLocaleString()}` : 'TBC'}
+      {pmEnabled && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <SectionHeader title="Proposals" href="/operations?tab=pipeline" badge={proposalProjects.length || proposals.length} />
+            {proposalProjects.length > 0 ? (
+              <ul className="space-y-2">
+                {proposalProjects.slice(0, 3).map((p) => (
+                  <li key={p.project_id}>
+                    <Link to="/operations?tab=pipeline" className="block text-sm hover:text-[var(--et-teal-dark)]">
+                      <span className="font-medium text-slate-900">{p.project_name}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">{p.client_name ?? 'Client TBC'}</span>
+                    </Link>
                   </li>
                 ))}
               </ul>
-            </div>
-          ) : (
-            <div className="flex items-start gap-2 text-sm text-slate-600">
-              <Briefcase size={16} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
-              <p>
-                {pmProjects.length} PM project{pmProjects.length === 1 ? '' : 's'} in pipeline. Open Finance for budgets,
-                invoices, and the finance agent.
-              </p>
-            </div>
-          )}
-        </ModuleCard>
-      </div>
+            ) : (
+              <p className="text-xs text-slate-500">No projects at Proposal stage.</p>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <SectionHeader title="CRM" href="/operations?tab=clients" badge={clients.length} />
+            {clients.length > 0 ? (
+              <ul className="space-y-2">
+                {clients.slice(0, 3).map((c) => (
+                  <li key={c.client_id} className="text-sm">
+                    <span className="font-medium text-slate-900">{c.client_name}</span>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      {c.project_count ?? 0} project{(c.project_count ?? 0) === 1 ? '' : 's'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-slate-500">Add clients in Operations.</p>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <SectionHeader title="Finance" href="/operations?tab=finance" />
+            {financeSnapshots.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-2xl font-semibold text-slate-900">
+                  {totalOutstanding > 0 ? `£${totalOutstanding.toLocaleString()}` : '—'}
+                </p>
+                <p className="text-[10px] font-semibold uppercase text-slate-400">Outstanding (sample)</p>
+                <Link to="/accounting" className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline">
+                  Open accounting →
+                </Link>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">Budgets & invoices in Operations → Finance.</p>
+            )}
+          </section>
+        </div>
+      )}
 
       {showNewTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">

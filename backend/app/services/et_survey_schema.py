@@ -23,6 +23,9 @@ _ET_TYPE_MAP: dict[str, str] = {
     "array_carousel": "F",
     "ranking": "R",
     "yes_no": "Y",
+    "gps": "S",
+    "photo": "S",
+    "audio": "S",
 }
 
 
@@ -36,7 +39,18 @@ def _question_to_variable(
 ) -> dict[str, Any]:
     ls_type = _ET_TYPE_MAP.get(question.type, "L")
     info = get_type_info(ls_type)
+    kind = info.kind
+    if question.type == "gps":
+        kind = "location"
+    elif question.type in ("photo", "audio"):
+        kind = "text"
     columns = [question.code]
+    lat_column = ""
+    lng_column = ""
+    if question.type == "gps":
+        lat_column = f"{question.code}GPSLat"
+        lng_column = f"{question.code}GPSLng"
+        columns = [lat_column, lng_column]
     answer_options = [
         {"code": o.code, "label": o.label, "sort_order": o.sort_order}
         for o in sorted(question.options, key=lambda x: x.sort_order)
@@ -84,7 +98,7 @@ def _question_to_variable(
         "code": question.code,
         "text": question.text,
         "ls_type": ls_type,
-        "kind": info.kind,
+        "kind": kind,
         "type_label": f"ET {question.type.replace('_', ' ').title()}",
         "group_id": group_id,
         "group_title": group_title,
@@ -97,8 +111,8 @@ def _question_to_variable(
         "can_banner": info.can_banner and question.type != "display",
         "can_filter": info.can_filter and question.type != "display",
         "parent_qid": 0,
-        "lat_column": "",
-        "lng_column": "",
+        "lat_column": lat_column,
+        "lng_column": lng_column,
         "et_type": question.type,
         "required": question.required,
         "show_if": question.show_if.model_dump() if question.show_if else None,

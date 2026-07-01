@@ -426,6 +426,33 @@ def list_unassigned_tasks() -> list[dict[str, Any]]:
     return out
 
 
+def list_team_assigned_tasks(viewer_username: str | None) -> list[dict[str, Any]]:
+    """Open tasks assigned to a teammate (not the viewer)."""
+    viewer = (viewer_username or "").strip()
+    out: list[dict[str, Any]] = []
+    if not _DATA_DIR.is_dir():
+        return []
+    for path in sorted(_DATA_DIR.glob("*.json")):
+        try:
+            survey_id = int(path.stem)
+        except ValueError:
+            continue
+        workflow = get_project_workflow(survey_id)
+        for task in workflow.tasks:
+            assignee = (task.assignee or "").strip()
+            if not assignee or assignee == viewer or task.status == "done":
+                continue
+            out.append(_task_row(survey_id, workflow, task))
+    out.sort(
+        key=lambda row: (
+            (row["task"].get("assignee") or "").lower(),
+            row["task"].get("due_date") or "9999",
+            row["task"].get("title", "").lower(),
+        )
+    )
+    return out
+
+
 def _task_row(survey_id: int, workflow: ProjectWorkflow, task: ProjectTask) -> dict[str, Any]:
     return {
         "survey_id": survey_id,

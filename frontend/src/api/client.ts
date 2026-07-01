@@ -988,6 +988,9 @@ export type EtQuestionType =
   | 'array_carousel'
   | 'ranking'
   | 'yes_no'
+  | 'gps'
+  | 'photo'
+  | 'audio'
 
 export interface EtAnswerOption {
   code: string
@@ -1028,6 +1031,8 @@ export interface EtQuestion {
   randomize_options?: boolean
   randomize_code?: string
   show_if?: EtShowIfRule | null
+  max_recording_seconds?: number
+  camera_only?: boolean
 }
 
 export interface EtBlock {
@@ -1288,6 +1293,37 @@ export interface GmailMessageSummary {
   email_url: string
 }
 
+export interface GmailMessageDetail extends GmailMessageSummary {
+  body_text: string
+  message_id_header: string
+}
+
+export interface GmailSendEmailRequest {
+  to: string
+  subject: string
+  body_text: string
+  reply_to_message_id?: string | null
+  scheduled_at?: number | null
+}
+
+export interface GmailSendEmailResponse {
+  ok: boolean
+  scheduled: boolean
+  scheduled_id?: string | null
+  scheduled_at?: number | null
+  gmail_message_id?: string | null
+  message: string
+}
+
+export interface GmailScheduledSend {
+  id: string
+  to: string
+  subject: string
+  body_text: string
+  scheduled_at: number
+  status: 'pending' | 'sent' | 'overdue'
+}
+
 export interface GmailTaskDraft {
   title: string
   note: string
@@ -1542,7 +1578,7 @@ export interface PmPipelineOverview {
 export interface PmImportRowResult {
   row_number: number
   project_name: string
-  status: 'created' | 'skipped' | 'error'
+  status: 'created' | 'updated' | 'skipped' | 'error'
   project_id: string | null
   limesurvey_survey_id: number | null
   message: string | null
@@ -1551,6 +1587,7 @@ export interface PmImportRowResult {
 export interface PmImportResult {
   total_rows: number
   created: number
+  updated: number
   skipped: number
   errors: number
   rows: PmImportRowResult[]
@@ -1581,6 +1618,25 @@ export interface PmMarketingActivity {
   owner_name: string | null
   due_date: string | null
   notes: string | null
+}
+
+export interface PmSurveyLinkSuggestion {
+  project_id: string
+  project_name: string
+  client_name: string | null
+  limesurvey_survey_id: number
+  survey_title: string
+  confidence: 'high' | 'medium' | 'low'
+  reason: string
+}
+
+export interface PmSurveyLinkAgentResult {
+  agent: string
+  configured: boolean
+  summary: string
+  suggestions: PmSurveyLinkSuggestion[]
+  applied_count: number
+  applied: PmSurveyLinkSuggestion[]
 }
 
 export interface PmAgentBrief {
@@ -1679,6 +1735,8 @@ export const api = {
     fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/me/tasks', undefined, BOOTSTRAP_TIMEOUT_MS),
   getUnassignedTasks: () =>
     fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/tasks/unassigned', undefined, BOOTSTRAP_TIMEOUT_MS),
+  getTeamAssignedTasks: () =>
+    fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/tasks/assigned', undefined, BOOTSTRAP_TIMEOUT_MS),
   getUserPreferences: () =>
     fetchJson<UserPreferences>('/api/me/preferences', undefined, BOOTSTRAP_TIMEOUT_MS),
   updateUserPreferences: (body: Partial<UserPreferences>) =>
@@ -2574,6 +2632,18 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  runSurveyLinkAgent: (body?: { apply?: boolean; context?: string }) =>
+    fetchJson<PmSurveyLinkAgentResult>('/api/pm/agents/survey-links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    }),
+  applySurveyLinks: (links: { project_id: string; limesurvey_survey_id: number }[]) =>
+    fetchJson<{ applied_count: number; errors: string[] }>('/api/pm/agents/survey-links/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ links }),
+    }),
   listPmMarketing: () =>
     fetchJson<PmMarketingActivity[]>('/api/pm/marketing', undefined, BOOTSTRAP_TIMEOUT_MS),
   createPmMarketing: (body: {
@@ -2612,6 +2682,20 @@ export const api = {
       undefined,
       BOOTSTRAP_TIMEOUT_MS,
     ),
+  getGmailMessage: (messageId: string, markRead = true) =>
+    fetchJson<GmailMessageDetail>(
+      `/api/gmail/messages/${messageId}?mark_read=${markRead ? 'true' : 'false'}`,
+      undefined,
+      BOOTSTRAP_TIMEOUT_MS,
+    ),
+  sendGmailMessage: (body: GmailSendEmailRequest) =>
+    fetchJson<GmailSendEmailResponse>('/api/gmail/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  getGmailScheduled: () =>
+    fetchJson<GmailScheduledSend[]>('/api/gmail/scheduled', undefined, BOOTSTRAP_TIMEOUT_MS),
   getGmailTaskSuggestion: (messageId: string) =>
     fetchJson<GmailTaskSuggestion>(
       `/api/gmail/messages/${messageId}/suggestion`,
@@ -2720,6 +2804,18 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  uploadCollectorMedia: async (slug: string, file: File, kind: 'photo' | 'audio', questionId: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('kind', kind)
+    form.append('question_id', questionId)
+    const res = await fetch(`/api/collector/${slug}/upload`, { method: 'POST', body: form })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(formatApiError(err, res.status))
+    }
+    return res.json() as Promise<{ media_id: string; url: string; question_id: string }>
+  },
   draftStudioQuestionnaire: (workspaceId: number, body: { brief: string; language?: string }) =>
     fetchJson<{ configured: boolean; definition: EtSurveyDefinition; message: string }>(
       `/api/studio/surveys/${workspaceId}/ai/questionnaire`,

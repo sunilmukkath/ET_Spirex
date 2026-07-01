@@ -25,8 +25,32 @@ def _flatten_answers(answers: dict[str, Any], schema: dict[str, Any]) -> dict[st
     matrix_vars = {
         v["id"]: v for v in schema.get("variables") or [] if v.get("et_type") in matrix_types
     }
+    gps_vars = {v["id"]: v for v in schema.get("variables") or [] if v.get("et_type") == "gps"}
+    media_vars = {
+        v["id"]: v for v in schema.get("variables") or [] if v.get("et_type") in ("photo", "audio")
+    }
 
     for qid, value in answers.items():
+        gps_var = gps_vars.get(qid)
+        if gps_var and isinstance(value, dict):
+            code = gps_var["code"]
+            lat = value.get("lat")
+            lng = value.get("lng")
+            if lat is not None:
+                row[f"{code}GPSLat"] = lat
+            if lng is not None:
+                row[f"{code}GPSLng"] = lng
+            continue
+
+        media_var = media_vars.get(qid)
+        if media_var:
+            code = media_var["code"]
+            if isinstance(value, dict):
+                row[code] = value.get("url") or value.get("media_id") or ""
+            else:
+                row[code] = value
+            continue
+
         var = matrix_vars.get(qid)
         if var and isinstance(value, dict):
             for sub_code, sub_val in value.items():

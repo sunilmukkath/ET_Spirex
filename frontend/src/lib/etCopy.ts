@@ -5,9 +5,13 @@ export const ET_PRODUCT_NAME = 'ET Scout'
 export const ET_LIMESURVEY_LABEL = 'Elastic Tree LimeSurvey'
 
 export const ET_LANDING_BADGE = 'Quant + qual research workspace'
-export const ET_LANDING_TITLE = 'From brief to final deck — one research hub.'
+export const ET_LANDING_TITLE = 'From Brief To Client Impact — One Research Hub.'
 export const ET_LANDING_SUBTITLE =
   'Run quant, qual, and AI analysis in one Elastic Tree workspace.'
+
+export const ET_HOME_TAGLINE = ET_LANDING_TITLE
+export const ET_HOME_SUBTITLE =
+  'Tasks, pipeline, and quick paths to quant fieldwork, ops, and client delivery.'
 
 export const ET_SIGNIN_TAGLINE = 'Sign in to run quant and qual studies with your ET team.'
 

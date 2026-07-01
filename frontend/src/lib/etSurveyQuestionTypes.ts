@@ -36,6 +36,14 @@ export const QUESTION_TYPE_GROUPS: { title: string; types: QuestionTypeOption[] 
     ],
   },
   {
+    title: 'Field capture',
+    types: [
+      { value: 'gps', label: 'GPS tag', hint: 'Capture lat/lng from device' },
+      { value: 'photo', label: 'Photo', hint: 'Camera or gallery upload' },
+      { value: 'audio', label: 'Audio', hint: 'Record voice note' },
+    ],
+  },
+  {
     title: 'Other',
     types: [{ value: 'display', label: 'Instruction text' }],
   },
@@ -83,6 +91,8 @@ export function newQuestion(type: EtQuestionType, index: number): EtQuestion {
     other_label: 'Other (please specify)',
     randomize_options: false,
     randomize_code: '',
+    max_recording_seconds: 120,
+    camera_only: false,
   }
 
   switch (type) {
@@ -97,6 +107,17 @@ export function newQuestion(type: EtQuestionType, index: number): EtQuestion {
         { code: 'Y', label: 'Yes', sort_order: 0 },
         { code: 'N', label: 'No', sort_order: 1 },
       ]
+      break
+    case 'gps':
+      base.text = 'Please share your GPS location.'
+      base.help_text = 'We use your device location for field verification.'
+      break
+    case 'photo':
+      base.text = 'Please take or upload a photo.'
+      break
+    case 'audio':
+      base.text = 'Please record a short audio note.'
+      base.max_recording_seconds = 120
       break
     case 'matrix':
     case 'array_carousel':

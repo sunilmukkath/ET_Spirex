@@ -45,4 +45,5 @@ def test_google_signin_url_has_no_pkce_challenge():
         query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
         redirect = urllib.parse.unquote(query["redirect_uri"][0])
         assert "code_challenge" not in url
+        assert query["access_type"] == ["offline"]
         assert redirect == "https://et-scout.up.railway.app/api/auth/google/callback"

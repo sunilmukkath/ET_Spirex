@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { applyRandomizeOrder } from '../../lib/etSurveyRandomize'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { EtQuestion } from '../../api/client'
+import { AudioCapture, GpsCapture, PhotoCapture } from './EtFieldCapture'
 
 function shuffledOptions<T extends { sort_order: number }>(items: T[], randomize: boolean): T[] {
   const sorted = [...items].sort((a, b) => a.sort_order - b.sort_order)
@@ -18,10 +19,12 @@ export function EtQuestionField({
   question,
   value,
   onChange,
+  slug,
 }: {
   question: EtQuestion
   value: unknown
   onChange: (v: unknown) => void
+  slug?: string
 }) {
   if (question.type === 'display') {
     return <p className="text-sm leading-relaxed text-slate-700">{question.text}</p>
@@ -227,6 +230,22 @@ export function EtQuestionField({
 
       {question.type === 'array_carousel' && (
         <CarouselArray question={question} value={value} onChange={onChange} />
+      )}
+
+      {question.type === 'gps' && <GpsCapture value={value} onChange={onChange} />}
+
+      {question.type === 'photo' && slug && (
+        <PhotoCapture slug={slug} question={question} value={value} onChange={onChange} />
+      )}
+      {question.type === 'photo' && !slug && (
+        <p className="mt-2 text-xs text-slate-500">Photo capture is available in the live survey.</p>
+      )}
+
+      {question.type === 'audio' && slug && (
+        <AudioCapture slug={slug} question={question} value={value} onChange={onChange} />
+      )}
+      {question.type === 'audio' && !slug && (
+        <p className="mt-2 text-xs text-slate-500">Audio recording is available in the live survey.</p>
       )}
     </div>
   )

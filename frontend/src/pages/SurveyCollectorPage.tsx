@@ -129,7 +129,13 @@ export function SurveyCollectorPage() {
               </h2>
               <div className="space-y-6">
                 {visibleQuestions.map((q) => (
-                  <EtQuestionField key={q.id} question={q} value={answers[q.id]} onChange={(v) => setAnswer(q.id, v)} />
+                  <EtQuestionField
+                    key={q.id}
+                    slug={slug}
+                    question={q}
+                    value={answers[q.id]}
+                    onChange={(v) => setAnswer(q.id, v)}
+                  />
                 ))}
               </div>
             </>

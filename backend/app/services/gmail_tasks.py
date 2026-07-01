@@ -19,6 +19,7 @@ from app.models.project_workflow import ProjectTask
 from app.services import gmail_store
 from app.services.gmail_client import (
     GmailNotConnectedError,
+    ensure_credentials,
     fetch_inbox_messages,
     fetch_message_detail,
     get_profile_email,
@@ -109,6 +110,9 @@ def sync_inbox(username: str, *, force: bool = False) -> list[GmailMessageSummar
             return enrich_messages(username, cache.get("messages") or [])
 
     try:
+        from app.services.gmail_mail import process_scheduled_sends
+
+        process_scheduled_sends(username)
         messages = fetch_inbox_messages(username)
         gmail_store.save_inbox_cache(username, messages)
         return enrich_messages(username, messages)
@@ -129,14 +133,21 @@ def get_connection_status(username: str) -> dict[str, Any]:
             "last_sync_at": None,
             "message": "Google OAuth not configured on server.",
         }
-    tokens = gmail_store.get_tokens(username)
-    if not tokens:
+    if not gmail_store.get_tokens(username):
         return {
             "configured": True,
             "connected": False,
             "email": None,
             "last_sync_at": None,
             "message": "Connect your Elastic Tree Gmail account to turn emails into tasks.",
+        }
+    if ensure_credentials(username) is None:
+        return {
+            "configured": True,
+            "connected": False,
+            "email": None,
+            "last_sync_at": None,
+            "message": "Gmail access expired — sign in with Google again or reconnect once.",
         }
     email = get_profile_email(username)
     cache = gmail_store.get_inbox_cache(username)

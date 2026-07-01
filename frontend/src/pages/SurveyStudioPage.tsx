@@ -62,8 +62,9 @@ export function SurveyStudioPage({ embedded = false }: { embedded?: boolean }) {
             <h1 className="text-2xl font-semibold text-slate-900">Survey Studio</h1>
           </div>
           <p className="max-w-2xl text-sm text-slate-600">
-            Program quant surveys inside ET Scout — customisable blocks, question types, and a hosted
-            collector. Analysis, QC, and reports use the same workspace as LimeSurvey studies.
+            Program quant surveys inside ET Scout — customisable blocks, question types, GPS tagging,
+            photo capture, audio recording, and a hosted collector. Analysis, QC, and reports use the same
+            workspace as LimeSurvey studies.
           </p>
         </div>
       </div>

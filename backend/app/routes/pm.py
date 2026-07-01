@@ -51,6 +51,9 @@ from app.models.pm import (
     ProposalOut,
     SurveyInstrumentCreate,
     SurveyInstrumentOut,
+    SurveyLinkAgentRequest,
+    SurveyLinkAgentResponse,
+    SurveyLinkApplyRequest,
     SurveyLinkOut,
     TeamMemberOut,
 )
@@ -67,6 +70,7 @@ from app.services.pm_bootstrap import bootstrap_projects_from_master, bundled_ma
 from app.services.crm_agent import run_crm_agent
 from app.services.finance_agent import run_finance_agent
 from app.services.proposal_agent import run_proposal_writing_agent
+from app.services.survey_link_agent import apply_survey_links, run_survey_link_agent
 from app.services.auth import get_session
 from app.services.team_registry_store import is_global_admin
 from app.db.models import TeamMember
@@ -539,6 +543,25 @@ def pm_proposal_writing_agent(
         body.project_id,
         extra_context=body.context,
     )
+
+
+@router.post("/agents/survey-links", response_model=SurveyLinkAgentResponse)
+def pm_survey_link_agent(
+    body: SurveyLinkAgentRequest,
+    _: str = Depends(require_auth),
+    session: Session = Depends(get_pm_db),
+):
+    return run_survey_link_agent(session, apply=body.apply, extra_context=body.context)
+
+
+@router.post("/agents/survey-links/apply")
+def pm_survey_link_apply(
+    body: SurveyLinkApplyRequest,
+    _: str = Depends(require_auth),
+    session: Session = Depends(get_pm_db),
+):
+    applied, errors = apply_survey_links(session, body.links)
+    return {"applied_count": applied, "errors": errors}
 
 
 # --- Survey programming ---

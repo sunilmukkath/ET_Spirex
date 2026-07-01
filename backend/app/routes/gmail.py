@@ -13,7 +13,11 @@ from app.models.gmail import (
     CreateTasksFromEmailBatchResponse,
     GmailConnectionStatus,
     GmailEmailBreakdown,
+    GmailMessageDetail,
     GmailMessageSummary,
+    GmailScheduledSend,
+    GmailSendEmailRequest,
+    GmailSendEmailResponse,
     GmailTaskSuggestion,
 )
 from app.services.auth import get_session
@@ -36,6 +40,7 @@ from app.services.gmail_tasks import (
     _resolve_message,
     _survey_title_for,
 )
+from app.services.gmail_mail import get_message_detail, list_scheduled, send_gmail_message
 
 router = APIRouter(prefix="/gmail", tags=["gmail"])
 
@@ -67,7 +72,7 @@ def gmail_oauth_url(authorization: str | None = Header(default=None)):
     if not record:
         raise HTTPException(status_code=401, detail="Not signed in")
     try:
-        return {"url": build_oauth_url(session_token=record.token)}
+        return {"url": build_oauth_url(session_token=record.token, username=record.username)}
     except GmailNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -85,7 +90,7 @@ def gmail_oauth_callback(code: str | None = None, state: str | None = None, erro
     if not record:
         raise HTTPException(status_code=401, detail="Session expired — sign in and connect Gmail again")
     try:
-        tokens = exchange_code_for_tokens(code)
+        tokens = exchange_code_for_tokens(code, username=record.username)
         gmail_store.save_tokens(record.username, tokens)
     except Exception:
         return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=error&reason=token_exchange")
@@ -111,6 +116,33 @@ def gmail_inbox(sync: bool = False, username: str = Depends(require_auth)):
         if "did not respond within" in detail:
             raise HTTPException(status_code=504, detail=detail) from exc
         raise HTTPException(status_code=502, detail=f"Gmail sync failed: {detail}") from exc
+
+
+@router.get("/messages/{message_id}", response_model=GmailMessageDetail)
+def gmail_get_message(message_id: str, mark_read: bool = True, username: str = Depends(require_auth)):
+    try:
+        return get_message_detail(username, message_id, mark_read=mark_read)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GmailNotConnectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not load email: {exc}") from exc
+
+
+@router.post("/send", response_model=GmailSendEmailResponse)
+def gmail_send(body: GmailSendEmailRequest, username: str = Depends(require_auth)):
+    try:
+        return send_gmail_message(username, body)
+    except GmailNotConnectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Send failed: {exc}") from exc
+
+
+@router.get("/scheduled", response_model=list[GmailScheduledSend])
+def gmail_scheduled(username: str = Depends(require_auth)):
+    return list_scheduled(username)
 
 
 @router.get("/messages/{message_id}/suggestion", response_model=GmailTaskSuggestion)

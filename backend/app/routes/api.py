@@ -110,6 +110,7 @@ from app.services.project_workflow_store import (
     get_project_workflow,
     list_my_tasks,
     list_unassigned_tasks,
+    list_team_assigned_tasks,
     set_project_workflow,
     workflow_access_summary,
 )
@@ -392,6 +393,15 @@ def unassigned_tasks_route(authorization: str | None = Header(default=None)):
     if not record:
         raise HTTPException(status_code=401, detail="Not signed in")
     rows = list_unassigned_tasks()
+    return {"tasks": _format_task_rows(rows), "count": len(rows)}
+
+
+@router.get("/tasks/assigned")
+def team_assigned_tasks_route(authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    rows = list_team_assigned_tasks(record.username)
     return {"tasks": _format_task_rows(rows), "count": len(rows)}
 
 

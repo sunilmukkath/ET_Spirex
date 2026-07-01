@@ -14,10 +14,11 @@ from app.services.google_auth import (
     build_google_signin_url,
     classify_token_exchange_error,
     decode_login_state,
-    exchange_code_for_email,
+    exchange_code_for_login,
     is_google_auth_configured,
 )
 from app.services.super_admin import resolve_login_identifier
+from app.services import gmail_store
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ def google_auth_callback(
     if not code or not decode_login_state(state or ""):
         raise HTTPException(status_code=400, detail="Invalid Google sign-in callback")
     try:
-        email = exchange_code_for_email(code)
+        email, gmail_tokens = exchange_code_for_login(code)
     except Exception as exc:
         logger.exception("Google sign-in token exchange failed")
         return RedirectResponse(_auth_error_url(classify_token_exchange_error(exc)))
@@ -68,4 +69,6 @@ def google_auth_callback(
     token = create_session(username)
     if not token:
         return RedirectResponse(_auth_error_url("session_failed"))
+    if gmail_tokens:
+        gmail_store.save_tokens(username, gmail_tokens, email=email)
     return RedirectResponse(f"{success_base}?auth=google&token={token}&username={username}")

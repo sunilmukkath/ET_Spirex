@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { api, setAuthToken } from '../api/client'
+import { api, setAuthToken, type GmailConnectionStatus } from '../api/client'
 
 import type { GlobalRole } from '../api/client'
 
@@ -27,10 +27,12 @@ interface AuthState {
 interface AuthContextValue {
   user: AuthState | null
   loading: boolean
+  gmailStatus: GmailConnectionStatus | null
   activeSessions: { username: string; login_at: number; last_seen: number }[]
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refreshSessions: () => Promise<void>
+  refreshGmailStatus: () => Promise<void>
   isAdmin: boolean
   isSuperAdmin: boolean
 }
@@ -79,9 +81,26 @@ function clearOAuthQueryParams() {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthState | null>(() => loadStored())
   const [loading, setLoading] = useState(true)
+  const [gmailStatus, setGmailStatus] = useState<GmailConnectionStatus | null>(null)
   const [activeSessions, setActiveSessions] = useState<
     { username: string; login_at: number; last_seen: number }[]
   >([])
+
+  const refreshGmailStatus = useCallback(async () => {
+    if (!user) {
+      setGmailStatus(null)
+      return
+    }
+    try {
+      const status = await api.getGmailStatus()
+      setGmailStatus(status)
+      if (status.connected) {
+        await api.getGmailInbox(false).catch(() => null)
+      }
+    } catch {
+      setGmailStatus(null)
+    }
+  }, [user])
 
   const refreshSessions = useCallback(async () => {
     if (!user) {
@@ -164,6 +183,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user) refreshSessions()
   }, [user, refreshSessions])
 
+  useEffect(() => {
+    if (user && !loading) void refreshGmailStatus()
+  }, [user, loading, refreshGmailStatus])
+
   const login = useCallback(async (username: string, password: string) => {
     const result = await api.login(username, password)
     setAuthToken(result.token)
@@ -195,14 +218,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       loading,
+      gmailStatus,
       activeSessions,
       login,
       logout,
       refreshSessions,
+      refreshGmailStatus,
       isAdmin: user?.role === 'admin' || user?.is_super_admin === true,
       isSuperAdmin: user?.is_super_admin === true,
     }),
-    [user, loading, activeSessions, login, logout, refreshSessions],
+    [user, loading, gmailStatus, activeSessions, login, logout, refreshSessions, refreshGmailStatus],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

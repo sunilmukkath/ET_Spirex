@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Code2, Link2 } from 'lucide-react'
-import { api, type PmPipelineOverview, type Project } from '../../api/client'
+import { Bot, Code2, Link2, Loader2 } from 'lucide-react'
+import { api, type PmPipelineOverview, type PmSurveyLinkSuggestion, type Project } from '../../api/client'
 
 type OpsTab = 'programming' | 'links'
 
@@ -17,6 +18,12 @@ type Props = {
   onSwitchTab: (tab: OpsTab) => void
 }
 
+function confidenceBadge(conf: PmSurveyLinkSuggestion['confidence']) {
+  if (conf === 'high') return 'bg-emerald-100 text-emerald-800'
+  if (conf === 'medium') return 'bg-amber-100 text-amber-900'
+  return 'bg-slate-100 text-slate-600'
+}
+
 export function QuantitativeSurveyOps({
   tab,
   pipeline,
@@ -31,6 +38,68 @@ export function QuantitativeSurveyOps({
 }: Props) {
   const projects = pipeline?.projects ?? []
   const surveyTitleById = new Map(limeSurveys.map((s) => [s.id, s.title]))
+  const [agentLoading, setAgentLoading] = useState(false)
+  const [agentError, setAgentError] = useState<string | null>(null)
+  const [agentSummary, setAgentSummary] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<PmSurveyLinkSuggestion[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [applying, setApplying] = useState(false)
+
+  async function runLinkAgent(applyHighOnly = false) {
+    setAgentLoading(true)
+    setAgentError(null)
+    try {
+      const result = await api.runSurveyLinkAgent({ apply: applyHighOnly })
+      setAgentSummary(result.summary)
+      setSuggestions(result.suggestions)
+      setSelected(
+        new Set(
+          result.suggestions
+            .filter((s) => s.confidence === 'high')
+            .map((s) => s.project_id),
+        ),
+      )
+      if (applyHighOnly && result.applied_count > 0) {
+        onReload()
+      }
+    } catch (e) {
+      setAgentError(e instanceof Error ? e.message : 'Agent failed')
+    } finally {
+      setAgentLoading(false)
+    }
+  }
+
+  async function applySelected() {
+    const links = suggestions
+      .filter((s) => selected.has(s.project_id))
+      .map((s) => ({ project_id: s.project_id, limesurvey_survey_id: s.limesurvey_survey_id }))
+    if (links.length === 0) return
+    setApplying(true)
+    setAgentError(null)
+    try {
+      const result = await api.applySurveyLinks(links)
+      if (result.errors.length) {
+        setAgentError(result.errors.join(' · '))
+      }
+      setAgentSummary(`Applied ${result.applied_count} link(s).`)
+      setSuggestions((prev) => prev.filter((s) => !selected.has(s.project_id)))
+      setSelected(new Set())
+      onReload()
+    } catch (e) {
+      setAgentError(e instanceof Error ? e.message : 'Apply failed')
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  function toggleSuggestion(projectId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(projectId)) next.delete(projectId)
+      else next.add(projectId)
+      return next
+    })
+  }
 
   if (tab === 'programming') {
     return (
@@ -117,6 +186,83 @@ export function QuantitativeSurveyOps({
         </span>{' '}
         or the Operations pipeline.
       </p>
+
+      <div className="rounded-xl border border-[var(--et-teal)]/25 bg-[var(--et-teal-light)]/20 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--et-navy)]">
+              <Bot size={16} />
+              Survey link agent
+            </h3>
+            <p className="mt-1 text-xs text-slate-600">
+              Matches unlinked PM projects to LimeSurvey / Survey Studio studies by name and client — review before
+              applying.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void runLinkAgent(false)}
+              disabled={agentLoading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--et-teal)]/40 bg-white px-3 py-1.5 text-xs font-medium text-[var(--et-teal-dark)] disabled:opacity-50"
+            >
+              {agentLoading ? <Loader2 size={14} className="animate-spin" /> : <Bot size={14} />}
+              Suggest links
+            </button>
+            <button
+              type="button"
+              onClick={() => void runLinkAgent(true)}
+              disabled={agentLoading}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-teal)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              Apply high-confidence
+            </button>
+          </div>
+        </div>
+
+        {agentSummary && <p className="mt-3 text-xs text-slate-700">{agentSummary}</p>}
+        {agentError && <p className="mt-2 text-xs text-rose-700">{agentError}</p>}
+
+        {suggestions.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <ul className="max-h-64 space-y-2 overflow-y-auto et-scroll">
+              {suggestions.map((s) => (
+                <li
+                  key={s.project_id}
+                  className="flex flex-wrap items-start gap-3 rounded-lg border border-white/80 bg-white/90 px-3 py-2 text-xs"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(s.project_id)}
+                    onChange={() => toggleSuggestion(s.project_id)}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-slate-900">{s.project_name}</p>
+                    <p className="text-slate-600">
+                      → #{s.limesurvey_survey_id} {s.survey_title}
+                    </p>
+                    <p className="text-slate-500">{s.reason}</p>
+                  </div>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${confidenceBadge(s.confidence)}`}>
+                    {s.confidence}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => void applySelected()}
+              disabled={applying || selected.size === 0}
+              className="rounded-lg bg-[var(--et-navy)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {applying ? <Loader2 size={14} className="animate-spin inline" /> : null}
+              Apply {selected.size} selected
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full text-left text-sm">
           <thead className="border-b border-slate-100 bg-slate-50 text-xs uppercase text-slate-500">

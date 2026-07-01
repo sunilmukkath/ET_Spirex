@@ -1,18 +1,15 @@
-import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   Bot,
   Briefcase,
   DollarSign,
-  Download,
-  FileUp,
   FileText,
   Loader2,
   Megaphone,
   Plus,
   RefreshCw,
   Save,
-  Settings2,
   Users,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
@@ -22,9 +19,6 @@ import {
   type PmAgentDraft,
   type PmClient,
   type PmFinanceSummary,
-  type PmImportConfig,
-  type PmImportPreview,
-  type PmImportResult,
   type PmPipelineOverview,
   type ProjectRequirements,
 } from '../api/client'
@@ -142,7 +136,7 @@ function DraftAgentPanel({ draft, loading }: { draft: PmAgentDraft | null; loadi
 }
 
 export function OperationsHubPage() {
-  const { user, isAdmin } = useAuth()
+  const { user } = useAuth()
   const { prefs } = useUserPreferences(user?.username)
   const [searchParams] = useSearchParams()
   const [tab, setTab] = useState<Tab>(() => parseTab(searchParams.get('tab')))
@@ -168,14 +162,6 @@ export function OperationsHubPage() {
 
   const [newClientName, setNewClientName] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
-  const [importing, setImporting] = useState(false)
-  const [importResult, setImportResult] = useState<PmImportResult | null>(null)
-  const [importError, setImportError] = useState<string | null>(null)
-  const [importConfig, setImportConfig] = useState<PmImportConfig | null>(null)
-  const [configuring, setConfiguring] = useState(false)
-  const [importPreview, setImportPreview] = useState<PmImportPreview | null>(null)
-  const importInputRef = useRef<HTMLInputElement>(null)
-  const masterInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -187,14 +173,12 @@ export function OperationsHubPage() {
         setPipeline(null)
         return
       }
-      const [pipe, clientRows, config] = await Promise.all([
+      const [pipe, clientRows] = await Promise.all([
         api.getPmPipeline(),
         api.listPmClients(),
-        api.getPmImportConfig().catch(() => null),
       ])
       setPipeline(pipe)
       setClients(clientRows)
-      setImportConfig(config)
       const first = pipe.projects[0]?.project_id ?? ''
       setSelectedProjectId((cur) => cur || first)
       setProposalProjectId((cur) => cur || first)
@@ -251,53 +235,6 @@ export function OperationsHubPage() {
     })
     setNewProjectName('')
     await load()
-  }
-
-  async function handleImportProjects(file: File) {
-    setImporting(true)
-    setImportError(null)
-    setImportResult(null)
-    setImportPreview(null)
-    try {
-      const preview = await api.previewPmImport(file)
-      setImportPreview(preview)
-      const result = await api.importPmProjects(file)
-      setImportResult(result)
-      await load()
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : 'Import failed')
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  async function handleConfigureMaster(file: File) {
-    setConfiguring(true)
-    setImportError(null)
-    try {
-      const config = await api.configurePmImportMaster(file)
-      setImportConfig(config)
-      setImportPreview(null)
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : 'Could not configure import template')
-    } finally {
-      setConfiguring(false)
-    }
-  }
-
-  async function handleBootstrapMaster() {
-    setImporting(true)
-    setImportError(null)
-    setImportResult(null)
-    try {
-      const result = await api.bootstrapPmMasterImport()
-      setImportResult(result)
-      await load()
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : 'Master import failed')
-    } finally {
-      setImporting(false)
-    }
   }
 
   async function handleStageChange(projectId: string, stage: string) {
@@ -448,127 +385,6 @@ export function OperationsHubPage() {
             ))}
           </div>
 
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 shadow-sm">
-            <h3 className="text-sm font-semibold text-[var(--et-navy)]">Import projects from Excel</h3>
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              Your Elastic Tree project sheet is bundled with ET Scout (188 rows). It loads automatically when the
-              pipeline is empty, or use the button below to import now.
-            </p>
-            {importConfig?.configured && (
-              <p className="mt-2 text-xs text-emerald-800">
-                Column mapping ready — Project No, FY, Month, client, value INR, and more (
-                {importConfig.column_count} columns).
-              </p>
-            )}
-            {isAdmin && (
-              <div className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50/80 p-3">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
-                  <Settings2 size={14} />
-                  One-time master sheet setup
-                </div>
-                <p className="mt-1 text-xs text-slate-500">
-                  Upload your real Elastic Tree project sheet (.xls) once — ET Scout learns your column headers
-                  and reuses that mapping for every import.
-                </p>
-                <input
-                  ref={masterInputRef}
-                  type="file"
-                  accept=".xls,.xlsx,.xlsm,.csv"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) void handleConfigureMaster(file)
-                    e.target.value = ''
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={configuring}
-                  onClick={() => masterInputRef.current?.click()}
-                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {configuring ? <Loader2 size={14} className="animate-spin" /> : <FileUp size={14} />}
-                  Upload master sheet (.xls)
-                </button>
-              </div>
-            )}
-            <div className="mt-3 flex flex-wrap gap-2">
-              {isAdmin && (
-                <button
-                  type="button"
-                  disabled={importing}
-                  onClick={() => void handleBootstrapMaster()}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-navy)] px-3 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-                >
-                  {importing ? <Loader2 size={14} className="animate-spin" /> : <FileUp size={14} />}
-                  Import bundled project sheet
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => void api.downloadPmProjectImportTemplate().catch(() => setImportError('Template download failed'))}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              >
-                <Download size={14} />
-                Download template
-              </button>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".xlsx,.xlsm,.xls,.csv"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) void handleImportProjects(file)
-                  e.target.value = ''
-                }}
-              />
-              <button
-                type="button"
-                disabled={importing}
-                onClick={() => importInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 rounded-lg et-btn-accent px-3 py-2 text-xs disabled:opacity-50"
-              >
-                {importing ? <Loader2 size={14} className="animate-spin" /> : <FileUp size={14} />}
-                Upload project sheet
-              </button>
-            </div>
-            {importPreview && (
-              <p className="mt-2 text-xs text-slate-600">
-                Preview: {importPreview.row_count} rows, {importPreview.headers.length} columns detected.
-                {Object.values(importPreview.suggested_column_map).includes('project_value_inr') &&
-                  ' Finance value column detected.'}
-              </p>
-            )}
-            {importError && <p className="mt-2 text-xs text-rose-600">{importError}</p>}
-            {importResult && (
-              <div className="mt-3 rounded-lg bg-[var(--et-gray-50)] px-3 py-2 text-xs text-slate-700">
-                <p className="font-medium text-[var(--et-navy)]">
-                  Import complete — {importResult.created} created, {importResult.skipped} skipped,{' '}
-                  {importResult.errors} errors
-                </p>
-                <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto et-scroll">
-                  {importResult.rows.map((row) => (
-                    <li key={`${row.row_number}-${row.project_name}`}>
-                      <span
-                        className={
-                          row.status === 'created'
-                            ? 'text-emerald-700'
-                            : row.status === 'skipped'
-                              ? 'text-amber-700'
-                              : 'text-rose-700'
-                        }
-                      >
-                        Row {row.row_number}: {row.project_name}
-                      </span>
-                      {row.message ? ` — ${row.message}` : ''}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-
           <form onSubmit={(e) => void handleCreateProject(e)} className="flex flex-wrap gap-2">
             <input
               value={newProjectName}
@@ -678,13 +494,13 @@ export function OperationsHubPage() {
                 {pipeline!.unlinked_survey_ids.length} LimeSurvey stud
                 {pipeline!.unlinked_survey_ids.length === 1 ? 'y' : 'ies'} not assigned to a PM project
               </p>
-              <p className="mt-1 text-xs">
-                Open{' '}
-                <Link to="/quantitative?tab=links" className="font-semibold underline">
-                  Quantitative → Survey links
-                </Link>{' '}
-                to assign them.
-              </p>
+          <p className="mt-1 text-xs">
+            Open{' '}
+            <Link to="/quantitative?tab=links" className="font-semibold underline">
+              Quantitative → Survey links
+            </Link>{' '}
+            and run the <strong>Survey link agent</strong> to auto-match studies to projects.
+          </p>
             </div>
           )}
 

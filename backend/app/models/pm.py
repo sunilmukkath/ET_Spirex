@@ -380,7 +380,7 @@ class PipelineOverview(BaseModel):
 class PmImportRowResult(BaseModel):
     row_number: int
     project_name: str
-    status: Literal["created", "skipped", "error"]
+    status: Literal["created", "updated", "skipped", "error"]
     project_id: UUID | None = None
     limesurvey_survey_id: int | None = None
     message: str | None = None
@@ -389,6 +389,7 @@ class PmImportRowResult(BaseModel):
 class PmImportResult(BaseModel):
     total_rows: int
     created: int
+    updated: int = 0
     skipped: int
     errors: int
     rows: list[PmImportRowResult] = Field(default_factory=list)
@@ -424,6 +425,34 @@ class AgentBriefResponse(BaseModel):
     summary: str
     actions: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
+
+
+class SurveyLinkSuggestion(BaseModel):
+    project_id: UUID
+    project_name: str
+    client_name: str | None = None
+    limesurvey_survey_id: int
+    survey_title: str
+    confidence: Literal["high", "medium", "low"]
+    reason: str
+
+
+class SurveyLinkAgentRequest(BaseModel):
+    apply: bool = False
+    context: str | None = None
+
+
+class SurveyLinkApplyRequest(BaseModel):
+    links: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SurveyLinkAgentResponse(BaseModel):
+    agent: str
+    configured: bool
+    summary: str
+    suggestions: list[SurveyLinkSuggestion] = Field(default_factory=list)
+    applied_count: int = 0
+    applied: list[SurveyLinkSuggestion] = Field(default_factory=list)
 
 
 class AgentDraftSection(BaseModel):

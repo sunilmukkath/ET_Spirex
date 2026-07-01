@@ -19,7 +19,7 @@ from app.services import gmail_store
 logger = logging.getLogger(__name__)
 
 GMAIL_SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
 ]
 _GMAIL_TIMEOUT = 20.0
@@ -72,8 +72,10 @@ def _redirect_uri() -> str:
     return uri
 
 
-def build_oauth_url(*, session_token: str) -> str:
+def build_oauth_url(*, session_token: str, username: str | None = None) -> str:
     state = encode_oauth_state(session_token)
+    existing = gmail_store.get_tokens(username) if username else None
+    has_refresh = bool(existing and existing.get("refresh_token"))
     params: dict[str, str] = {
         "client_id": settings.google_client_id.strip(),
         "redirect_uri": _redirect_uri(),
@@ -81,16 +83,19 @@ def build_oauth_url(*, session_token: str) -> str:
         "scope": " ".join(GMAIL_SCOPES),
         "access_type": "offline",
         "include_granted_scopes": "true",
-        "prompt": "consent",
         "state": state,
     }
+    if has_refresh:
+        params["prompt"] = "select_account"
+    else:
+        params["prompt"] = "consent"
     domain = settings.workspace_domain.strip()
     if domain:
         params["hd"] = domain
     return f"https://accounts.google.com/o/oauth2/auth?{urllib.parse.urlencode(params)}"
 
 
-def exchange_code_for_tokens(code: str) -> dict[str, Any]:
+def exchange_code_for_tokens(code: str, *, username: str | None = None) -> dict[str, Any]:
     payload = {
         "code": code,
         "client_id": settings.google_client_id.strip(),
@@ -104,7 +109,7 @@ def exchange_code_for_tokens(code: str) -> dict[str, Any]:
             logger.error("Gmail token exchange failed: %s", response.text)
             raise RuntimeError(response.text)
         token_data = response.json()
-    return {
+    incoming = {
         "token": token_data.get("access_token"),
         "refresh_token": token_data.get("refresh_token"),
         "token_uri": "https://oauth2.googleapis.com/token",
@@ -112,14 +117,28 @@ def exchange_code_for_tokens(code: str) -> dict[str, Any]:
         "client_secret": settings.google_client_secret.strip(),
         "scopes": list(token_data.get("scope", "").split()) or GMAIL_SCOPES,
     }
+    existing = gmail_store.get_tokens(username) if username else None
+    return gmail_store.merge_token_data(existing, incoming)
 
 
-def _credentials_from_store(username: str):
+def _credentials_payload(creds) -> dict[str, Any]:
+    return {
+        "token": creds.token,
+        "refresh_token": creds.refresh_token,
+        "token_uri": creds.token_uri,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "scopes": list(creds.scopes or GMAIL_SCOPES),
+    }
+
+
+def ensure_credentials(username: str):
+    """Load Gmail credentials, refresh if expired, and persist updates."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
     raw = gmail_store.get_tokens(username)
-    if not raw:
+    if not raw or not (raw.get("token") or raw.get("refresh_token")):
         return None
     creds = Credentials(
         token=raw.get("token"),
@@ -129,32 +148,29 @@ def _credentials_from_store(username: str):
         client_secret=raw.get("client_secret") or settings.google_client_secret,
         scopes=raw.get("scopes") or GMAIL_SCOPES,
     )
+    if creds.valid:
+        return creds
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        gmail_store.save_tokens(
-            username,
-            {
-                "token": creds.token,
-                "refresh_token": creds.refresh_token,
-                "token_uri": creds.token_uri,
-                "client_id": creds.client_id,
-                "client_secret": creds.client_secret,
-                "scopes": list(creds.scopes or GMAIL_SCOPES),
-            },
-        )
-    return creds
+        try:
+            creds.refresh(Request())
+            gmail_store.save_tokens(username, _credentials_payload(creds))
+            return creds
+        except Exception:
+            logger.exception("Gmail token refresh failed for %s", username)
+            return None
+    return None
+
+
+def _credentials_from_store(username: str):
+    return ensure_credentials(username)
 
 
 def get_gmail_service(username: str):
-    from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
 
-    creds = _credentials_from_store(username)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            raise GmailNotConnectedError("Gmail is not connected for this user.")
+    creds = ensure_credentials(username)
+    if not creds:
+        raise GmailNotConnectedError("Gmail is not connected for this user.")
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
 
@@ -198,6 +214,7 @@ def _normalize_message(msg: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(msg.get("id") or ""),
         "thread_id": str(msg.get("threadId") or ""),
+        "message_id_header": headers.get("message-id", ""),
         "subject": headers.get("subject", "(no subject)"),
         "from_name": from_name or from_email,
         "from_email": from_email.lower(),
@@ -300,6 +317,9 @@ def send_email_message(
     subject: str,
     body_text: str,
     body_html: str | None = None,
+    thread_id: str | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
 ) -> dict[str, Any]:
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
@@ -309,22 +329,44 @@ def send_email_message(
         message = MIMEMultipart("alternative")
         message["to"] = to
         message["subject"] = subject
+        if in_reply_to:
+            message["In-Reply-To"] = in_reply_to
+        if references:
+            message["References"] = references
         message.attach(MIMEText(body_text, "plain", "utf-8"))
         if body_html:
             message.attach(MIMEText(body_html, "html", "utf-8"))
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode().rstrip("=")
         service = get_gmail_service(username)
-        return (
-            service.users()
-            .messages()
-            .send(userId="me", body={"raw": raw})
-            .execute()
-        )
+        body: dict[str, Any] = {"raw": raw}
+        if thread_id:
+            body["threadId"] = thread_id
+        return service.users().messages().send(userId="me", body=body).execute()
 
     try:
         return _run_with_timeout(_send)
     except HttpError as exc:
         raise RuntimeError(f"Gmail send failed: {exc}") from exc
+
+
+def mark_message_read(username: str, message_id: str, *, read: bool = True) -> None:
+    from googleapiclient.errors import HttpError
+
+    def _mark() -> None:
+        service = get_gmail_service(username)
+        if read:
+            service.users().messages().modify(
+                userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]}
+            ).execute()
+        else:
+            service.users().messages().modify(
+                userId="me", id=message_id, body={"addLabelIds": ["UNREAD"]}
+            ).execute()
+
+    try:
+        _run_with_timeout(_mark, timeout=10.0)
+    except HttpError as exc:
+        raise RuntimeError(f"Could not update read state: {exc}") from exc
 
 
 def encode_oauth_state(token: str) -> str:

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from pydantic import BaseModel, Field
 
@@ -27,6 +28,8 @@ from app.services.et_survey_store import (
     submit_response,
     update_et_survey,
 )
+from app.services.et_survey_media import media_file_path, save_collector_media
+
 from app.services.questionnaire_agent import run_questionnaire_agent
 
 router = APIRouter(tags=["et-surveys"])
@@ -158,3 +161,35 @@ def collector_submit(slug: str, body: EtResponseSubmit):
     if survey:
         invalidate_et_response_cache(survey.workspace_id)
     return result
+
+
+def _active_survey_by_slug(slug: str):
+    _require_studio()
+    survey = get_et_survey_by_slug(slug)
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    if survey.status != "active":
+        raise HTTPException(status_code=403, detail="This survey is not accepting responses")
+    return survey
+
+
+@collector_router.post("/collector/{slug}/upload")
+def collector_upload_media(
+    slug: str,
+    file: UploadFile = File(...),
+    kind: str = Form(...),
+    question_id: str = Form(""),
+):
+    survey = _active_survey_by_slug(slug)
+    media_id = save_collector_media(survey.workspace_id, file, kind=kind)
+    url = f"/api/collector/{slug}/media/{media_id}"
+    return {"media_id": media_id, "url": url, "question_id": question_id}
+
+
+@collector_router.get("/collector/{slug}/media/{media_id}")
+def collector_serve_media(slug: str, media_id: str):
+    survey = _active_survey_by_slug(slug)
+    path = media_file_path(survey.workspace_id, media_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Media not found")
+    return FileResponse(path)

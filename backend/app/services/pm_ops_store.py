@@ -19,6 +19,7 @@ from app.db.models import (
     Proposal,
     SurveyInstrument,
 )
+from app.services.pm_project_sort import sort_projects
 from app.models.pm import (
     BudgetLineCreate,
     BudgetLineOut,
@@ -189,9 +190,11 @@ def create_invoice(session: Session, body: InvoiceCreate) -> InvoiceOut | None:
 
 
 def list_survey_links(session: Session) -> list[SurveyLinkOut]:
-    rows = session.scalars(
-        select(Project).options(joinedload(Project.client)).order_by(Project.updated_at.desc())
-    ).all()
+    rows = sort_projects(
+        session.scalars(
+            select(Project).options(joinedload(Project.client))
+        ).all()
+    )
     base = settings.limesurvey_url.rstrip("/")
     out: list[SurveyLinkOut] = []
     for row in rows:
@@ -321,9 +324,11 @@ STAGE_ORDER = [
 
 
 def pipeline_overview(session: Session, linked_survey_ids: list[int] | None = None) -> PipelineOverview:
-    rows = session.scalars(
-        select(Project).options(joinedload(Project.client)).order_by(Project.updated_at.desc())
-    ).all()
+    rows = sort_projects(
+        session.scalars(
+            select(Project).options(joinedload(Project.client))
+        ).all()
+    )
     proposal_status: dict[UUID, str] = {}
     for prop in session.scalars(select(Proposal)).all():
         cur = proposal_status.get(prop.project_id)

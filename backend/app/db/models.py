@@ -620,3 +620,13 @@ class AcctJournalLine(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(String(500))
 
     entry: Mapped[AcctJournalEntry] = relationship(back_populates="lines")
+
+
+class GmailOAuthToken(Base, TimestampMixin):
+    """Persisted Gmail OAuth tokens per ET Scout user (survives redeploys)."""
+
+    __tablename__ = "gmail_oauth_tokens"
+
+    username: Mapped[str] = mapped_column(String(120), primary_key=True)
+    token_data: Mapped[dict[str, Any]] = mapped_column(_json_type(), nullable=False, default=dict)
+    email: Mapped[str | None] = mapped_column(String(255))

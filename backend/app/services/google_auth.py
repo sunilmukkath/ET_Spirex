@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
-from app.services.gmail_client import GmailNotConfiguredError, is_gmail_configured
+from app.services.gmail_client import GMAIL_SCOPES, GmailNotConfiguredError, is_gmail_configured
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ GOOGLE_AUTH_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
+    *GMAIL_SCOPES,
 ]
 _AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -38,13 +39,14 @@ def _auth_redirect_uri() -> str:
 
 
 def build_google_signin_url() -> str:
-    """Build Google sign-in URL (confidential web client — no PKCE)."""
+    """Build Google sign-in URL (confidential web client — includes Gmail for persistent inbox)."""
     params: dict[str, str] = {
         "client_id": settings.google_client_id.strip(),
         "redirect_uri": _auth_redirect_uri(),
         "response_type": "code",
         "scope": " ".join(GOOGLE_AUTH_SCOPES),
-        "access_type": "online",
+        "access_type": "offline",
+        "include_granted_scopes": "true",
         "prompt": "select_account",
         "state": encode_login_state(),
     }
@@ -54,8 +56,19 @@ def build_google_signin_url() -> str:
     return f"{_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
 
-def exchange_code_for_email(code: str) -> str | None:
-    """Exchange Google auth code for the signed-in user's email."""
+def _token_payload_from_response(token_data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "token": token_data.get("access_token"),
+        "refresh_token": token_data.get("refresh_token"),
+        "token_uri": _TOKEN_URL,
+        "client_id": settings.google_client_id.strip(),
+        "client_secret": settings.google_client_secret.strip(),
+        "scopes": list(str(token_data.get("scope") or "").split()) or GOOGLE_AUTH_SCOPES,
+    }
+
+
+def exchange_code_for_login(code: str) -> tuple[str | None, dict[str, Any] | None]:
+    """Exchange Google auth code for email and Gmail OAuth tokens."""
     payload = {
         "code": code,
         "client_id": settings.google_client_id.strip(),
@@ -81,7 +94,14 @@ def exchange_code_for_email(code: str) -> str | None:
             raise RuntimeError(profile_response.text)
         profile = profile_response.json()
     email = str(profile.get("email") or "").strip().lower()
-    return email or None
+    gmail_tokens = _token_payload_from_response(token_data)
+    return email or None, gmail_tokens
+
+
+def exchange_code_for_email(code: str) -> str | None:
+    """Backward-compatible helper — email only."""
+    email, _tokens = exchange_code_for_login(code)
+    return email
 
 
 def encode_login_state() -> str:

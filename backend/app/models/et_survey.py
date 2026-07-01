@@ -21,6 +21,9 @@ EtQuestionType = Literal[
     "array_carousel",
     "ranking",
     "yes_no",
+    "gps",
+    "photo",
+    "audio",
 ]
 
 EtSurveyStatus = Literal["draft", "active", "closed"]
@@ -69,6 +72,8 @@ class EtQuestion(BaseModel):
     randomize_options: bool = False
     randomize_code: str = ""
     show_if: EtShowIfRule | None = None
+    max_recording_seconds: int = 120
+    camera_only: bool = False
 
 
 class EtBlock(BaseModel):
