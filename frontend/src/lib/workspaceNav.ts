@@ -294,9 +294,36 @@ export function navItemToSearchParams(item: WorkspaceNavItem): { mode: string; v
 export function buildWorkspaceHref(surveyId: number, item: WorkspaceNavItem): string {
   if (item.appPath) return item.appPath
   const { mode, view } = navItemToSearchParams(item)
+  return buildSurveyWorkspaceHref(surveyId, mode, view)
+}
+
+/** Build `/projects/:id` URL for workspace modes (used from Operations study overview). */
+export function buildSurveyWorkspaceHref(surveyId: number, mode: string, view?: string): string {
   const params = new URLSearchParams()
   params.set('mode', mode)
-  if (view) params.set('view', view)
+  if (mode === 'fields' && (view === 'fielding' || view === 'team' || view === 'quality' || view === 'monitor' || view === 'quotas')) {
+    params.set('view', view === 'fielding' || view === 'monitor' || view === 'quotas' ? 'fielding' : view)
+  } else if (mode === 'quality') {
+    params.set('mode', 'fields')
+    params.set('view', 'quality')
+  } else if (mode === 'variables') {
+    if (view === 'custom' || view === 'weighting') {
+      params.set('view', view)
+    } else if (view === 'questions' || view === 'profile') {
+      params.set('mode', 'explore')
+    } else {
+      params.set('view', 'custom')
+    }
+  } else if (view === 'compare' || view === 'crosstabs') {
+    params.set('mode', 'explore')
+    params.set('view', 'crosstabs')
+  } else if (view === 'profile') {
+    params.set('mode', 'explore')
+  } else if (mode !== 'explore' && mode !== 'fields') {
+    params.delete('view')
+  } else if (view) {
+    params.set('view', view)
+  }
   return `/projects/${surveyId}?${params.toString()}`
 }
 

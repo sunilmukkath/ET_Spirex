@@ -1,8 +1,9 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   Bot,
   Briefcase,
+  ChevronRight,
   DollarSign,
   FileText,
   Link2,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   Save,
   Users,
+  X,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import {
@@ -24,8 +26,10 @@ import {
   type PmSurveyLinkSuggestion,
   type ProjectRequirements,
 } from '../api/client'
+import { SurveyHomePanel } from '../components/analysis/SurveyHomePanel'
 import { ProjectRequirementsEditor, emptyProjectRequirements } from '../components/ProjectRequirementsEditor'
 import { useUserPreferences } from '../hooks/useUserPreferences'
+import { buildSurveyWorkspaceHref } from '../lib/workspaceNav'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
 type Tab = 'pipeline' | 'clients' | 'finance'
@@ -140,7 +144,7 @@ function DraftAgentPanel({ draft, loading }: { draft: PmAgentDraft | null; loadi
 export function OperationsHubPage() {
   const { user } = useAuth()
   const { prefs } = useUserPreferences(user?.username)
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [tab, setTab] = useState<Tab>(() => parseTab(searchParams.get('tab')))
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
@@ -179,6 +183,23 @@ export function OperationsHubPage() {
   const [fieldworkTarget, setFieldworkTarget] = useState('')
   const [fieldworkSaving, setFieldworkSaving] = useState(false)
 
+  const overviewProjectId = searchParams.get('project') ?? ''
+
+  const selectOverviewProject = useCallback(
+    (projectId: string) => {
+      setSearchParams(
+        (prev) => {
+          prev.set('tab', 'pipeline')
+          if (projectId) prev.set('project', projectId)
+          else prev.delete('project')
+          return prev
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -213,6 +234,18 @@ export function OperationsHubPage() {
     const next = parseTab(searchParams.get('tab'))
     setTab(next)
   }, [searchParams])
+
+  const projects = pipeline?.projects ?? []
+  const overviewProject = useMemo(
+    () => projects.find((p) => p.project_id === overviewProjectId) ?? null,
+    [projects, overviewProjectId],
+  )
+
+  const surveyHrefBuilder = useMemo(() => {
+    const surveyId = overviewProject?.limesurvey_survey_id
+    if (!surveyId) return undefined
+    return (mode: string, view?: string) => buildSurveyWorkspaceHref(surveyId, mode, view)
+  }, [overviewProject?.limesurvey_survey_id])
 
   useEffect(() => {
     if (!searchParams.get('tab') && prefs.operations_default_tab) {
@@ -429,8 +462,6 @@ export function OperationsHubPage() {
   }
   if (error) return <div className="et-page py-10"><ErrorState message={error} /></div>
 
-  const projects = pipeline?.projects ?? []
-
   return (
     <div className="et-page et-page-wide space-y-6 py-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -517,11 +548,30 @@ export function OperationsHubPage() {
                 </tr>
               </thead>
               <tbody>
-                {projects.map((p) => (
-                  <tr key={p.project_id} className="border-b border-slate-50">
+                {projects.map((p) => {
+                  const isSelected = p.project_id === overviewProjectId
+                  return (
+                  <tr
+                    key={p.project_id}
+                    className={`border-b border-slate-50 ${isSelected ? 'bg-[var(--et-teal-light)]/25' : ''}`}
+                  >
                     <td className="px-4 py-3">
-                      <p className="font-medium text-slate-900">{p.project_name}</p>
-                      {p.project_code && <p className="text-xs text-slate-500">{p.project_code}</p>}
+                      <button
+                        type="button"
+                        onClick={() => selectOverviewProject(isSelected ? '' : p.project_id)}
+                        className="group flex w-full items-start gap-2 text-left"
+                      >
+                        <ChevronRight
+                          size={16}
+                          className={`mt-0.5 shrink-0 text-slate-400 transition ${isSelected ? 'rotate-90 text-[var(--et-teal-dark)]' : 'group-hover:text-slate-600'}`}
+                        />
+                        <span>
+                          <p className="font-medium text-slate-900 group-hover:text-[var(--et-teal-dark)]">
+                            {p.project_name}
+                          </p>
+                          {p.project_code && <p className="text-xs text-slate-500">{p.project_code}</p>}
+                        </span>
+                      </button>
                     </td>
                     <td className="px-4 py-3 text-slate-600">{p.client_name ?? '—'}</td>
                     <td className="px-4 py-3 text-xs text-slate-600">
@@ -584,6 +634,13 @@ export function OperationsHubPage() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
+                          onClick={() => selectOverviewProject(p.project_id)}
+                          className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+                        >
+                          Study overview
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => void openRequirements(p.project_id, p.project_name)}
                           className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
                         >
@@ -606,7 +663,8 @@ export function OperationsHubPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
             {projects.length === 0 && (
@@ -614,7 +672,66 @@ export function OperationsHubPage() {
             )}
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
+          {overviewProject && (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Study overview</p>
+                  <p className="text-sm font-semibold text-slate-900">{overviewProject.project_name}</p>
+                  <p className="text-xs text-slate-500">
+                    {overviewProject.client_name ?? 'No client'}
+                    {' · '}
+                    {overviewProject.stage}
+                    {overviewProject.limesurvey_survey_id
+                      ? ` · Survey #${overviewProject.limesurvey_survey_id}`
+                      : ' · No survey linked'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {overviewProject.limesurvey_survey_id && (
+                    <Link
+                      to={`/projects/${overviewProject.limesurvey_survey_id}`}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Open workspace
+                    </Link>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => selectOverviewProject('')}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    <X size={14} />
+                    Close
+                  </button>
+                </div>
+              </div>
+              {overviewProject.limesurvey_survey_id ? (
+                <SurveyHomePanel
+                  surveyId={overviewProject.limesurvey_survey_id}
+                  onNavigate={() => {}}
+                  buildHref={surveyHrefBuilder}
+                  projectLabel={overviewProject.project_name}
+                />
+              ) : (
+                <div className="space-y-3 p-6 text-sm text-slate-600">
+                  <p>Link a LimeSurvey study to see sample health, quotas, and analysis shortcuts.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLinkQuery(overviewProject.project_name)
+                      document.getElementById('survey-link-agent')?.scrollIntoView({ behavior: 'smooth' })
+                    }}
+                    className="font-medium text-[var(--et-teal-dark)] hover:underline"
+                  >
+                    Use survey link agent below
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div id="survey-link-agent" className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
