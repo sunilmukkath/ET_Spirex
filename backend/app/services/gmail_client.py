@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from email.utils import parseaddr
 from typing import Any, Callable, TypeVar
 
+import httpx
+
 from app.config import settings
 from app.services import gmail_store
+
+logger = logging.getLogger(__name__)
 
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -89,19 +94,27 @@ def build_oauth_url(*, session_token: str) -> str:
 
 
 def exchange_code_for_tokens(code: str, *, code_verifier: str) -> dict[str, Any]:
-    from google_auth_oauthlib.flow import Flow
-
-    flow = Flow.from_client_config(_client_config(), scopes=GMAIL_SCOPES, redirect_uri=_redirect_uri())
-    flow.oauth2session.code_verifier = code_verifier
-    flow.fetch_token(code=code)
-    creds = flow.credentials
+    payload = {
+        "code": code,
+        "client_id": settings.google_client_id.strip(),
+        "client_secret": settings.google_client_secret.strip(),
+        "redirect_uri": _redirect_uri(),
+        "grant_type": "authorization_code",
+        "code_verifier": code_verifier,
+    }
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post("https://oauth2.googleapis.com/token", data=payload)
+        if response.status_code >= 400:
+            logger.error("Gmail token exchange failed: %s", response.text)
+            raise RuntimeError(response.text)
+        token_data = response.json()
     return {
-        "token": creds.token,
-        "refresh_token": creds.refresh_token,
-        "token_uri": creds.token_uri,
-        "client_id": creds.client_id,
-        "client_secret": creds.client_secret,
-        "scopes": list(creds.scopes or GMAIL_SCOPES),
+        "token": token_data.get("access_token"),
+        "refresh_token": token_data.get("refresh_token"),
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": settings.google_client_id.strip(),
+        "client_secret": settings.google_client_secret.strip(),
+        "scopes": list(token_data.get("scope", "").split()) or GMAIL_SCOPES,
     }
 
 

@@ -14,6 +14,10 @@ from app.services.google_auth import (
     exchange_code_for_email,
     is_google_auth_configured,
 )
+
+import logging
+
+logger = logging.getLogger(__name__)
 from app.services.super_admin import resolve_login_identifier
 
 router = APIRouter(prefix="/auth/google", tags=["auth"])
@@ -52,6 +56,7 @@ def google_auth_callback(
     try:
         email = exchange_code_for_email(code, code_verifier=code_verifier)
     except Exception:
+        logger.exception("Google sign-in token exchange failed")
         return RedirectResponse(_auth_error_url("token_exchange"))
     username = resolve_login_identifier(email or "")
     if not username:
