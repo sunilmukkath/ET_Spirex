@@ -32,6 +32,11 @@ def google_auth_url():
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+def _auth_error_url(reason: str) -> str:
+    base = settings.resolved_app_public_url.rstrip("/")
+    return f"{base}/?auth=error&reason={reason}"
+
+
 @router.get("/callback", include_in_schema=False)
 def google_auth_callback(
     code: str | None = None,
@@ -40,17 +45,18 @@ def google_auth_callback(
 ):
     success_base = settings.resolved_google_auth_success_url
     if error:
-        return RedirectResponse(f"{success_base}?auth=error&reason={error}")
-    if not code or not state or not decode_login_state(state):
+        return RedirectResponse(_auth_error_url(error))
+    code_verifier = decode_login_state(state or "")
+    if not code or not code_verifier:
         raise HTTPException(status_code=400, detail="Invalid Google sign-in callback")
     try:
-        email = exchange_code_for_email(code)
+        email = exchange_code_for_email(code, code_verifier=code_verifier)
     except Exception:
-        return RedirectResponse(f"{success_base}?auth=error&reason=token_exchange")
+        return RedirectResponse(_auth_error_url("token_exchange"))
     username = resolve_login_identifier(email or "")
     if not username:
-        return RedirectResponse(f"{success_base}?auth=error&reason=not_authorized")
+        return RedirectResponse(_auth_error_url("not_authorized"))
     token = create_session(username)
     if not token:
-        return RedirectResponse(f"{success_base}?auth=error&reason=session_failed")
+        return RedirectResponse(_auth_error_url("session_failed"))
     return RedirectResponse(f"{success_base}?auth=google&token={token}&username={username}")

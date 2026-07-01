@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import secrets
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from email.utils import parseaddr
 from typing import Any, Callable, TypeVar
@@ -66,11 +67,14 @@ def _redirect_uri() -> str:
     return uri
 
 
-def build_oauth_url(*, state: str) -> str:
+def build_oauth_url(*, session_token: str) -> str:
     from google_auth_oauthlib.flow import Flow
 
+    verifier = secrets.token_urlsafe(64)
+    state = encode_oauth_state(session_token, verifier)
     flow = Flow.from_client_config(_client_config(), scopes=GMAIL_SCOPES, redirect_uri=_redirect_uri())
     flow.oauth2session.scope = GMAIL_SCOPES
+    flow.oauth2session.code_verifier = verifier
     auth_kwargs: dict[str, str] = {
         "access_type": "offline",
         "include_granted_scopes": "true",
@@ -84,10 +88,11 @@ def build_oauth_url(*, state: str) -> str:
     return auth_url
 
 
-def exchange_code_for_tokens(code: str) -> dict[str, Any]:
+def exchange_code_for_tokens(code: str, *, code_verifier: str) -> dict[str, Any]:
     from google_auth_oauthlib.flow import Flow
 
     flow = Flow.from_client_config(_client_config(), scopes=GMAIL_SCOPES, redirect_uri=_redirect_uri())
+    flow.oauth2session.code_verifier = code_verifier
     flow.fetch_token(code=code)
     creds = flow.credentials
     return {
@@ -265,17 +270,20 @@ def send_email_message(
         raise RuntimeError(f"Gmail send failed: {exc}") from exc
 
 
-def encode_oauth_state(token: str) -> str:
-    payload = json.dumps({"t": token})
+def encode_oauth_state(token: str, code_verifier: str) -> str:
+    payload = json.dumps({"t": token, "cv": code_verifier})
     return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
 
-def decode_oauth_state(state: str) -> str | None:
+def decode_oauth_state(state: str) -> dict[str, str] | None:
     try:
         pad = "=" * (-len(state) % 4)
         raw = base64.urlsafe_b64decode(state + pad)
         data = json.loads(raw.decode())
         token = str(data.get("t") or "").strip()
-        return token or None
+        verifier = str(data.get("cv") or "").strip()
+        if not token or not verifier:
+            return None
+        return {"token": token, "code_verifier": verifier}
     except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
         return None

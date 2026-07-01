@@ -19,7 +19,6 @@ from app.services.gmail_client import (
     GmailNotConnectedError,
     build_oauth_url,
     decode_oauth_state,
-    encode_oauth_state,
     exchange_code_for_tokens,
     is_gmail_configured,
 )
@@ -62,8 +61,7 @@ def gmail_oauth_url(authorization: str | None = Header(default=None)):
     if not record:
         raise HTTPException(status_code=401, detail="Not signed in")
     try:
-        state = encode_oauth_state(record.token)
-        return {"url": build_oauth_url(state=state)}
+        return {"url": build_oauth_url(session_token=record.token)}
     except GmailNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -74,14 +72,14 @@ def gmail_oauth_callback(code: str | None = None, state: str | None = None, erro
         return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=error&reason={error}")
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing OAuth code or state")
-    token = decode_oauth_state(state)
-    if not token:
+    oauth_state = decode_oauth_state(state)
+    if not oauth_state:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
-    record = get_session(token)
+    record = get_session(oauth_state["token"])
     if not record:
         raise HTTPException(status_code=401, detail="Session expired — sign in and connect Gmail again")
     try:
-        tokens = exchange_code_for_tokens(code)
+        tokens = exchange_code_for_tokens(code, code_verifier=oauth_state["code_verifier"])
         gmail_store.save_tokens(record.username, tokens)
     except Exception as exc:
         return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=error&reason=token_exchange")

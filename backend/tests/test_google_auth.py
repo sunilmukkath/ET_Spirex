@@ -9,8 +9,8 @@ from app.services.super_admin import email_for_username
 
 
 def test_google_login_state_roundtrip():
-    state = encode_login_state()
-    assert decode_login_state(state)
+    state = encode_login_state("test-verifier-123")
+    assert decode_login_state(state) == "test-verifier-123"
 
 
 def test_email_for_super_admin():

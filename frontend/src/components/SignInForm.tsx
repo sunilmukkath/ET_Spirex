@@ -8,12 +8,42 @@ interface Props {
   compact?: boolean
 }
 
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  token_exchange: 'Google sign-in could not be completed. Please try again.',
+  not_authorized: 'This Google account is not authorized for ET Scout. Use your Elastic Tree email.',
+  session_failed: 'Could not start your ET Scout session. Please try again.',
+  access_denied: 'Google sign-in was cancelled.',
+}
+
+function readAuthErrorFromUrl(): string | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('auth') !== 'error') return null
+  const reason = params.get('reason') || 'unknown'
+  return AUTH_ERROR_MESSAGES[reason] ?? `Google sign-in failed (${reason}).`
+}
+
+function clearAuthErrorFromUrl() {
+  if (typeof window === 'undefined') return
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('auth') !== 'error') return
+  const next = new URL(window.location.href)
+  next.searchParams.delete('auth')
+  next.searchParams.delete('reason')
+  window.history.replaceState({}, '', `${next.pathname}${next.search}${next.hash}`)
+}
+
 export function SignInForm({ compact }: Props) {
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(() => readAuthErrorFromUrl())
   const [googleConfigured, setGoogleConfigured] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
 
   useEffect(() => {
+    const authError = readAuthErrorFromUrl()
+    if (authError) {
+      setError(authError)
+      clearAuthErrorFromUrl()
+    }
     let cancelled = false
     api
       .getGoogleAuthConfigured()

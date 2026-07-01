@@ -127,7 +127,7 @@ export function LandingPage() {
   }
 
   if (user) {
-    return <Navigate to="/home" replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   return (
@@ -305,7 +305,7 @@ export function LandingPage() {
                 </ul>
               </div>
               <div className="p-4 sm:p-5">
-                <SignInForm onSuccess={() => navigate('/home')} />
+                <SignInForm onSuccess={() => navigate('/dashboard')} />
               </div>
             </div>
           </aside>
