@@ -63,6 +63,7 @@ from app.services.pm_import import (
     inspect_project_sheet,
     project_import_template_xlsx,
 )
+from app.services.pm_bootstrap import bootstrap_projects_from_master, bundled_master_sheet
 from app.services.crm_agent import run_crm_agent
 from app.services.finance_agent import run_finance_agent
 from app.services.proposal_agent import run_proposal_writing_agent
@@ -220,6 +221,32 @@ async def pm_import_projects(
         raise HTTPException(status_code=400, detail="Empty file")
     try:
         return import_projects_from_sheet(session, data, filename=filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/projects/import/bootstrap-master", response_model=PmImportResult)
+def pm_import_bootstrap_master(
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_pm_db),
+):
+    """Import bundled Project sheet (admin). Skips rows that already exist by project name."""
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not is_global_admin(record.username):
+        raise HTTPException(status_code=403, detail="Only admins can run master import")
+    data = bundled_master_sheet()
+    if not data:
+        raise HTTPException(status_code=404, detail="Bundled project master sheet not found on server")
+    try:
+        result = bootstrap_projects_from_master(session, only_if_empty=False)
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Bundled project master sheet or column mapping not found on server",
+            )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

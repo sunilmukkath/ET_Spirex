@@ -285,6 +285,21 @@ export function OperationsHubPage() {
     }
   }
 
+  async function handleBootstrapMaster() {
+    setImporting(true)
+    setImportError(null)
+    setImportResult(null)
+    try {
+      const result = await api.bootstrapPmMasterImport()
+      setImportResult(result)
+      await load()
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Master import failed')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   async function handleStageChange(projectId: string, stage: string) {
     await api.updatePmProject(projectId, { stage })
     await load()
@@ -436,12 +451,13 @@ export function OperationsHubPage() {
           <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 shadow-sm">
             <h3 className="text-sm font-semibold text-[var(--et-navy)]">Import projects from Excel</h3>
             <p className="mt-1 text-xs text-[var(--muted)]">
-              Upload your project sheet (.xls or .xlsx) with project names and LimeSurvey IDs or survey titles —
-              ET Scout creates pipeline entries and links studies automatically.
+              Your Elastic Tree project sheet is bundled with ET Scout (188 rows). It loads automatically when the
+              pipeline is empty, or use the button below to import now.
             </p>
             {importConfig?.configured && (
               <p className="mt-2 text-xs text-emerald-800">
-                Custom column mapping active ({importConfig.column_count} columns from your master sheet).
+                Column mapping ready — Project No, FY, Month, client, value INR, and more (
+                {importConfig.column_count} columns).
               </p>
             )}
             {isAdmin && (
@@ -477,6 +493,17 @@ export function OperationsHubPage() {
               </div>
             )}
             <div className="mt-3 flex flex-wrap gap-2">
+              {isAdmin && (
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => void handleBootstrapMaster()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-navy)] px-3 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                >
+                  {importing ? <Loader2 size={14} className="animate-spin" /> : <FileUp size={14} />}
+                  Import bundled project sheet
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void api.downloadPmProjectImportTemplate().catch(() => setImportError('Template download failed'))}

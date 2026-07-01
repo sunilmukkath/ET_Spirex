@@ -1,0 +1,19 @@
+{
+  "column_map": {
+    "Project No": "project_code",
+    "FY": "fiscal_year",
+    "Month": "billing_month",
+    "client_name": "client_name",
+    "project_name": "project_name",
+    "limesurvey_survey_id": "limesurvey_survey_id",
+    "survey_name": "survey_name",
+    "project_type": "project_type",
+    "engagement_type": "engagement_type",
+    "stage": "stage",
+    "owner_name": "owner_name",
+    "budget_estimate": "budget_estimate",
+    "status_notes": "status_notes",
+    "Project_Value_INR": "project_value_inr"
+  },
+  "source_filename": "Project sheet.xlsx"
+}

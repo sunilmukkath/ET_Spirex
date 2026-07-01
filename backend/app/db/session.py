@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -20,6 +21,8 @@ _db_ready = False
 _db_init_error: str | None = None
 
 DEFAULT_TEAM = ("Sunil", "Ambika", "Shilaja", "Ravikumar")
+
+logger = logging.getLogger(__name__)
 
 
 def database_enabled() -> bool:
@@ -60,6 +63,7 @@ def ensure_database_ready() -> None:
             Base.metadata.create_all(bind=engine)
             _apply_schema_patches(engine)
             _seed_team_members(engine)
+            _bootstrap_pm_projects(engine)
             _db_ready = True
             _db_init_error = None
             _db_init_failed = False
@@ -151,6 +155,25 @@ def _seed_team_members(engine: Engine) -> None:
         session.commit()
     finally:
         session.close()
+
+
+def _bootstrap_pm_projects(engine: Engine) -> None:
+    """One-time load of bundled Elastic Tree project sheet when pipeline is empty."""
+    try:
+        from app.services.pm_bootstrap import bootstrap_projects_from_master
+
+        factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        session = factory()
+        try:
+            bootstrap_projects_from_master(session, only_if_empty=True)
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception("PM project sheet bootstrap failed")
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("PM bootstrap module unavailable")
 
 
 def reset_engine_for_tests() -> None:

@@ -2,13 +2,16 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
+  BarChart3,
   Briefcase,
   Circle,
   ClipboardList,
   DollarSign,
   FileText,
-  LayoutGrid,
+  Landmark,
+  Link2,
   Loader2,
+  PenLine,
   Plus,
   RefreshCw,
   Sparkles,
@@ -31,6 +34,91 @@ import { EmptyState, ErrorState, LoadingState } from '../components/States'
 
 const TASK_PREVIEW = 5
 const PROJECT_PREVIEW = 6
+
+const QUICK_LINK_TOOLS = [
+  {
+    id: 'limesurvey',
+    label: 'LimeSurvey studies',
+    description: 'Open fieldwork & analysis workspaces',
+    href: '/quantitative?tab=studies',
+    icon: BarChart3,
+    group: 'Quantitative',
+  },
+  {
+    id: 'studio',
+    label: 'Survey Studio',
+    description: 'Program ET native surveys',
+    href: '/quantitative?tab=studio',
+    icon: Sparkles,
+    group: 'Quantitative',
+  },
+  {
+    id: 'programming',
+    label: 'Programming',
+    description: 'Survey links & PM shortcuts',
+    href: '/quantitative?tab=programming',
+    icon: PenLine,
+    group: 'Quantitative',
+  },
+  {
+    id: 'survey-links',
+    label: 'Survey links',
+    description: 'Link LimeSurvey IDs to PM projects',
+    href: '/quantitative?tab=links',
+    icon: Link2,
+    group: 'Quantitative',
+  },
+  {
+    id: 'operations',
+    label: 'PM projects',
+    description: 'Pipeline, proposals & delivery stages',
+    href: '/operations?tab=pipeline',
+    icon: Briefcase,
+    group: 'Operations',
+  },
+  {
+    id: 'my-work',
+    label: 'My work',
+    description: 'Tasks & Gmail inbox',
+    href: '/my-work',
+    icon: ClipboardList,
+    group: 'Operations',
+  },
+  {
+    id: 'accounting',
+    label: 'Accounting',
+    description: 'Invoices, bills & Zoho migration',
+    href: '/accounting',
+    icon: Landmark,
+    group: 'Operations',
+  },
+  {
+    id: 'crm',
+    label: 'CRM',
+    description: 'Clients & marketing',
+    href: '/operations?tab=clients',
+    icon: Users,
+    group: 'Operations',
+  },
+] as const
+
+const QUICK_LINK_STORAGE_KEY = 'et_scout_home_quick_links'
+
+function loadQuickLinkSelection(): string[] {
+  try {
+    const raw = localStorage.getItem(QUICK_LINK_STORAGE_KEY)
+    if (!raw) return ['limesurvey', 'studio', 'operations', 'my-work']
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return ['limesurvey', 'studio', 'operations', 'my-work']
+    return parsed.filter((id): id is string => typeof id === 'string')
+  } catch {
+    return ['limesurvey', 'studio', 'operations', 'my-work']
+  }
+}
+
+function saveQuickLinkSelection(ids: string[]) {
+  localStorage.setItem(QUICK_LINK_STORAGE_KEY, JSON.stringify(ids))
+}
 
 function ModuleCard({
   title,
@@ -147,6 +235,8 @@ export function HomePage() {
   const [financeSnapshots, setFinanceSnapshots] = useState<PmFinanceSummary[]>([])
 
   const [showNewTask, setShowNewTask] = useState(false)
+  const [showQuickLinkPicker, setShowQuickLinkPicker] = useState(false)
+  const [quickLinkIds, setQuickLinkIds] = useState<string[]>(() => loadQuickLinkSelection())
   const [taskSurveyId, setTaskSurveyId] = useState<number | ''>('')
   const [taskTitle, setTaskTitle] = useState('')
   const [taskAssignee, setTaskAssignee] = useState('')
@@ -275,6 +365,22 @@ export function HomePage() {
 
   const openAssigned = assignedTasks.filter((t) => t.task.status !== 'done')
 
+  const quickLinks = useMemo(
+    () =>
+      quickLinkIds
+        .map((id) => QUICK_LINK_TOOLS.find((t) => t.id === id))
+        .filter((t): t is (typeof QUICK_LINK_TOOLS)[number] => Boolean(t)),
+    [quickLinkIds],
+  )
+
+  function toggleQuickLink(id: string) {
+    setQuickLinkIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      saveQuickLinkSelection(next)
+      return next
+    })
+  }
+
   if (loading) return <LoadingState message="Loading your workspace…" />
 
   return (
@@ -288,7 +394,11 @@ export function HomePage() {
             Welcome back{user?.username ? `, ${user.username}` : ''}
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
-            Your hub for tasks, projects, proposals, CRM, and finance — pick up where you left off.
+            PM projects, tasks, and finance live here. LimeSurvey and Survey Studio are under{' '}
+            <Link to="/quantitative" className="font-medium text-[var(--et-teal-dark)] hover:underline">
+              Quantitative
+            </Link>
+            .
           </p>
         </div>
         <button
@@ -319,11 +429,84 @@ export function HomePage() {
             Draft proposal
           </Link>
         )}
-        <Link to="/quantitative" className="et-btn-secondary">
-          <LayoutGrid size={16} />
-          All LimeSurvey studies
-        </Link>
       </div>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Quick links</h2>
+            <p className="text-xs text-slate-500">
+              Jump to LimeSurvey, Studio, or operations tools — choose what appears below.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowQuickLinkPicker((v) => !v)}
+            className="text-xs font-medium text-[var(--et-teal-dark)] hover:underline"
+          >
+            {showQuickLinkPicker ? 'Done' : 'Choose tools'}
+          </button>
+        </div>
+
+        {showQuickLinkPicker ? (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {QUICK_LINK_TOOLS.map((tool) => {
+              const selected = quickLinkIds.includes(tool.id)
+              const Icon = tool.icon
+              return (
+                <button
+                  key={tool.id}
+                  type="button"
+                  onClick={() => toggleQuickLink(tool.id)}
+                  className={`flex items-start gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition ${
+                    selected
+                      ? 'border-[var(--et-teal)] bg-[var(--et-teal-light)]/30'
+                      : 'border-slate-200 bg-slate-50/50 hover:border-slate-300'
+                  }`}
+                >
+                  <Icon size={16} className="mt-0.5 shrink-0 text-[var(--et-teal-dark)]" />
+                  <span>
+                    <span className="block font-medium text-slate-900">{tool.label}</span>
+                    <span className="text-[10px] text-slate-500">{tool.group}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        ) : quickLinks.length > 0 ? (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {quickLinks.map((tool) => {
+              const Icon = tool.icon
+              return (
+                <Link
+                  key={tool.id}
+                  to={tool.href}
+                  className="group flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-3 transition hover:border-[var(--et-teal)]/35 hover:bg-[var(--et-teal-light)]/15"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--et-teal-dark)] shadow-sm ring-1 ring-slate-100 group-hover:ring-[var(--et-teal)]/30">
+                    <Icon size={18} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-slate-900">{tool.label}</span>
+                    <span className="mt-0.5 block text-xs text-slate-500">{tool.description}</span>
+                  </span>
+                </Link>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">
+            No quick links selected.{' '}
+            <button
+              type="button"
+              className="font-medium text-[var(--et-teal-dark)] hover:underline"
+              onClick={() => setShowQuickLinkPicker(true)}
+            >
+              Choose tools
+            </button>
+          </p>
+        )}
+      </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ModuleCard
@@ -352,48 +535,37 @@ export function HomePage() {
 
         <ModuleCard
           title="My projects"
-          icon={LayoutGrid}
-          href="/quantitative"
-          actionLabel="All studies"
-          badge={myPmProjects.length || limeProjects.length}
+          icon={Briefcase}
+          href="/operations?tab=pipeline"
+          actionLabel="Operations"
+          badge={myPmProjects.length}
         >
-          {myPmProjects.length > 0 ? (
+          {!pmEnabled ? (
+            <p className="text-sm text-slate-500">
+              PM projects (proposals, budgets, delivery) live in Operations — separate from LimeSurvey studies.
+            </p>
+          ) : myPmProjects.length > 0 ? (
             <ul className="space-y-2">
               {myPmProjects.map((p) => (
                 <li key={p.project_id}>
                   <Link
-                    to={
-                      p.limesurvey_survey_id
-                        ? `/projects/${p.limesurvey_survey_id}`
-                        : '/operations?tab=pipeline'
-                    }
+                    to="/operations?tab=pipeline"
                     className="block rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 text-sm hover:border-[var(--et-teal)]/30"
                   >
                     <span className="font-medium text-slate-900">{p.project_name}</span>
                     <span className="mt-0.5 block text-xs text-slate-500">
                       {p.client_name ?? 'No client'} · {p.stage}
-                      {p.limesurvey_survey_id ? ` · Survey #${p.limesurvey_survey_id}` : ''}
+                      {p.project_code ? ` · ${p.project_code}` : ''}
                     </span>
                   </Link>
                 </li>
               ))}
             </ul>
-          ) : limeProjects.length > 0 ? (
-            <ul className="space-y-2">
-              {limeProjects.slice(0, PROJECT_PREVIEW).map((p) => (
-                <li key={p.id}>
-                  <Link
-                    to={`/projects/${p.id}`}
-                    className="block rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 text-sm hover:border-[var(--et-teal)]/30"
-                  >
-                    <span className="font-medium text-slate-900">{p.title}</span>
-                    <span className="mt-0.5 block text-xs text-slate-500">LimeSurvey #{p.id}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
           ) : (
-            <EmptyState title="No projects yet" description="Create a PM project in Operations or open LimeSurvey studies." />
+            <EmptyState
+              title="No PM projects yet"
+              description="Add projects in Operations. Open LimeSurvey or Studio from Quantitative quick links."
+            />
           )}
         </ModuleCard>
 
@@ -506,10 +678,12 @@ export function HomePage() {
             className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
           >
             <h3 className="text-lg font-semibold text-slate-900">New task</h3>
-            <p className="mt-1 text-sm text-slate-500">Add a task to a study workflow.</p>
+            <p className="mt-1 text-sm text-slate-500">
+              Add a task to a LimeSurvey study workflow, or use My work for personal tasks.
+            </p>
             <div className="mt-4 space-y-3">
               <label className="block text-sm">
-                <span className="mb-1 block text-slate-600">Study</span>
+                <span className="mb-1 block text-slate-600">LimeSurvey study</span>
                 <select
                   className="et-input w-full"
                   value={taskSurveyId}

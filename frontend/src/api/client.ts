@@ -2384,6 +2384,26 @@ export const api = {
     }
     return res.json() as Promise<PmImportResult>
   },
+  bootstrapPmMasterImport: async () => {
+    const token = localStorage.getItem('et_scout_auth')
+    let auth = ''
+    if (token) {
+      try {
+        auth = JSON.parse(token).token ?? ''
+      } catch {
+        auth = ''
+      }
+    }
+    const res = await fetch('/api/pm/projects/import/bootstrap-master', {
+      method: 'POST',
+      headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Master import failed')
+    }
+    return res.json() as Promise<PmImportResult>
+  },
   getPmImportConfig: () =>
     fetchJson<PmImportConfig>('/api/pm/projects/import/config', undefined, BOOTSTRAP_TIMEOUT_MS),
   previewPmImport: async (file: File) => {
