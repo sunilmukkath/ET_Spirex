@@ -8,7 +8,7 @@ from typing import Any
 from docx import Document
 from docx.shared import Inches
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
@@ -44,24 +44,48 @@ def questionnaire_spec_excel(schema: dict[str, Any], *, title: str = "Questionna
     ws = wb.active
     ws.title = "Questionnaire"
     headers = ["Group", "Code", "Variable ID", "Question text", "Type", "Kind", "Answers / items", "Columns"]
-    header_fill = PatternFill("solid", fgColor="00796B")
-    header_font = Font(bold=True, color="FFFFFF")
+
+    ws.merge_cells("A1:H1")
+    title_cell = ws.cell(1, 1, title)
+    title_cell.font = Font(bold=True, size=14, color="0B2545", name="Calibri")
+    title_cell.alignment = Alignment(horizontal="left", vertical="center")
+
+    header_fill = PatternFill("solid", fgColor="0B2545")
+    header_font = Font(bold=True, color="FFFFFF", name="Calibri")
+    thin = Side(style="thin", color="CBD5E1")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    zebra = PatternFill("solid", fgColor="F8FAFC")
+
+    header_row = 2
     for col, label in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=label)
+        cell = ws.cell(row=header_row, column=col, value=label)
         cell.fill = header_fill
         cell.font = header_font
+        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        cell.border = border
 
-    for r, row in enumerate(rows, 2):
-        ws.cell(row=r, column=1, value=row["group"])
-        ws.cell(row=r, column=2, value=row["code"])
-        ws.cell(row=r, column=3, value=row["variable_id"])
-        ws.cell(row=r, column=4, value=row["question"])
-        ws.cell(row=r, column=5, value=row["type"])
-        ws.cell(row=r, column=6, value=row["kind"])
-        ws.cell(row=r, column=7, value=row["answers"])
-        ws.cell(row=r, column=8, value=row["columns"])
+    for r, row in enumerate(rows, header_row + 1):
+        values = [
+            row["group"],
+            row["code"],
+            row["variable_id"],
+            row["question"],
+            row["type"],
+            row["kind"],
+            row["answers"],
+            row["columns"],
+        ]
+        fill = zebra if (r - header_row) % 2 == 0 else None
+        for col, value in enumerate(values, 1):
+            cell = ws.cell(row=r, column=col, value=value)
+            cell.font = Font(size=10, name="Calibri")
+            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            cell.border = border
+            if fill:
+                cell.fill = fill
 
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "A3"
+    ws.sheet_view.showGridLines = False
     widths = [22, 12, 14, 48, 16, 12, 40, 24]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -71,6 +95,8 @@ def questionnaire_spec_excel(schema: dict[str, Any], *, title: str = "Questionna
     meta["B1"] = title
     meta["A2"] = "Questions"
     meta["B2"] = len(rows)
+    meta.column_dimensions["A"].width = 14
+    meta.column_dimensions["B"].width = 40
 
     buf = io.BytesIO()
     wb.save(buf)

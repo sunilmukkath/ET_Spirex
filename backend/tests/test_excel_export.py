@@ -40,14 +40,15 @@ def test_multi_table_export_single_sheet_with_index():
     wb = load_workbook(io.BytesIO(raw))
 
     assert wb.sheetnames == ["Index", "Crosstab"]
-    assert wb["Index"]["A2"].value == "Q1: Awareness"
-    assert wb["Index"]["A3"].value == "Q2: Consideration"
-    assert wb["Index"]["A2"].hyperlink.location == "'Crosstab'!A1"
-    assert wb["Index"]["A3"].hyperlink.location == "'Crosstab'!A9"
+    assert wb["Index"]["B3"].value == "Q1: Awareness"
+    assert wb["Index"]["B4"].value == "Q2: Consideration"
+    assert wb["Index"]["B3"].hyperlink.location == "'Crosstab'!A1"
+    assert wb["Index"]["B4"].hyperlink.location == "'Crosstab'!A11"
 
     data = wb["Crosstab"]
     assert data["A1"].value == "Awareness"
-    assert data["A9"].value == "Consideration"
+    assert data["A11"].value == "Consideration"
+    assert data["C5"].number_format == "0.0%"
 
 
 def test_single_table_export_has_index():
@@ -57,6 +58,6 @@ def test_single_table_export_has_index():
     wb = load_workbook(io.BytesIO(raw))
 
     assert wb.sheetnames == ["Index", "Crosstab"]
-    assert wb["Index"]["A2"].value == "Q1: Satisfaction"
-    assert wb["Index"]["A2"].hyperlink.location == "'Crosstab'!A1"
+    assert wb["Index"]["B3"].value == "Q1: Satisfaction"
+    assert wb["Index"]["B3"].hyperlink.location == "'Crosstab'!A1"
     assert wb["Crosstab"]["A1"].value == "Satisfaction"
