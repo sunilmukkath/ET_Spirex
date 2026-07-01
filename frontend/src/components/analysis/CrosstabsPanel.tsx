@@ -10,6 +10,7 @@ import type {
 } from '../../api/client'
 import { CollapsibleSection } from '../CollapsibleSection'
 import { AnalysisBookmarkMenu } from './AnalysisBookmarkMenu'
+import { TeamPresetsMenu } from './TeamPresetsMenu'
 import { BannerLayerEditor } from './BannerLayerEditor'
 import { BannerPicker } from './BannerPicker'
 import { FilterEditor } from './FilterEditor'
@@ -485,6 +486,21 @@ export function CrosstabsPanel(props: CrosstabsPanelProps) {
             kind="crosstab"
             onSave={buildBookmarkConfig}
             onLoad={onLoadBookmark}
+          />
+          <TeamPresetsMenu
+            surveyId={surveyId}
+            kind="banner"
+            onSave={buildBookmarkConfig}
+            onLoad={(config) =>
+              onLoadBookmark({
+                id: '',
+                name: '',
+                kind: 'crosstab',
+                config,
+                created_at: 0,
+                updated_at: 0,
+              })
+            }
           />
           <FilterEditor
             surveyId={surveyId}

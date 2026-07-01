@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowUpDown,
-  BarChart3,
   Calendar,
   ChevronRight,
+  ClipboardList,
   Globe,
   LayoutGrid,
   List,
@@ -12,24 +12,28 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  ShieldCheck,
+  Table2,
   User,
   Wifi,
   WifiOff,
   X,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { api, type ConnectionStatus, type Project } from '../api/client'
+import { api, type ConnectionStatus, type MyTaskRow, type Project } from '../api/client'
 import { usePinnedSurveys } from '../hooks/usePinnedSurveys'
 import {
   loadUserAppSession,
   resolveSurveyHref,
   saveUserAppSession,
 } from '../lib/workspaceSession'
+import { PROJECT_PHASE_LABELS } from '../lib/workflowPhases'
+import { ET_DASHBOARD_SUBTITLE, ET_DASHBOARD_TITLE } from '../lib/etCopy'
+import { TASK_CATEGORY_LABELS, TASK_STATUS_LABELS } from '../lib/workflowAccess'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState, ErrorState, LoadingState, SkeletonBlock } from '../components/States'
 
-const STATS_BATCH = 40
+const STATS_BATCH = 50
+const PRIORITY_STATS_COUNT = 30
 
 type StatusFilter = 'all' | 'active' | 'inactive' | 'expired'
 type SortKey = 'newest' | 'oldest' | 'name' | 'responses' | 'expiring'
@@ -156,8 +160,12 @@ export function DashboardPage() {
     () => (appSession?.dashboardViewMode as ViewMode | undefined) ?? 'grid',
   )
   const { pinnedIds, pinnedSet, toggle: togglePinned } = usePinnedSurveys()
+  const pinnedIdsRef = useRef(pinnedIds)
+  pinnedIdsRef.current = pinnedIds
   const [showPinnedOnly, setShowPinnedOnly] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [myTasks, setMyTasks] = useState<MyTaskRow[]>([])
+  const [myTasksLoading, setMyTasksLoading] = useState(true)
   const loadGeneration = useRef(0)
 
   useEffect(() => {
@@ -174,36 +182,69 @@ export function DashboardPage() {
   }, [user?.username, appSession?.lastSurveyId])
 
   const loadProjects = useCallback(async (generation: number) => {
-    const [conn, data] = await Promise.all([api.getConnection(), api.getProjects()])
+    const data = await api.getProjects()
     if (generation !== loadGeneration.current) return
-    setConnection(conn)
     setProjects(data.projects)
     setStatsLoaded(0)
     return data.projects
   }, [])
 
-  const loadStats = useCallback(async (projectList: Project[], generation: number) => {
-    const pending = projectList.map((p) => p.id)
-    if (!pending.length) return
+  const loadConnection = useCallback(async (generation: number) => {
+    try {
+      const conn = await api.getConnection()
+      if (generation === loadGeneration.current) setConnection(conn)
+    } catch {
+      if (generation === loadGeneration.current) {
+        setConnection({
+          connected: false,
+          configured: true,
+          message: 'Could not reach LimeSurvey',
+        })
+      }
+    }
+  }, [])
 
-    setStatsLoading(true)
-    let loaded = 0
-    for (let i = 0; i < pending.length; i += STATS_BATCH) {
+  const loadStatsBatch = useCallback(async (ids: number[], generation: number) => {
+    if (!ids.length || generation !== loadGeneration.current) return
+    for (let i = 0; i < ids.length; i += STATS_BATCH) {
       if (generation !== loadGeneration.current) return
-      const batch = pending.slice(i, i + STATS_BATCH)
+      const batch = ids.slice(i, i + STATS_BATCH)
       try {
         const { stats } = await api.getProjectStats(batch)
         if (generation !== loadGeneration.current) return
-        loaded += batch.length
-        setStatsLoaded(loaded)
+        setStatsLoaded((prev) => prev + batch.length)
         setProjects((prev) => mergeStats(prev, stats))
       } catch {
-        loaded += batch.length
-        setStatsLoaded(loaded)
+        if (generation !== loadGeneration.current) return
+        setStatsLoaded((prev) => prev + batch.length)
       }
     }
-    if (generation === loadGeneration.current) setStatsLoading(false)
   }, [])
+
+  const loadStats = useCallback(
+    async (projectList: Project[], generation: number, priorityIds: number[]) => {
+      const allIds = projectList.map((p) => p.id)
+      if (!allIds.length) return
+
+      const prioritySet = new Set(priorityIds)
+      const priority = [
+        ...priorityIds.filter((id) => allIds.includes(id)),
+        ...allIds.filter((id) => !prioritySet.has(id)).slice(0, PRIORITY_STATS_COUNT),
+      ]
+      const priorityUnique = [...new Set(priority)]
+      const deferred = allIds.filter((id) => !priorityUnique.includes(id))
+
+      setStatsLoading(true)
+      setStatsLoaded(0)
+      await loadStatsBatch(priorityUnique, generation)
+      if (generation === loadGeneration.current) setStatsLoading(false)
+
+      if (deferred.length) {
+        void loadStatsBatch(deferred, generation)
+      }
+    },
+    [loadStatsBatch],
+  )
 
   useEffect(() => {
     const generation = ++loadGeneration.current
@@ -213,12 +254,16 @@ export function DashboardPage() {
       try {
         setLoading(true)
         setError(null)
+        void loadConnection(generation)
         const list = await loadProjects(generation)
         if (cancelled || !list) return
-        await loadStats(list, generation)
+        setLoading(false)
+        void loadStats(list, generation, pinnedIdsRef.current)
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load projects')
-      } finally {
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : 'Failed to load projects'
+          setError(msg)
+        }
         if (!cancelled) setLoading(false)
       }
     }
@@ -227,7 +272,26 @@ export function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [loadProjects, loadStats])
+  }, [loadProjects, loadStats, loadConnection])
+
+  useEffect(() => {
+    let cancelled = false
+    setMyTasksLoading(true)
+    api
+      .getMyTasks()
+      .then((data) => {
+        if (!cancelled) setMyTasks(data.tasks)
+      })
+      .catch(() => {
+        if (!cancelled) setMyTasks([])
+      })
+      .finally(() => {
+        if (!cancelled) setMyTasksLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const handleRefresh = useCallback(async () => {
     const generation = ++loadGeneration.current
@@ -235,14 +299,20 @@ export function DashboardPage() {
     setError(null)
     setStatsLoaded(0)
     try {
+      void loadConnection(generation)
       const list = await loadProjects(generation)
-      if (list) await loadStats(list, generation)
+      if (list) {
+        setLoading(false)
+        void loadStats(list, generation, pinnedIds)
+      }
+      const tasks = await api.getMyTasks()
+      if (generation === loadGeneration.current) setMyTasks(tasks.tasks)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh surveys')
     } finally {
       if (generation === loadGeneration.current) setRefreshing(false)
     }
-  }, [loadProjects, loadStats])
+  }, [loadProjects, loadStats, loadConnection, pinnedIds])
 
   const filtered = useMemo(() => {
     const rows = projects.filter((p) => {
@@ -276,9 +346,11 @@ export function DashboardPage() {
   const hasActiveFilters =
     search.trim() !== '' || statusFilter !== 'all' || showPinnedOnly || sortKey !== 'newest'
 
-  const statsProgress = projects.length ? Math.round((statsLoaded / projects.length) * 100) : 0
+  const statsProgress = projects.length
+    ? Math.min(100, Math.round((statsLoaded / projects.length) * 100))
+    : 0
 
-  if (loading) return <LoadingState message="Loading surveys..." />
+  if (loading) return <LoadingState message="Loading projects…" />
   if (error && !projects.length) return <ErrorState message={error} />
 
   return (
@@ -290,8 +362,9 @@ export function DashboardPage() {
               Welcome back, <span className="text-slate-700">{user?.username}</span>
             </p>
             <h2 className="font-display text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-              Your surveys
+              {ET_DASHBOARD_TITLE}
             </h2>
+            <p className="mt-1 max-w-2xl text-sm text-slate-500">{ET_DASHBOARD_SUBTITLE}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {connection && (
@@ -304,7 +377,7 @@ export function DashboardPage() {
               >
                 {connection.connected ? <Wifi size={12} /> : <WifiOff size={12} />}
                 {connection.connected
-                  ? `${connection.survey_count} surveys`
+                  ? `${connection.survey_count ?? projects.length} studies on LimeSurvey`
                   : connection.message || 'Not connected'}
               </div>
             )}
@@ -360,12 +433,69 @@ export function DashboardPage() {
         </section>
       )}
 
+      {!myTasksLoading && myTasks.length > 0 && (
+        <section className="rounded-xl border border-slate-200 bg-white shadow-sm sm:px-5">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-0">
+            <div className="flex items-center gap-2">
+              <ClipboardList size={16} className="text-[var(--et-teal)]" />
+              <h3 className="text-sm font-semibold text-slate-900">My tasks</h3>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                {myTasks.length}
+              </span>
+            </div>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {myTasks.slice(0, 8).map((row) => (
+              <li key={`${row.survey_id}-${row.task.id}`} className="px-4 py-3 sm:px-0">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900">{row.task.title}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      <span className="font-medium text-slate-700">{row.survey_title}</span>
+                      {row.phase && (
+                        <>
+                          {' '}
+                          · {PROJECT_PHASE_LABELS[row.phase]}
+                        </>
+                      )}
+                      {' · '}
+                      {TASK_CATEGORY_LABELS[row.task.category]}
+                      {' · '}
+                      {TASK_STATUS_LABELS[row.task.status]}
+                      {row.task.due_date && (
+                        <>
+                          {' '}
+                          · Due {formatDate(row.task.due_date)}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                  <Link
+                    to={`/projects/${row.survey_id}?mode=workflow`}
+                    state={{ title: row.survey_title }}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-[var(--et-teal-dark)] hover:bg-[var(--et-teal-light)]/30"
+                  >
+                    Open workflow
+                    <ChevronRight size={14} />
+                  </Link>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {myTasks.length > 8 && (
+            <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500 sm:px-0">
+              +{myTasks.length - 8} more open tasks across your projects
+            </p>
+          )}
+        </section>
+      )}
+
       {pinnedProjects.length > 0 && !showPinnedOnly && !search.trim() && statusFilter === 'all' && (
         <section className="rounded-xl border border-[var(--et-teal)]/20 bg-[var(--et-teal-light)]/25 p-4 shadow-sm sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Pin size={16} className="text-[var(--et-teal-dark)]" />
-              <h3 className="text-sm font-semibold text-slate-900">Pinned surveys</h3>
+              <h3 className="text-sm font-semibold text-slate-900">Pinned projects</h3>
               <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
                 {pinnedProjects.length}
               </span>
@@ -394,7 +524,7 @@ export function DashboardPage() {
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {[
-          { label: 'Total surveys', value: counts.all, tone: 'text-slate-900' },
+          { label: 'Total projects', value: counts.all, tone: 'text-slate-900' },
           { label: 'Active', value: counts.active, tone: 'text-emerald-700' },
           { label: 'Inactive', value: counts.inactive, tone: 'text-slate-600' },
           { label: 'Expired', value: counts.expired, tone: 'text-amber-700' },
@@ -417,7 +547,7 @@ export function DashboardPage() {
             <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
               type="search"
-              placeholder="Search by name, ID, owner, or language…"
+              placeholder="Search by study name, ID, owner, or language…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="et-input et-input-with-icon pr-10"
@@ -435,7 +565,7 @@ export function DashboardPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label className="sr-only" htmlFor="survey-sort">
-              Sort surveys
+              Sort projects
             </label>
             <div className="relative">
               <ArrowUpDown size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -515,19 +645,19 @@ export function DashboardPage() {
 
         <p className="text-xs text-slate-500">
           Showing <span className="font-semibold text-slate-700">{filtered.length}</span> of{' '}
-          {projects.length} surveys
+          {projects.length} projects
           {!showPinnedOnly && pinnedIds.length > 0 && sortKey === 'newest' && (
-            <span className="text-slate-400"> · Pinned surveys shown first</span>
+            <span className="text-slate-400"> · Pinned projects shown first</span>
           )}
         </p>
       </section>
 
       {filtered.length === 0 ? (
         <EmptyState
-          title="No surveys found"
+          title="No projects found"
           description={
             showPinnedOnly
-              ? 'Pin surveys from the list below, or turn off the pinned filter.'
+              ? 'Pin projects from the list below, or turn off the pinned filter.'
               : 'Try a different search term or status filter.'
           }
         />
@@ -688,18 +818,22 @@ function SurveyCard({
             </span>
           ) : null}
         </div>
-
-        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
-          <div className="flex gap-2 opacity-0 transition group-hover:opacity-100">
-            <QuickAction to={`/projects/${project.id}?mode=charts`} icon={<BarChart3 size={12} />} label="Charts" />
-            <QuickAction to={`/projects/${project.id}?mode=fields&view=team`} icon={<ShieldCheck size={12} />} label="Field manage" />
-          </div>
-          <span className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-[var(--et-teal)] opacity-0 transition group-hover:opacity-100">
-            Open
-            <ChevronRight size={14} />
-          </span>
-        </div>
       </Link>
+
+      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
+        <div className="flex gap-2 opacity-0 transition group-hover:opacity-100">
+          <QuickAction to={`/projects/${project.id}?mode=explore&view=compare`} icon={<Table2 size={12} />} label="Crosstabs" />
+          <QuickAction to={`/projects/${project.id}?mode=workflow`} icon={<ClipboardList size={12} />} label="Workflow" />
+        </div>
+        <Link
+          to={openHref}
+          state={{ title: project.title }}
+          className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-[var(--et-teal)] opacity-0 transition group-hover:opacity-100"
+        >
+          Open
+          <ChevronRight size={14} />
+        </Link>
+      </div>
     </article>
   )
 }
@@ -735,7 +869,7 @@ function SurveyTable({
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="w-10 px-3 py-3" aria-label="Pin" />
-              <th className="px-4 py-3 font-semibold">Survey</th>
+              <th className="px-4 py-3 font-semibold">Project</th>
               <th className="px-4 py-3 font-semibold">Status</th>
               <th className="px-4 py-3 font-semibold">Responses</th>
               <th className="px-4 py-3 font-semibold">Created</th>

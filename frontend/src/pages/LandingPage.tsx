@@ -1,5 +1,6 @@
 import { Navigate, useNavigate } from 'react-router-dom'
 import {
+  ClipboardList,
   Database,
   Layers,
   PieChart,
@@ -13,17 +14,18 @@ import { useAuth } from '../auth/AuthContext'
 import { BrandLockup } from '../components/BrandLockup'
 import { SignInForm } from '../components/SignInForm'
 import { LoadingState } from '../components/States'
+import { ET_ORG_NAME, ET_PRODUCT_NAME } from '../lib/etCopy'
 
 const FEATURES = [
   {
     icon: Layers,
-    title: 'Survey home',
-    desc: 'Mission control per study — sample, QC, quotas, and quick links.',
+    title: 'Study overview',
+    desc: 'Per-project sample health, quotas, and role-based shortcuts for the ET team.',
   },
   {
-    icon: Layers,
-    title: 'Questions & crosstabs',
-    desc: 'Profile distributions and multi-banner crosstabs with significance testing.',
+    icon: Table2,
+    title: 'Crosstabs & profiles',
+    desc: 'Question profiles and multi-banner tables with significance testing.',
   },
   {
     icon: PieChart,
@@ -31,23 +33,23 @@ const FEATURES = [
     desc: '30+ chart types plus correlation, regression, t-tests, and ANOVA.',
   },
   {
-    icon: Table2,
+    icon: ClipboardList,
     title: 'Fielding & quotas',
     desc: 'Daily completes, interviewer throughput, and layered quota targets.',
   },
   {
     icon: ShieldCheck,
-    title: 'Data quality',
+    title: 'QC review',
     desc: 'Speeders, duplicates, straight-lining, custom rules, and interviewer QC.',
   },
   {
     icon: SlidersHorizontal,
-    title: 'Setup & weighting',
+    title: 'Programming & weighting',
     desc: 'Custom variables, recodes, net scores, and survey weighting.',
   },
   {
     icon: Database,
-    title: 'Data & reports',
+    title: 'Exports & reports',
     desc: 'Raw data, codebook export, and client-ready PDF/PPT report builder.',
   },
   {
@@ -64,7 +66,7 @@ export function LandingPage() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--et-navy)]">
-        <LoadingState message="Loading ET Scout…" />
+        <LoadingState message={`Loading ${ET_PRODUCT_NAME}…`} />
       </div>
     )
   }
@@ -102,14 +104,15 @@ export function LandingPage() {
         <div className="animate-fade-in">
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--et-teal)]/30 bg-[var(--et-teal)]/10 px-3.5 py-1.5 text-xs font-semibold text-[var(--et-teal-light)]">
             <Sparkles size={14} />
-            Survey intelligence platform
+            Built for the Elastic Tree team
           </div>
           <h1 className="font-display text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl lg:text-[3.25rem]">
             Analytics that feel as sharp as your research.
           </h1>
           <p className="mt-5 max-w-lg text-base leading-relaxed text-white/75 sm:text-lg">
-            ET Scout turns LimeSurvey data into explore charts, custom visualisations,
-            advanced crosstabs, quality scans, and export-ready tables — built for the Elastic Tree team.
+            {ET_PRODUCT_NAME} turns LimeSurvey data into profiles, crosstabs, charts,
+            QC review, fielding dashboards, and client-ready exports — one workspace for programming,
+            field, research, and delivery.
           </p>
 
           <div className="mt-10 grid gap-2.5 sm:grid-cols-2">
@@ -136,7 +139,7 @@ export function LandingPage() {
       </main>
 
       <footer className="relative z-10 border-t border-white/10 py-6 text-center text-xs text-white/40">
-        ET Scout · Elastic Tree Consumer Insights
+        {ET_PRODUCT_NAME} · {ET_ORG_NAME}
       </footer>
     </div>
   )

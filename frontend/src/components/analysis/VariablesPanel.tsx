@@ -36,6 +36,9 @@ interface Props {
   focusQuestionId?: string | null
   onFocusQuestionConsumed?: () => void
   onChanged?: () => void
+  pageTab?: 'questions' | 'custom' | 'weighting'
+  onPageTabChange?: (tab: 'questions' | 'custom' | 'weighting') => void
+  hideSubNav?: boolean
 }
 
 const EMPTY_FORM: CustomVariableInput = {
@@ -134,8 +137,13 @@ export function VariablesPanel({
   focusQuestionId,
   onFocusQuestionConsumed,
   onChanged,
+  pageTab: pageTabProp,
+  onPageTabChange,
+  hideSubNav = false,
 }: Props) {
-  const [pageTab, setPageTab] = useState<'questions' | 'custom' | 'weighting'>('questions')
+  const [internalTab, setInternalTab] = useState<'questions' | 'custom' | 'weighting'>('questions')
+  const pageTab = pageTabProp ?? internalTab
+  const setPageTab = onPageTabChange ?? setInternalTab
   const [variables, setVariables] = useState<CustomVariable[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -427,6 +435,7 @@ export function VariablesPanel({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {!hideSubNav && (
             <div className="et-segment">
               <button
                 type="button"
@@ -456,6 +465,7 @@ export function VariablesPanel({
                 Weighting
               </button>
             </div>
+            )}
             {pageTab === 'custom' && !showForm && (
               <button
                 type="button"

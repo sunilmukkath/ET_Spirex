@@ -124,6 +124,18 @@ def _resolve_variable_columns(
     return matches or [title]
 
 
+def _list_group_questions(survey_id: int, gid: int) -> list[dict[str, Any]]:
+    """List questions in a group using a dedicated client (safe for parallel RPC)."""
+    from citric import Client
+
+    client = Client(
+        settings.limesurvey_url,
+        settings.limesurvey_username,
+        settings.limesurvey_password,
+    )
+    return client.list_questions(survey_id, gid)
+
+
 def _fetch_question_props(qid: int) -> dict[str, Any]:
     def load_props(client) -> dict[str, Any]:
         return dict(
@@ -226,8 +238,11 @@ def build_survey_schema(
     *,
     completion_status: str = "complete",
     light: bool = False,
+    enrich_only: bool = False,
 ) -> dict[str, Any]:
-    cache_key = (survey_id, completion_status, light)
+    """Build survey schema. enrich_only loads answer options without exporting all responses."""
+    effective_light = light and not enrich_only
+    cache_key = (survey_id, completion_status, effective_light, enrich_only)
     now = time.time()
     if cache_key in _SCHEMA_CACHE:
         cached_at, data = _SCHEMA_CACHE[cache_key]
@@ -236,13 +251,28 @@ def build_survey_schema(
                 survey_id,
                 data,
                 completion_status=completion_status,
-                light=light,
+                light=effective_light,
             )
 
     def build_from_lime(client) -> dict[str, Any]:
         groups = client.list_groups(survey_id)
         groups_sorted = sorted(groups, key=lambda g: int(g.get("group_order") or 0))
         response_count = _response_count_for_status(survey_id, completion_status, light=light)
+
+        questions_by_gid: dict[int, list[dict[str, Any]]] = {}
+        if groups_sorted:
+            workers = min(8, len(groups_sorted))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(_list_group_questions, survey_id, int(g["gid"])): int(g["gid"])
+                    for g in groups_sorted
+                }
+                for future in as_completed(futures):
+                    gid = futures[future]
+                    try:
+                        questions_by_gid[gid] = future.result()
+                    except Exception:
+                        questions_by_gid[gid] = []
 
         variables: list[SurveyVariable] = []
         group_summaries: list[dict[str, Any]] = []
@@ -252,7 +282,7 @@ def build_survey_schema(
             gid = int(group["gid"])
             group_title = _strip_html(str(group.get("group_name", "")))
             group_order = int(group.get("group_order") or 0)
-            questions = client.list_questions(survey_id, gid)
+            questions = questions_by_gid.get(gid, [])
             questions_sorted = sorted(questions, key=lambda q: int(q.get("question_order") or 0))
             group_vars: list[str] = []
 
@@ -292,7 +322,7 @@ def build_survey_schema(
                 variables.append(variable)
                 group_vars.append(var_id)
 
-                if not light and info.kind in _ENRICH_KINDS:
+                if not effective_light and info.kind in _ENRICH_KINDS:
                     enrich_queue.append((variable, qid))
 
             if group_vars:
@@ -306,7 +336,7 @@ def build_survey_schema(
                 )
 
         df_columns: list[str] = []
-        if not light:
+        if not effective_light and not enrich_only:
             try:
                 from app.services.response_store import get_responses
 
@@ -316,24 +346,24 @@ def build_survey_schema(
             except Exception:
                 pass
 
-        if not light and enrich_queue:
+        if not effective_light and enrich_queue:
             _enrich_variables_parallel(enrich_queue, df_columns)
 
-        if not light and df_columns:
+        if not effective_light and not enrich_only and df_columns:
             apply_location_kind(variables, df_columns)
 
         return {
             "survey_id": survey_id,
             "response_count": response_count,
             "question_count": len(variables),
-            "enriched": not light,
+            "enriched": not effective_light,
             "variables": [_variable_to_dict(v) for v in variables],
             "groups": group_summaries,
         }
 
     result = execute_lime(build_from_lime)
     _SCHEMA_CACHE[cache_key] = (now, result)
-    return _finalize_schema(survey_id, result, completion_status=completion_status, light=light)
+    return _finalize_schema(survey_id, result, completion_status=completion_status, light=effective_light)
 
 
 def _finalize_schema(

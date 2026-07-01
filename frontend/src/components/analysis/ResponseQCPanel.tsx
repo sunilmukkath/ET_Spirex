@@ -41,6 +41,7 @@ import {
 import { ErrorState } from '../States'
 import { InterviewerQcTab } from './InterviewerQcTab'
 import { QcSettingsPanel } from './QcSettingsPanel'
+import { TeamPresetsMenu } from './TeamPresetsMenu'
 
 interface Props {
   surveyId: number
@@ -71,6 +72,19 @@ function defaultQcConfig(): QcConfig {
     },
     custom_rules: [],
     straight_line_variable_ids: null,
+  }
+}
+
+function qcPresetPayload(config: QcConfig): Record<string, unknown> {
+  return {
+    disabled_checks: config.disabled_checks,
+    kept_response_ids: [],
+    excluded_response_ids: [],
+    thresholds: config.thresholds,
+    custom_rules: config.custom_rules,
+    interviewer_variable_id: config.interviewer_variable_id ?? null,
+    gps_variable_id: config.gps_variable_id ?? null,
+    straight_line_variable_ids: config.straight_line_variable_ids ?? null,
   }
 }
 
@@ -323,6 +337,15 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
       setSettingsSaving(false)
     }
   }, [surveyId, qcConfig, onReviewChanged])
+
+  const reloadQcFromPreset = useCallback(async () => {
+    const cfg = await api.getQcConfig(surveyId).catch(() => null)
+    if (cfg) {
+      setQcConfig({ ...defaultQcConfig(), ...cfg })
+      rememberQcDefaults(cfg)
+    }
+    onReviewChanged?.()
+  }, [surveyId, onReviewChanged])
 
   const metrics = useMemo(() => {
     if (!result) return null
@@ -651,6 +674,16 @@ function ResponseQCPanelInner({ surveyId, variables = [], onUseQcApproved, onRev
             </p>
           )}
         </section>
+
+        <TeamPresetsMenu
+          surveyId={surveyId}
+          kind="qc"
+          onSave={() => ({
+            name: 'QC thresholds',
+            config: qcPresetPayload(qcConfig),
+          })}
+          onApplied={reloadQcFromPreset}
+        />
 
         <QcSettingsPanel
           variables={variables}

@@ -191,6 +191,18 @@ export interface AnalysisBookmark {
   updated_at: number
 }
 
+export type TeamPresetKind = 'banner' | 'quota' | 'qc' | 'filter'
+
+export interface TeamPreset {
+  id: string
+  name: string
+  kind: TeamPresetKind
+  config: Record<string, unknown>
+  created_by?: string | null
+  created_at: number
+  updated_at: number
+}
+
 export interface WeightConfig {
   enabled: boolean
   variable_id: string | null
@@ -530,6 +542,43 @@ export interface ProjectTask {
   created_by?: string | null
   created_at?: number | null
   updated_at?: number | null
+  comments?: TaskComment[]
+}
+
+export type ActivityType =
+  | 'phase_change'
+  | 'task_created'
+  | 'task_updated'
+  | 'task_comment'
+  | 'member_added'
+  | 'member_removed'
+  | 'note'
+
+export interface TaskComment {
+  id: string
+  author: string
+  body: string
+  created_at: number
+}
+
+export interface ProjectActivity {
+  id: string
+  type: ActivityType
+  message: string
+  actor?: string | null
+  created_at: number
+  task_id?: string | null
+}
+
+export type TranslationStatus = 'not_started' | 'in_progress' | 'review' | 'complete'
+
+export interface TranslationRow {
+  id: string
+  language: string
+  label?: string
+  status: TranslationStatus
+  notes?: string
+  updated_at?: number | null
 }
 
 export interface ProjectWorkflow {
@@ -542,6 +591,18 @@ export interface ProjectWorkflow {
   members: ProjectMember[]
   tasks: ProjectTask[]
   notes?: string
+  activities?: ProjectActivity[]
+  translations?: TranslationRow[]
+  pilot_tasks_seeded?: boolean
+}
+
+export interface MyTaskRow {
+  survey_id: number
+  survey_title: string
+  phase?: ProjectPhase
+  client_name?: string
+  project_code?: string
+  task: ProjectTask
 }
 
 export interface WorkflowAccess {
@@ -802,6 +863,24 @@ export interface AiStatus {
   hints: Record<string, string>
 }
 
+export interface ReportSectionPayload {
+  section_id: string
+  label: string
+  report_type: 'profile' | 'banner'
+  variable_id?: string
+  completion_status?: string
+  filters?: FilterSpec[]
+  filter_tree?: FilterGroup | null
+  banner_request?: BannerRequest
+}
+
+export interface SlidePlanItem {
+  section_id: string
+  title: string
+  bullets: string[]
+  speaker_notes?: string
+}
+
 let authToken: string | null = null
 
 export function setAuthToken(token: string | null) {
@@ -826,6 +905,8 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 const API_TIMEOUT_MS = 12_000
 /** Schema, QC summary, and warmup on large surveys. */
 const SURVEY_LOAD_TIMEOUT_MS = 120_000
+/** LimeSurvey-backed list/connection calls (can be slow on VPN). */
+const LIMESURVEY_TIMEOUT_MS = 45_000
 /** Per-request ceiling for analysis calls (crosstabs run in chunks for large builds). */
 const ANALYSIS_TIMEOUT_MS = 600_000
 
@@ -835,6 +916,9 @@ function timeoutErrorMessage(timeoutMs: number): string {
   }
   if (timeoutMs >= SURVEY_LOAD_TIMEOUT_MS) {
     return 'Request timed out while loading survey data. Large surveys can take a minute — wait and try again, or refresh the page.'
+  }
+  if (timeoutMs >= LIMESURVEY_TIMEOUT_MS) {
+    return 'LimeSurvey is not responding. Check your VPN/network connection, then refresh. Cached surveys may still appear if available.'
   }
   return 'Request timed out. Check your connection or try again in a moment.'
 }
@@ -976,6 +1060,40 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(workflow),
     }),
+  addProjectActivity: (id: number, message: string) =>
+    fetchJson<ProjectWorkflowResponse>(`/api/projects/${id}/workflow/activities`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    }),
+  addTaskComment: (surveyId: number, taskId: string, body: string) =>
+    fetchJson<ProjectWorkflowResponse>(`/api/projects/${surveyId}/workflow/tasks/${taskId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    }),
+  getMyTasks: () => fetchJson<{ tasks: MyTaskRow[]; count: number }>('/api/me/tasks'),
+  exportQuestionnaireSpec: async (
+    id: number,
+    format: 'xlsx' | 'docx',
+    filename?: string,
+  ) => {
+    const ext = format === 'docx' ? 'docx' : 'xlsx'
+    const res = await fetch(`/api/projects/${id}/questionnaire/export?format=${ext}`, {
+      headers: authHeaders(),
+    })
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      throw new Error(errBody.detail || `Export failed (${res.status})`)
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename ?? `questionnaire.${ext}`
+    a.click()
+    URL.revokeObjectURL(url)
+  },
   getPinnedSurveys: () => fetchJson<{ survey_ids: number[] }>('/api/me/pinned-surveys'),
   setPinnedSurveys: (surveyIds: number[]) =>
     fetchJson<{ survey_ids: number[] }>('/api/me/pinned-surveys', {
@@ -983,7 +1101,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ survey_ids: surveyIds }),
     }),
-  getConnection: () => fetchJson<ConnectionStatus>('/api/connection'),
+  getConnection: () => fetchJson<ConnectionStatus>('/api/connection', undefined, LIMESURVEY_TIMEOUT_MS),
   getAiStatus: () => fetchJson<AiStatus>('/api/ai/status'),
   previewReportNarrative: (
     id: number,
@@ -1007,12 +1125,28 @@ export const api = {
         }),
       },
     ),
+  previewReportSlidePlan: (
+    id: number,
+    body: {
+      deck_title?: string
+      sections: ReportSectionPayload[]
+    },
+  ) =>
+    fetchJson<{ slides: SlidePlanItem[]; deck_title: string }>(
+      `/api/projects/${id}/analysis/report-slide-plan`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      ANALYSIS_TIMEOUT_MS,
+    ),
   getProjects: (opts?: { limit?: number; includeStats?: boolean }) => {
     const params = new URLSearchParams()
     if (opts?.limit != null) params.set('limit', String(opts.limit))
     if (opts?.includeStats) params.set('include_stats', 'true')
     const qs = params.toString()
-    return fetchJson<{ projects: Project[] }>(`/api/projects${qs ? `?${qs}` : ''}`)
+    return fetchJson<{ projects: Project[] }>(`/api/projects${qs ? `?${qs}` : ''}`, undefined, LIMESURVEY_TIMEOUT_MS)
   },
   getProjectStats: (ids: number[]) =>
     fetchJson<{
@@ -1025,11 +1159,15 @@ export const api = {
           created_date: string | null
         }
       >
-    }>('/api/projects/stats', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ survey_ids: ids }),
-    }),
+    }>(
+      '/api/projects/stats',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ survey_ids: ids }),
+      },
+      LIMESURVEY_TIMEOUT_MS,
+    ),
   getProject: (id: number) =>
     fetchJson<ProjectDetail>(`/api/projects/${id}`, undefined, SURVEY_LOAD_TIMEOUT_MS),
   getQuestions: (id: number) =>
@@ -1293,6 +1431,23 @@ export const api = {
     }),
   deleteBookmark: (id: number, bookmarkId: string) =>
     fetchJson<{ ok: boolean }>(`/api/projects/${id}/bookmarks/${bookmarkId}`, { method: 'DELETE' }),
+  getTeamPresets: (id: number, kind?: TeamPresetKind) => {
+    const qs = kind ? `?kind=${encodeURIComponent(kind)}` : ''
+    return fetchJson<{ presets: TeamPreset[] }>(`/api/projects/${id}/team-presets${qs}`)
+  },
+  createTeamPreset: (
+    id: number,
+    body: { name: string; kind: TeamPresetKind; config: Record<string, unknown> },
+  ) =>
+    fetchJson<TeamPreset>(`/api/projects/${id}/team-presets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteTeamPreset: (id: number, presetId: string) =>
+    fetchJson<{ ok: boolean }>(`/api/projects/${id}/team-presets/${presetId}`, { method: 'DELETE' }),
+  applyTeamPreset: (id: number, presetId: string) =>
+    fetchJson<TeamPreset>(`/api/projects/${id}/team-presets/${presetId}/apply`, { method: 'POST' }),
   getWeightConfig: (id: number) =>
     fetchJson<WeightConfig>(`/api/projects/${id}/weight-config`),
   setWeightConfig: (id: number, config: WeightConfig) =>
@@ -1352,6 +1507,34 @@ export const api = {
     const a = document.createElement('a')
     a.href = url
     a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+  exportReportDeck: async (
+    id: number,
+    body: {
+      deck_title?: string
+      sections: ReportSectionPayload[]
+      slide_plan?: SlidePlanItem[]
+      include_charts?: boolean
+      ai_narrative?: boolean
+    },
+    filename = 'report_deck.pptx',
+  ) => {
+    const res = await fetch(`/api/projects/${id}/analysis/report-deck`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, format: 'pptx' }),
+    })
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      throw new Error(errBody.detail || `Export failed (${res.status})`)
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename.endsWith('.pptx') ? filename : `${filename}.pptx`
     a.click()
     URL.revokeObjectURL(url)
   },

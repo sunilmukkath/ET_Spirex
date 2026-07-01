@@ -7,9 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from app.models.project_workflow import (
+    ProjectActivity,
     ProjectMember,
     ProjectTask,
     ProjectWorkflow,
+    TaskComment,
+    TranslationRow,
     normalize_module_ids,
 )
 from app.models.team_registry import PROJECT_MODULES
@@ -21,6 +24,64 @@ _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "project_workflow"
 def _path(survey_id: int) -> Path:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     return _DATA_DIR / f"{survey_id}.json"
+
+
+def _normalize_comment(raw: dict[str, Any]) -> TaskComment | None:
+    body = str(raw.get("body") or "").strip()
+    if not body:
+        return None
+    comment_id = str(raw.get("id") or "").strip() or uuid.uuid4().hex[:12]
+    author = str(raw.get("author") or "").strip() or "unknown"
+    created_at = float(raw["created_at"]) if raw.get("created_at") is not None else time.time()
+    return TaskComment(id=comment_id, author=author, body=body, created_at=created_at)
+
+
+def _normalize_activity(raw: dict[str, Any]) -> ProjectActivity | None:
+    message = str(raw.get("message") or "").strip()
+    if not message:
+        return None
+    activity_id = str(raw.get("id") or "").strip() or uuid.uuid4().hex[:12]
+    activity_type = str(raw.get("type") or "note").strip().lower()
+    if activity_type not in {
+        "phase_change",
+        "task_created",
+        "task_updated",
+        "task_comment",
+        "member_added",
+        "member_removed",
+        "note",
+    }:
+        activity_type = "note"
+    created_at = float(raw["created_at"]) if raw.get("created_at") is not None else time.time()
+    task_id = str(raw.get("task_id") or "").strip() or None
+    actor = str(raw.get("actor") or "").strip() or None
+    return ProjectActivity(
+        id=activity_id,
+        type=activity_type,  # type: ignore[arg-type]
+        message=message,
+        actor=actor,
+        created_at=created_at,
+        task_id=task_id,
+    )
+
+
+def _normalize_translation(raw: dict[str, Any]) -> TranslationRow | None:
+    language = str(raw.get("language") or "").strip()
+    if not language:
+        return None
+    row_id = str(raw.get("id") or "").strip() or uuid.uuid4().hex[:12]
+    status = str(raw.get("status") or "not_started").strip().lower()
+    if status not in {"not_started", "in_progress", "review", "complete"}:
+        status = "not_started"
+    updated_at = float(raw["updated_at"]) if raw.get("updated_at") is not None else None
+    return TranslationRow(
+        id=row_id,
+        language=language,
+        label=str(raw.get("label") or "").strip(),
+        status=status,  # type: ignore[arg-type]
+        notes=str(raw.get("notes") or "").strip(),
+        updated_at=updated_at,
+    )
 
 
 def _normalize_task(raw: dict[str, Any]) -> ProjectTask | None:
@@ -46,6 +107,12 @@ def _normalize_task(raw: dict[str, Any]) -> ProjectTask | None:
         priority = "medium"
     assignee = str(raw.get("assignee") or "").strip() or None
     due_date = str(raw.get("due_date") or "").strip() or None
+    comments: list[TaskComment] = []
+    for item in raw.get("comments") or []:
+        if isinstance(item, dict):
+            comment = _normalize_comment(item)
+            if comment:
+                comments.append(comment)
     return ProjectTask(
         id=task_id,
         title=title,
@@ -58,6 +125,7 @@ def _normalize_task(raw: dict[str, Any]) -> ProjectTask | None:
         created_by=str(raw.get("created_by") or "").strip() or None,
         created_at=float(raw["created_at"]) if raw.get("created_at") is not None else None,
         updated_at=float(raw["updated_at"]) if raw.get("updated_at") is not None else None,
+        comments=comments,
     )
 
 
@@ -113,6 +181,26 @@ def _normalize_workflow(raw: dict[str, Any] | None) -> ProjectWorkflow:
     target_field_start = str(raw.get("target_field_start") or "").strip() or None
     target_delivery = str(raw.get("target_delivery") or "").strip() or None
 
+    activities: list[ProjectActivity] = []
+    for item in raw.get("activities") or []:
+        if isinstance(item, dict):
+            activity = _normalize_activity(item)
+            if activity:
+                activities.append(activity)
+    activities.sort(key=lambda a: a.created_at, reverse=True)
+
+    from app.models.project_workflow import MAX_ACTIVITIES
+
+    if len(activities) > MAX_ACTIVITIES:
+        activities = activities[:MAX_ACTIVITIES]
+
+    translations: list[TranslationRow] = []
+    for item in raw.get("translations") or []:
+        if isinstance(item, dict):
+            row = _normalize_translation(item)
+            if row:
+                translations.append(row)
+
     return ProjectWorkflow(
         phase=phase,  # type: ignore[arg-type]
         study_type=study_type,  # type: ignore[arg-type]
@@ -123,6 +211,9 @@ def _normalize_workflow(raw: dict[str, Any] | None) -> ProjectWorkflow:
         members=members,
         tasks=tasks,
         notes=str(raw.get("notes") or "").strip(),
+        activities=activities,
+        translations=translations,
+        pilot_tasks_seeded=bool(raw.get("pilot_tasks_seeded")),
     )
 
 
@@ -137,13 +228,136 @@ def get_project_workflow(survey_id: int) -> ProjectWorkflow:
     return _normalize_workflow(raw)
 
 
-def set_project_workflow(survey_id: int, workflow: ProjectWorkflow) -> ProjectWorkflow:
+def set_project_workflow(
+    survey_id: int,
+    workflow: ProjectWorkflow,
+    *,
+    editor: str | None = None,
+) -> ProjectWorkflow:
+    from app.services.pilot_checklist import seed_pilot_tasks
+    from app.services.workflow_activity import append_activities, diff_workflow_activities
+
+    previous = get_project_workflow(survey_id)
     normalized = _normalize_workflow(workflow.model_dump())
+    normalized = seed_pilot_tasks(normalized, editor=editor)
+    events = diff_workflow_activities(previous, normalized, editor=editor)
+    if events:
+        normalized = append_activities(normalized, events)
     _path(survey_id).write_text(
         json.dumps(normalized.model_dump(), indent=2),
         encoding="utf-8",
     )
     return normalized
+
+
+def add_manual_activity(survey_id: int, *, actor: str, message: str) -> ProjectWorkflow:
+    from app.services.workflow_activity import _new_activity, append_activities
+
+    workflow = get_project_workflow(survey_id)
+    updated = append_activities(
+        workflow,
+        [_new_activity("note", message, actor=actor)],
+    )
+    _path(survey_id).write_text(
+        json.dumps(updated.model_dump(), indent=2),
+        encoding="utf-8",
+    )
+    return updated
+
+
+def add_task_comment(
+    survey_id: int,
+    task_id: str,
+    *,
+    author: str,
+    body: str,
+) -> ProjectWorkflow:
+    from app.services.workflow_activity import _new_activity, append_activities
+
+    workflow = get_project_workflow(survey_id)
+    text = body.strip()
+    if not text:
+        raise ValueError("Comment body required")
+
+    found = False
+    tasks: list[ProjectTask] = []
+    for task in workflow.tasks:
+        if task.id != task_id:
+            tasks.append(task)
+            continue
+        found = True
+        comment = TaskComment(
+            id=uuid.uuid4().hex[:12],
+            author=author,
+            body=text,
+            created_at=time.time(),
+        )
+        tasks.append(
+            ProjectTask(
+                **{
+                    **task.model_dump(),
+                    "comments": [*task.comments, comment],
+                    "updated_at": time.time(),
+                }
+            )
+        )
+    if not found:
+        raise ValueError("Task not found")
+
+    data = workflow.model_dump()
+    data["tasks"] = [t.model_dump() for t in tasks]
+    interim = ProjectWorkflow(**data)
+    task_title = next(t.title for t in interim.tasks if t.id == task_id)
+    preview = text[:80] + ("…" if len(text) > 80 else "")
+    updated = append_activities(
+        interim,
+        [
+            _new_activity(
+                "task_comment",
+                f"Comment on “{task_title}”: {preview}",
+                actor=author,
+                task_id=task_id,
+            )
+        ],
+    )
+    _path(survey_id).write_text(
+        json.dumps(updated.model_dump(), indent=2),
+        encoding="utf-8",
+    )
+    return updated
+
+
+def list_my_tasks(username: str) -> list[dict[str, Any]]:
+    if not username:
+        return []
+    out: list[dict[str, Any]] = []
+    if not _DATA_DIR.is_dir():
+        return []
+    for path in sorted(_DATA_DIR.glob("*.json")):
+        try:
+            survey_id = int(path.stem)
+        except ValueError:
+            continue
+        workflow = get_project_workflow(survey_id)
+        for task in workflow.tasks:
+            if task.assignee != username or task.status == "done":
+                continue
+            out.append(
+                {
+                    "survey_id": survey_id,
+                    "task": task.model_dump(),
+                    "phase": workflow.phase,
+                    "client_name": workflow.client_name,
+                    "project_code": workflow.project_code,
+                }
+            )
+    out.sort(
+        key=lambda row: (
+            row["task"].get("due_date") or "9999",
+            row["task"].get("title", "").lower(),
+        )
+    )
+    return out
 
 
 def _find_member(workflow: ProjectWorkflow, username: str | None) -> ProjectMember | None:

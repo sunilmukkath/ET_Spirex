@@ -487,7 +487,7 @@ export function QcSettingsPanel({
             </p>
             <div className="space-y-4 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
               <p className="text-xs text-slate-600">
-                Require an interviewer question in QC or Field manage settings. Checks duplicate
+                Require an interviewer question in QC or Field team settings. Checks duplicate
                 answers, interviews at the same GPS spot, and back-to-back completes with too little
                 time between them.
               </p>
@@ -637,7 +637,7 @@ export function QcSettingsPanel({
               </div>
               {!config.interviewer_variable_id && (
                 <p className="text-xs text-amber-800">
-                  Set the interviewer variable on the <strong>Team</strong> tab or in Field manage
+                  Set the interviewer variable on the <strong>Field team</strong> tab or in QC settings
                   quotas so these checks can run.
                 </p>
               )}

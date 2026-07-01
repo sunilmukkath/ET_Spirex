@@ -4,7 +4,7 @@ import io
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from typing import Any, TypeVar
 
 import pandas as pd
@@ -60,8 +60,8 @@ def get_client(*, force_new: bool = False) -> Client:
         return _lime_client
 
 
-def execute_lime(operation: Callable[[Client], T]) -> T:
-    """Run a LimeSurvey RPC call, re-authenticating once if the session key expired."""
+def _run_lime_operation(operation: Callable[[Client], T]) -> T:
+    """Run one LimeSurvey RPC with session retry."""
     last_error: Exception | None = None
     for attempt in range(2):
         try:
@@ -75,6 +75,21 @@ def execute_lime(operation: Callable[[Client], T]) -> T:
             raise
     assert last_error is not None
     raise last_error
+
+
+def execute_lime(operation: Callable[[Client], T], *, timeout: float | None = None) -> T:
+    """Run a LimeSurvey RPC call with timeout and re-auth on stale session."""
+    effective_timeout = timeout if timeout is not None else settings.lime_rpc_timeout
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_run_lime_operation, operation)
+        try:
+            return future.result(timeout=effective_timeout)
+        except FuturesTimeoutError:
+            invalidate_lime_client()
+            raise LimeSurveyError(
+                f"LimeSurvey did not respond within {effective_timeout:.0f}s. "
+                "Check your network, VPN, or LimeSurvey server."
+            ) from None
 
 
 def clear_client_cache() -> None:
@@ -108,9 +123,20 @@ def _survey_list_index() -> dict[int, dict[str, Any]]:
         surveys = client.list_surveys(username)
         return {int(s["sid"]): s for s in surveys}
 
-    index = execute_lime(load_surveys)
+    try:
+        index = execute_lime(load_surveys)
+    except LimeSurveyError:
+        if cache_key in _survey_list_cache:
+            return _survey_list_cache[cache_key][1]
+        raise
+
     _survey_list_cache[cache_key] = (now, index)
     return index
+
+
+def survey_title(survey_id: int, props: dict[str, Any] | None = None) -> str:
+    """Public helper for survey display title."""
+    return _survey_title(survey_id, props)
 
 
 def _survey_title(survey_id: int, props: dict[str, Any] | None = None) -> str:
@@ -157,26 +183,18 @@ def _parse_timestamp(value: str | None) -> float:
 
 
 def _fetch_project_meta(survey_id: int) -> dict[str, Any]:
-    """Fetch completed sample size and creation date for one survey."""
+    """Fetch response counts for one survey (summary only — dates come from list_surveys)."""
     cached = _stats_cache.get(survey_id)
     if cached and time.time() - cached[0] < _PROJECTS_TTL:
         return cached[1]
 
     def load_meta(active_client: Client) -> dict[str, Any]:
         summary = active_client.get_summary(survey_id) or {}
-        datecreated = None
-        try:
-            props = active_client.get_survey_properties(
-                survey_id, properties=["datecreated"]
-            )
-            datecreated = props.get("datecreated") or None
-        except Exception:
-            pass
         return {
             "completed": int(summary.get("completed_responses") or 0),
             "incomplete": int(summary.get("incomplete_responses") or 0),
             "total": int(summary.get("count_total") or 0),
-            "datecreated": datecreated,
+            "datecreated": None,
         }
 
     meta = execute_lime(load_meta)
@@ -197,7 +215,7 @@ def fetch_projects_stats(survey_ids: list[int]) -> dict[int, dict[str, Any]]:
     ]
 
     if missing:
-        workers = min(16, len(missing))
+        workers = min(24, len(missing))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_fetch_project_meta, sid): sid for sid in missing}
             for future in as_completed(futures):
@@ -274,11 +292,17 @@ def list_projects(*, include_stats: bool = False, limit: int | None = None) -> l
             )
         return projects
 
-    projects = execute_lime(load_projects)
-    _sort_projects_for_dashboard(projects)
-
-    if not include_stats:
+    try:
+        projects = execute_lime(load_projects)
+    except LimeSurveyError:
+        if cache_key in _projects_cache:
+            projects = _projects_cache[cache_key][1]
+        else:
+            raise
+    else:
         _projects_cache[cache_key] = (now, projects)
+
+    _sort_projects_for_dashboard(projects)
 
     result = projects
     if limit is not None:
@@ -382,17 +406,14 @@ def get_connection_status() -> dict[str, Any]:
     try:
         def check_connection(client: Client) -> dict[str, Any]:
             version = client.get_server_version()
-            username = settings.limesurvey_filter_user or settings.limesurvey_username
-            survey_count = len(client.list_surveys(username))
             return {
                 "connected": True,
                 "configured": True,
                 "version": version,
-                "survey_count": survey_count,
                 "url": settings.limesurvey_url,
             }
 
-        return execute_lime(check_connection)
+        return execute_lime(check_connection, timeout=min(15.0, settings.lime_rpc_timeout))
     except Exception as exc:
         return {
             "connected": False,

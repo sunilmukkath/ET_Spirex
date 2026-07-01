@@ -7,13 +7,18 @@ import {
   Kanban,
   Layers,
   Loader2,
+  Scale,
   ShieldCheck,
   Sigma,
   SlidersHorizontal,
   Table2,
   Users,
+  Variable,
 } from 'lucide-react'
-import { api, type SurveyOverview } from '../../api/client'
+import { api, type ProjectPhase, type SurveyOverview } from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
+import { PROJECT_PHASE_LABELS } from '../../lib/workflowPhases'
+import { ET_SURVEY_HOME_TAGLINE, ET_SURVEY_HOME_TITLE, NAV_GROUP_LABELS } from '../../lib/etCopy'
 
 interface Props {
   surveyId: number
@@ -68,53 +73,92 @@ function LinkSection({ title, children }: { title: string; children: React.React
 }
 
 export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
+  const { user } = useAuth()
   const [overview, setOverview] = useState<SurveyOverview | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [phase, setPhase] = useState<ProjectPhase | null>(null)
+  const [myOpenTasks, setMyOpenTasks] = useState(0)
+  const [statsLoading, setStatsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    api
+    setStatsLoading(true)
+    setError(null)
+    void api.getProjectWorkflow(surveyId).then((workflowData) => {
+      if (cancelled) return
+      setPhase(workflowData.workflow.phase ?? 'field')
+      const username = user?.username
+      const open =
+        username != null
+          ? workflowData.workflow.tasks.filter(
+              (t) => t.assignee === username && t.status !== 'done',
+            ).length
+          : 0
+      setMyOpenTasks(open)
+    }).catch(() => {})
+
+    void api
       .getSurveyOverview(surveyId)
-      .then((data) => {
-        if (!cancelled) setOverview(data)
+      .then((overviewData) => {
+        if (!cancelled) setOverview(overviewData)
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load overview')
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setStatsLoading(false)
       })
+
     return () => {
       cancelled = true
     }
-  }, [surveyId])
+  }, [surveyId, user?.username])
 
-  if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-12">
-        <Loader2 className="animate-spin text-[var(--et-teal)]" size={32} />
-      </div>
-    )
-  }
-
-  if (error || !overview) {
-    return <p className="p-8 text-sm text-rose-700">{error ?? 'No overview data'}</p>
-  }
-
-  const qs = overview.quota_summary
+  const qs = overview?.quota_summary
 
   return (
     <div className="flex-1 overflow-y-auto bg-[var(--canvas-subtle)] p-4 sm:p-6 et-scroll">
       <div className="mx-auto max-w-5xl space-y-8">
         <header>
-          <h2 className="font-display text-xl font-semibold text-slate-900">Survey home</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-display text-xl font-semibold text-slate-900">{ET_SURVEY_HOME_TITLE}</h2>
+            {phase && (
+              <span className="rounded-full bg-[var(--et-teal-light)] px-2.5 py-0.5 text-xs font-semibold text-[var(--et-teal-dark)] ring-1 ring-[var(--et-teal)]/20">
+                {PROJECT_PHASE_LABELS[phase]}
+              </span>
+            )}
+          </div>
           <p className="mt-1 text-sm text-slate-500">
-            Mission control — sample health, quotas, and shortcuts to every part of this study.
+            {ET_SURVEY_HOME_TAGLINE}
+            {myOpenTasks > 0 && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={() => onNavigate('workflow')}
+                  className="font-medium text-[var(--et-teal-dark)] hover:underline"
+                >
+                  {myOpenTasks} open task{myOpenTasks === 1 ? '' : 's'} assigned to you
+                </button>
+              </>
+            )}
           </p>
         </header>
 
+        {error && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Sample stats could not be loaded ({error}). Shortcuts below still work.
+          </div>
+        )}
+
+        {statsLoading && !overview && (
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+            <Loader2 className="animate-spin text-[var(--et-teal)]" size={16} />
+            Loading sample stats…
+          </div>
+        )}
+
+        {overview && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Completed" value={overview.response_count.toLocaleString()} />
           <StatCard
@@ -125,8 +169,9 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
           <StatCard label="Questions" value={overview.question_count} sub={`${overview.banner_ready_count} banner-ready`} />
           <StatCard label="Incomplete" value={overview.incomplete_count.toLocaleString()} />
         </div>
+        )}
 
-        {qs && (
+        {qs && overview && (
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="text-sm font-semibold text-slate-900">Quota snapshot</h3>
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -147,7 +192,7 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
           </div>
         )}
 
-        <LinkSection title="Analyze">
+        <LinkSection title={NAV_GROUP_LABELS.Analyze}>
           <QuickLink
             icon={<Layers size={18} />}
             title="Question profiles"
@@ -168,19 +213,19 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
           />
           <QuickLink
             icon={<Sigma size={18} />}
-            title="Statistics"
+            title="Advanced statistics"
             desc="Correlations, regression, and advanced analysis"
             onClick={() => onNavigate('multivariate')}
           />
           <QuickLink
             icon={<FileText size={18} />}
-            title="Reports"
+            title="Report builder"
             desc="Assemble exportable report decks"
             onClick={() => onNavigate('reports')}
           />
         </LinkSection>
 
-        <LinkSection title="Field & project">
+        <LinkSection title={NAV_GROUP_LABELS.Field}>
           <QuickLink
             icon={<ClipboardList size={18} />}
             title="Fielding & quotas"
@@ -189,30 +234,46 @@ export function SurveyHomePanel({ surveyId, onNavigate }: Props) {
           />
           <QuickLink
             icon={<ShieldCheck size={18} />}
-            title="Response quality"
-            desc="QC scan, flagged records, GPS proximity checks"
+            title="QC review"
+            desc="Flagged responses, speeders, GPS checks, and exclusions"
             onClick={() => onNavigate('fields', 'quality')}
           />
           <QuickLink
             icon={<Users size={18} />}
-            title="Interviewers"
-            desc="Throughput and rejection rates by field team member"
+            title="Field team"
+            desc="Interviewer throughput, approvals, and rejection rates"
             onClick={() => onNavigate('fields', 'team')}
           />
           <QuickLink
             icon={<Kanban size={18} />}
-            title="Workflow & tasks"
-            desc="Team assignments, module access, and task tracker"
+            title="Project workflow"
+            desc={
+              myOpenTasks > 0
+                ? `Team assignments and task tracker · ${myOpenTasks} open for you`
+                : 'Team assignments, module access, and task tracker'
+            }
             onClick={() => onNavigate('workflow')}
           />
         </LinkSection>
 
-        <LinkSection title="Data">
+        <LinkSection title={NAV_GROUP_LABELS.Data}>
           <QuickLink
             icon={<SlidersHorizontal size={18} />}
-            title="Data setup"
-            desc="Question types, weights, recodes, and derived variables"
-            onClick={() => onNavigate('variables')}
+            title="Question setup"
+            desc="Analysis types and per-question configuration"
+            onClick={() => onNavigate('variables', 'questions')}
+          />
+          <QuickLink
+            icon={<Variable size={18} />}
+            title="Custom variables"
+            desc="Recodes, nets, and combined questions"
+            onClick={() => onNavigate('variables', 'custom')}
+          />
+          <QuickLink
+            icon={<Scale size={18} />}
+            title="Weighting"
+            desc="Survey weight variable configuration"
+            onClick={() => onNavigate('variables', 'weighting')}
           />
           <QuickLink
             icon={<Database size={18} />}

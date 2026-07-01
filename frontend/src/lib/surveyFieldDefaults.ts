@@ -1,6 +1,13 @@
 import type { QcConfig, QuotaConfig, SurveyVariable } from '../api/client'
 
 /** Cross-survey defaults — matched by LimeSurvey question code when opening a new study. */
+export interface SurveyLayoutPrefs {
+  mode?: string
+  analyzeView?: string
+  fieldView?: string
+  setupView?: string
+}
+
 export interface SurveyFieldDefaults {
   interviewerCode?: string | null
   gpsCode?: string | null
@@ -9,6 +16,8 @@ export interface SurveyFieldDefaults {
   quotaFieldCodes?: string[]
   quotaLayerCodes?: string[][]
   quotaBasis?: 'complete' | 'qc_approved'
+  /** Per-survey workspace tab memory (survey id as string key). */
+  surveyLayouts?: Record<string, SurveyLayoutPrefs>
   updatedAt: number
 }
 
@@ -40,6 +49,23 @@ export function saveUserFieldDefaults(username: string, patch: Partial<SurveyFie
       updatedAt: Date.now(),
     }),
   )
+}
+
+export function loadSurveyLayout(username: string, surveyId: number): SurveyLayoutPrefs | null {
+  const defaults = loadUserFieldDefaults(username)
+  return defaults?.surveyLayouts?.[String(surveyId)] ?? null
+}
+
+export function saveSurveyLayout(
+  username: string,
+  surveyId: number,
+  patch: Partial<SurveyLayoutPrefs>,
+) {
+  const current = loadUserFieldDefaults(username) ?? { updatedAt: Date.now() }
+  const key = String(surveyId)
+  const layouts = { ...(current.surveyLayouts ?? {}) }
+  layouts[key] = { ...layouts[key], ...patch }
+  saveUserFieldDefaults(username, { surveyLayouts: layouts })
 }
 
 export function variableByCode(variables: SurveyVariable[], code: string): SurveyVariable | undefined {

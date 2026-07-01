@@ -3,37 +3,54 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from app.services.analysis_context import load_analysis_context
 from app.services.qc_config_store import get_qc_config
 from app.services.qc_filter import get_qc_excluded_response_ids
+from app.services.question_schema import build_survey_schema
 from app.services.quota_config_store import get_quota_config
 from app.services.quota_check import check_quotas
 
 
-def survey_overview(survey_id: int) -> dict[str, Any]:
-    schema, df_complete = load_analysis_context(survey_id, completion_status="complete")
-    total_complete = len(df_complete)
-
-    total_all = total_complete
+def _response_counts(survey_id: int) -> tuple[int, int, int]:
+    """Return (completed, incomplete, total) without failing when no response table exists."""
+    total_complete = 0
     incomplete = 0
+    total_all = 0
+
     try:
         from app.lime_client import execute_lime
 
         summary = execute_lime(lambda client: client.get_summary(survey_id) or {})
+        total_complete = int(summary.get("completed_responses") or 0)
         incomplete = int(summary.get("incomplete_responses") or 0)
-        total_all = int(summary.get("count_total") or 0) or (
-            int(summary.get("completed_responses") or total_complete) + incomplete
-        )
-        if not incomplete and total_all > total_complete:
-            incomplete = max(0, total_all - total_complete)
+        total_all = int(summary.get("count_total") or 0) or (total_complete + incomplete)
+        if total_all > 0:
+            return total_complete, incomplete, total_all
     except Exception:
+        pass
+
+    try:
+        from app.services.response_store import get_responses
+
+        df_complete = get_responses(survey_id, completion_status="complete").dataframe
+        total_complete = len(df_complete)
         try:
-            _, df_all = load_analysis_context(survey_id, completion_status="all")
+            df_all = get_responses(survey_id, completion_status="all").dataframe
             total_all = len(df_all)
             incomplete = max(0, total_all - total_complete)
         except Exception:
             total_all = total_complete
             incomplete = 0
+    except Exception:
+        total_complete = 0
+        incomplete = 0
+        total_all = 0
+
+    return total_complete, incomplete, total_all
+
+
+def survey_overview(survey_id: int) -> dict[str, Any]:
+    schema = build_survey_schema(survey_id, light=True)
+    total_complete, incomplete, total_all = _response_counts(survey_id)
 
     qc_cfg = get_qc_config(survey_id)
     quota_cfg = get_quota_config(survey_id)

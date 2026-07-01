@@ -3,6 +3,7 @@ import { Loader2, Save, Settings, Shield, Sparkles, Users, Wifi, WifiOff } from 
 import { api, type AiStatus, type GlobalRole, type TeamRegistry } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { TEAM_USERS } from '../auth/AuthContext'
+import { ET_LIMESURVEY_LABEL, ET_SETTINGS_SUBTITLE } from '../lib/etCopy'
 
 const ROLE_LABELS: Record<GlobalRole, string> = {
   admin: 'Admin — manage team roles & all projects',
@@ -81,7 +82,7 @@ export function AdminSettingsPage() {
           <Settings size={22} className="text-[var(--et-teal)]" />
           <h1 className="font-display text-2xl font-semibold text-slate-900">Settings</h1>
         </div>
-        <p className="mt-1 text-sm text-slate-500">Team workspace and connection status.</p>
+        <p className="mt-1 text-sm text-slate-500">{ET_SETTINGS_SUBTITLE}</p>
       </header>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -194,7 +195,7 @@ export function AdminSettingsPage() {
         </div>
         <p className="mt-2 text-sm text-slate-600">
           {connection?.connected
-            ? `Connected to ${connection.url ?? 'LimeSurvey'}`
+            ? `Connected to ${connection.url ?? ET_LIMESURVEY_LABEL}`
             : connection?.message ?? 'Not connected'}
         </p>
       </section>
@@ -221,13 +222,15 @@ export function AdminSettingsPage() {
         </ul>
       </section>
 
-      <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-        <p className="font-medium">Deployment note</p>
-        <p className="mt-1 text-xs leading-relaxed">
-          Survey configs (QC, quotas, custom variables) are stored as JSON on the server. Auth sessions reset when the
-          server restarts. For production rollout, move to environment-based credentials and persistent session storage.
-        </p>
-      </section>
+      {isAdmin && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+          <p className="font-medium">Deployment note (admins)</p>
+          <p className="mt-1 text-xs leading-relaxed">
+            Survey configs (QC, quotas, custom variables) are stored as JSON on the server. Auth sessions reset when the
+            server restarts. For production rollout, move to environment-based credentials and persistent session storage.
+          </p>
+        </section>
+      )}
     </div>
   )
 }

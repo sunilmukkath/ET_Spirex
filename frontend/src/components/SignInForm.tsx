@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Lock, User } from 'lucide-react'
 import { api } from '../api/client'
+import { ET_ORG_NAME, ET_PRODUCT_NAME } from '../lib/etCopy'
 import { TEAM_USERS, useAuth } from '../auth/AuthContext'
 
 interface Props {
@@ -61,9 +62,9 @@ export function SignInForm({ onSuccess, compact }: Props) {
         />
         <div>
           <h2 className="text-lg font-semibold text-white">
-            Sign in to ET <span className="text-[var(--et-yellow-bright)]">Scout</span>
+            Sign in to <span className="text-[var(--et-yellow-bright)]">{ET_PRODUCT_NAME}</span>
           </h2>
-          <p className="text-xs text-white/60">Elastic Tree team access</p>
+          <p className="text-xs text-white/60">{ET_ORG_NAME} team access</p>
         </div>
       </div>
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -24,6 +25,16 @@ Rules:
 - Lead with the most important pattern; note sample size if n is small (<100).
 - British English, professional tone, no hype.
 - Return plain text only: one bullet per line, each line starting with "• "."""
+
+SLIDE_PLAN_SYSTEM_PROMPT = """You are a senior market research analyst building a client presentation deck for Elastic Tree.
+Rules:
+- Use ONLY numbers and facts present in the sections JSON. Never invent statistics.
+- Return valid JSON only (no markdown fences).
+- Schema:
+{"slides":[{"section_id":"...","title":"short slide title","bullets":["bullet 1","bullet 2"],"speaker_notes":"optional presenter note"}]}
+- One slide object per section_id provided, in the same order.
+- 3–4 bullets per slide, max 20 words each, British English.
+- Titles should be insight-led, not just question codes."""
 
 
 def ai_status() -> dict[str, Any]:
@@ -115,9 +126,9 @@ def generate_narrative(context: dict[str, Any]) -> str | None:
 
     try:
         if provider == "anthropic":
-            return _anthropic_complete(user_prompt)
+            return _anthropic_complete(user_prompt, system=SYSTEM_PROMPT)
         if provider == "azure":
-            return _azure_complete(user_prompt)
+            return _azure_complete(user_prompt, system=SYSTEM_PROMPT)
     except Exception as exc:
         logger.warning("AI narrative failed: %s", exc)
         raise
@@ -125,10 +136,75 @@ def generate_narrative(context: dict[str, Any]) -> str | None:
     return None
 
 
-def _anthropic_complete(user_prompt: str) -> str:
+def generate_slide_plan(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return slide plan items: section_id, title, bullets, speaker_notes."""
+    provider = settings.resolved_ai_provider
+    if not provider:
+        return []
+
+    user_prompt = (
+        "Create a slide plan for this multi-section research report.\n\n"
+        f"```json\n{json.dumps({'sections': sections}, ensure_ascii=False, indent=2)}\n```"
+    )
+
+    if provider == "anthropic":
+        raw = _anthropic_complete(user_prompt, system=SLIDE_PLAN_SYSTEM_PROMPT, max_tokens=2048)
+    elif provider == "azure":
+        raw = _azure_complete(user_prompt, system=SLIDE_PLAN_SYSTEM_PROMPT, max_tokens=2048)
+    else:
+        return []
+
+    return _parse_slide_plan(raw, sections)
+
+
+def _parse_slide_plan(raw: str, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("Slide plan JSON parse failed: %s", raw[:200])
+        return _fallback_slide_plan(sections)
+
+    slides = data.get("slides") if isinstance(data, dict) else None
+    if not isinstance(slides, list):
+        return _fallback_slide_plan(sections)
+
+    by_id = {str(s.get("section_id")): s for s in slides if isinstance(s, dict)}
+    out: list[dict[str, Any]] = []
+    for sec in sections:
+        sid = str(sec.get("section_id") or "")
+        item = by_id.get(sid) or {}
+        bullets = item.get("bullets") if isinstance(item.get("bullets"), list) else []
+        out.append(
+            {
+                "section_id": sid,
+                "title": str(item.get("title") or sec.get("label") or "Slide"),
+                "bullets": [str(b).strip() for b in bullets if str(b).strip()],
+                "speaker_notes": str(item.get("speaker_notes") or "").strip(),
+            }
+        )
+    return out
+
+
+def _fallback_slide_plan(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "section_id": str(s.get("section_id") or ""),
+            "title": str(s.get("label") or "Slide"),
+            "bullets": [],
+            "speaker_notes": "",
+        }
+        for s in sections
+    ]
+
+
+def _anthropic_complete(user_prompt: str, *, system: str = SYSTEM_PROMPT, max_tokens: int = 512) -> str:
     key = settings.anthropic_api_key
     model = settings.anthropic_model
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(timeout=90.0) as client:
         res = client.post(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -138,8 +214,8 @@ def _anthropic_complete(user_prompt: str) -> str:
             },
             json={
                 "model": model,
-                "max_tokens": 512,
-                "system": SYSTEM_PROMPT,
+                "max_tokens": max_tokens,
+                "system": system,
                 "messages": [{"role": "user", "content": user_prompt}],
             },
         )
@@ -150,21 +226,21 @@ def _anthropic_complete(user_prompt: str) -> str:
         return text.strip()
 
 
-def _azure_complete(user_prompt: str) -> str:
+def _azure_complete(user_prompt: str, *, system: str = SYSTEM_PROMPT, max_tokens: int = 512) -> str:
     endpoint = settings.azure_openai_endpoint.rstrip("/")
     deployment = settings.azure_openai_deployment
     version = settings.azure_openai_api_version
     url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={version}"
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(timeout=90.0) as client:
         res = client.post(
             url,
             headers={"api-key": settings.azure_openai_api_key, "content-type": "application/json"},
             json={
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system},
                     {"role": "user", "content": user_prompt},
                 ],
-                "max_tokens": 512,
+                "max_tokens": max_tokens,
                 "temperature": 0.3,
             },
         )

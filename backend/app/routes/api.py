@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
@@ -22,7 +23,11 @@ from app.models.analysis import (
 )
 from app.models.auth import LoginRequest, LoginResponse
 from app.models.pinned_surveys import PinnedSurveys
-from app.models.project_workflow import ProjectWorkflow
+from app.models.project_workflow import (
+    ProjectActivityCreate,
+    ProjectWorkflow,
+    TaskCommentCreate,
+)
 from app.models.team_registry import TeamRegistry, PROJECT_MODULES
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
 from app.services.auth import VALID_USERS, authenticate, get_session, list_active_sessions, logout
@@ -40,6 +45,7 @@ from app.services.custom_variables import preview_custom_variable
 from app.services.data_quality import run_data_quality
 from app.services.excel_export import banner_result_to_excel
 from app.services.question_schema import build_survey_schema
+from app.services.questionnaire_spec import questionnaire_spec_docx, questionnaire_spec_excel
 from app.services.filter_preset_store import create_filter_preset, delete_filter_preset, list_filter_presets
 from app.services.analysis_bookmark_store import (
     create_analysis_bookmark,
@@ -63,24 +69,47 @@ from app.services.field_reports import interviewer_rejections_csv, qc_checks_csv
 from app.models.workspace_prefs import (
     AnalysisBookmarkCreate,
     FilterPresetCreate,
+    ReportDeckExportRequest,
     ReportExportRequest,
     ReportNarrativeRequest,
+    ReportSlidePlanRequest,
+    ReportSectionInput,
+    SlidePlanItem,
     WeightConfig,
 )
-from app.services.report_export import banner_to_pdf, banner_to_pptx, profile_to_pdf, profile_to_pptx
+from app.services.report_export import (
+    DeckSection,
+    banner_to_pdf,
+    banner_to_pptx,
+    merge_deck_pptx,
+    profile_to_pdf,
+    profile_to_pptx,
+)
 from app.services.ai_narrative import (
     ai_status,
     banner_context,
     generate_narrative,
+    generate_slide_plan,
     profile_context,
 )
 from app.services.raw_data import get_raw_data_page, raw_data_to_csv
 from app.services.response_store import get_responses
 from app.services.project_workflow_store import (
+    add_manual_activity,
+    add_task_comment,
+    can_access_module,
     can_manage_project_team,
     get_project_workflow,
+    list_my_tasks,
     set_project_workflow,
     workflow_access_summary,
+)
+from app.models.team_preset import TeamPresetCreate
+from app.services.team_preset_store import (
+    apply_team_preset,
+    create_team_preset,
+    delete_team_preset,
+    list_team_presets,
 )
 from app.services.pinned_survey_store import get_pinned_survey_ids, set_pinned_survey_ids
 from app.services.team_registry_store import (
@@ -244,11 +273,94 @@ def project_workflow_update(
         raise HTTPException(status_code=401, detail="Not signed in")
     if not can_manage_project_team(record.username, survey_id):
         raise HTTPException(status_code=403, detail="You do not have permission to edit project workflow")
-    saved = set_project_workflow(survey_id, body)
+    saved = set_project_workflow(survey_id, body, editor=record.username)
     return {
         "workflow": saved,
         "access": workflow_access_summary(record.username, survey_id),
     }
+
+
+@router.post("/projects/{survey_id}/workflow/activities")
+def project_workflow_add_activity(
+    survey_id: int,
+    body: ProjectActivityCreate,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    message = (body.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message required")
+    if not can_manage_project_team(record.username, survey_id):
+        raise HTTPException(status_code=403, detail="You do not have permission to post project updates")
+    saved = add_manual_activity(survey_id, actor=record.username, message=message)
+    return {
+        "workflow": saved,
+        "access": workflow_access_summary(record.username, survey_id),
+    }
+
+
+@router.post("/projects/{survey_id}/workflow/tasks/{task_id}/comments")
+def project_workflow_add_task_comment(
+    survey_id: int,
+    task_id: str,
+    body: TaskCommentCreate,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    workflow = get_project_workflow(survey_id)
+    if not workflow.members and not can_manage_project_team(record.username, survey_id):
+        raise HTTPException(status_code=403, detail="Not a project member")
+    is_member = any(m.username == record.username for m in workflow.members)
+    if not is_member and not can_manage_project_team(record.username, survey_id):
+        raise HTTPException(status_code=403, detail="Not a project member")
+    try:
+        saved = add_task_comment(
+            survey_id,
+            task_id,
+            author=record.username,
+            body=body.body,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "workflow": saved,
+        "access": workflow_access_summary(record.username, survey_id),
+    }
+
+
+@router.get("/me/tasks")
+def my_tasks_route(authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    rows = list_my_tasks(record.username)
+    title_by_id: dict[int, str] = {}
+    try:
+        for project in list_projects(include_stats=False):
+            sid = int(project.get("id") or 0)
+            if sid:
+                title_by_id[sid] = str(project.get("title") or f"Survey {sid}")
+    except Exception:
+        pass
+    tasks = []
+    for row in rows:
+        sid = int(row["survey_id"])
+        task = row["task"]
+        tasks.append(
+            {
+                "survey_id": sid,
+                "survey_title": title_by_id.get(sid) or f"Survey {sid}",
+                "phase": row.get("phase"),
+                "client_name": row.get("client_name") or "",
+                "project_code": row.get("project_code") or "",
+                "task": task,
+            }
+        )
+    return {"tasks": tasks, "count": len(tasks)}
 
 
 @router.get("/connection")
@@ -313,6 +425,42 @@ def survey_schema(
         )
     except Exception as exc:
         raise _handle_lime_error(exc) from exc
+
+
+@router.get("/projects/{survey_id}/questionnaire/export")
+def export_questionnaire_spec(
+    survey_id: int,
+    format: str = "xlsx",
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    fmt = (format or "xlsx").lower()
+    try:
+        schema = build_survey_schema(survey_id, enrich_only=True)
+        from app.lime_client import survey_title
+
+        title = survey_title(survey_id)
+        if fmt in ("xlsx", "excel"):
+            data = questionnaire_spec_excel(schema, title=title)
+            media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ext = "xlsx"
+        elif fmt in ("docx", "word"):
+            data = questionnaire_spec_docx(schema, title=title)
+            media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ext = "docx"
+        else:
+            raise HTTPException(status_code=400, detail="format must be xlsx or docx")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _handle_lime_error(exc) from exc
+
+    safe = title.replace('"', "").replace("/", "-")[:40]
+    return StreamingResponse(
+        iter([data]),
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{safe}_questionnaire.{ext}"'},
+    )
 
 
 @router.post("/projects/{survey_id}/warmup")
@@ -579,6 +727,86 @@ def remove_analysis_bookmark(
     return {"ok": True}
 
 
+_PRESET_MODULE: dict[str, str] = {
+    "banner": "analysis",
+    "filter": "analysis",
+    "quota": "field",
+    "qc": "qc",
+}
+
+
+def _require_preset_access(username: str | None, survey_id: int, kind: str) -> None:
+    module = _PRESET_MODULE.get(kind.strip().lower())
+    if not module:
+        raise HTTPException(status_code=400, detail="Invalid preset kind")
+    if can_manage_project_team(username, survey_id):
+        return
+    if not can_access_module(username, survey_id, module):
+        raise HTTPException(status_code=403, detail="No access to save team presets for this module")
+
+
+@router.get("/projects/{survey_id}/team-presets")
+def get_team_presets(
+    survey_id: int,
+    kind: str | None = None,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    return {"presets": [p.model_dump() for p in list_team_presets(survey_id, kind=kind)]}
+
+
+@router.post("/projects/{survey_id}/team-presets")
+def post_team_preset(
+    survey_id: int,
+    body: TeamPresetCreate,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    _require_preset_access(username, survey_id, body.kind)
+    try:
+        preset = create_team_preset(survey_id, body, username=username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return preset.model_dump()
+
+
+@router.delete("/projects/{survey_id}/team-presets/{preset_id}")
+def remove_team_preset(
+    survey_id: int,
+    preset_id: str,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    presets = list_team_presets(survey_id)
+    match = next((p for p in presets if p.id == preset_id), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    _require_preset_access(username, survey_id, match.kind)
+    ok = delete_team_preset(survey_id, preset_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    return {"ok": True}
+
+
+@router.post("/projects/{survey_id}/team-presets/{preset_id}/apply")
+def apply_team_preset_route(
+    survey_id: int,
+    preset_id: str,
+    authorization: str | None = Header(default=None),
+):
+    username = _optional_username(authorization)
+    presets = list_team_presets(survey_id)
+    match = next((p for p in presets if p.id == preset_id), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    _require_preset_access(username, survey_id, match.kind)
+    try:
+        preset = apply_team_preset(survey_id, preset_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return preset.model_dump()
+
+
 @router.get("/projects/{survey_id}/weight-config")
 def get_survey_weight_config(
     survey_id: int,
@@ -745,6 +973,130 @@ def export_analysis_report(
         iter([data]),
         media_type=media,
         headers={"Content-Disposition": f'attachment; filename="report.{ext}"'},
+    )
+
+
+def _run_report_section(survey_id: int, section: ReportSectionInput) -> tuple[str, dict[str, Any]]:
+    if section.report_type == "banner" and section.banner_request:
+        result = run_banner_table(survey_id, **section.banner_request)
+        return "banner", result
+    if section.variable_id:
+        result = run_question_profile(
+            survey_id,
+            section.variable_id,
+            completion_status=section.completion_status,
+            filters=[f for f in section.filters] if not section.filter_tree else None,
+            filter_tree=section.filter_tree,
+        )
+        return "profile", result
+    raise HTTPException(status_code=400, detail=f"Section {section.section_id} is not configured")
+
+
+def _section_ai_context(kind: str, result: dict[str, Any], section: ReportSectionInput) -> dict[str, Any]:
+    ctx = banner_context(result) if kind == "banner" else profile_context(result)
+    ctx["section_id"] = section.section_id
+    ctx["label"] = section.label
+    return ctx
+
+
+@router.post("/projects/{survey_id}/analysis/report-slide-plan")
+def preview_report_slide_plan(
+    survey_id: int,
+    body: ReportSlidePlanRequest,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    if not ai_status()["configured"]:
+        raise HTTPException(
+            status_code=503,
+            detail="AI not configured. Set ANTHROPIC_API_KEY or Azure OpenAI env vars on the server.",
+        )
+    if not body.sections:
+        raise HTTPException(status_code=400, detail="At least one section required")
+
+    contexts: list[dict[str, Any]] = []
+    for section in body.sections:
+        try:
+            kind, result = _run_report_section(survey_id, section)
+            contexts.append(_section_ai_context(kind, result, section))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to load section {section.label}: {exc}",
+            ) from exc
+
+    try:
+        slides = generate_slide_plan(contexts)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI slide plan failed: {exc}") from exc
+
+    return {"slides": slides, "deck_title": body.deck_title or f"Survey {survey_id}"}
+
+
+@router.post("/projects/{survey_id}/analysis/report-deck")
+def export_report_deck(
+    survey_id: int,
+    body: ReportDeckExportRequest,
+    authorization: str | None = Header(default=None),
+):
+    _optional_username(authorization)
+    if not body.sections:
+        raise HTTPException(status_code=400, detail="At least one section required")
+    fmt = (body.format or "pptx").lower()
+    if fmt != "pptx":
+        raise HTTPException(status_code=400, detail="Merged deck export supports PowerPoint only")
+
+    plan_by_id = {p.section_id: p for p in body.slide_plan}
+    deck_sections: list[DeckSection] = []
+
+    for section in body.sections:
+        kind, result = _run_report_section(survey_id, section)
+        plan = plan_by_id.get(section.section_id)
+        bullets: list[str] | None = None
+        narrative: str | None = None
+        speaker_notes = ""
+        slide_title = section.label
+
+        if plan:
+            slide_title = plan.title or section.label
+            bullets = plan.bullets
+            speaker_notes = plan.speaker_notes or ""
+        elif body.ai_narrative:
+            if not ai_status()["configured"]:
+                raise HTTPException(status_code=503, detail="AI not configured")
+            try:
+                narrative = generate_narrative(_section_ai_context(kind, result, section))
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"AI narrative failed: {exc}") from exc
+
+        chart_png = None
+        if body.include_charts and kind == "profile":
+            from app.services.chart_image import profile_distribution_png
+
+            chart_png = profile_distribution_png(result)
+
+        deck_sections.append(
+            DeckSection(
+                section_id=section.section_id,
+                title=slide_title,
+                kind=kind,
+                result=result,
+                bullets=bullets,
+                narrative=narrative,
+                chart_png=chart_png,
+                speaker_notes=speaker_notes,
+            )
+        )
+
+    deck_title = body.deck_title or f"Survey {survey_id} — Research findings"
+    data = merge_deck_pptx(deck_sections, deck_title=deck_title)
+    safe_name = deck_title.replace('"', "").replace("/", "-")[:60]
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.pptx"'},
     )
 
 

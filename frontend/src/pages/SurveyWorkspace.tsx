@@ -2,19 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } fro
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
-  BarChart3,
-  ClipboardList,
-  Database,
-  FileText,
-  Home,
-  Kanban,
   Layers,
   Loader2,
   PanelLeft,
   Pin,
+  Search,
   ShieldCheck,
-  Sigma,
-  SlidersHorizontal,
   Table2,
 } from 'lucide-react'
 import {
@@ -41,6 +34,7 @@ import {
   type ProjectDetail,
   type SurveySchema,
   type SurveyVariable,
+  type WorkflowAccess,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { usePinnedSurveys } from '../hooks/usePinnedSurveys'
@@ -59,11 +53,28 @@ import { filterPayload, treeToFlatFilters } from '../lib/filterTree'
 import type { ChartTypeId } from '../lib/chartTypes'
 import {
   captureCrosstabDefaults,
+  loadSurveyLayout,
   loadUserFieldDefaults,
   resolveIdsFromCodes,
   resolveLayersFromCodes,
+  saveSurveyLayout,
   saveUserFieldDefaults,
 } from '../lib/surveyFieldDefaults'
+import { canAccessMode, firstAllowedMode } from '../lib/workflowAccess'
+import {
+  navItemToSearchParams,
+  parseSetupView,
+  WORKSPACE_NAV_ITEMS,
+  type SetupView,
+  type WorkspaceNavItem,
+} from '../lib/workspaceNav'
+import { CommandPalette, useCommandPaletteHotkey } from '../components/workspace/CommandPalette'
+import { WorkspaceBreadcrumbs } from '../components/workspace/WorkspaceBreadcrumbs'
+import {
+  resolveSidebarActiveId,
+  WorkspaceSidebar,
+  WorkspaceSidebarToggle,
+} from '../components/workspace/WorkspaceSidebar'
 import {
   loadSurveySession,
   mergeSessionIntoSearch,
@@ -170,6 +181,7 @@ export function SurveyWorkspace() {
   const mode = parseMode(rawModeParam)
   const analyzeView = parseAnalyzeView(rawModeParam, searchParams.get('view'))
   const fieldView = parseFieldView(rawModeParam, searchParams.get('view'))
+  const setupView = parseSetupView(rawModeParam, searchParams.get('view'))
   const completionStatus = searchParams.get('responses') || 'complete'
   const initialChartType = (searchParams.get('chart') as ChartTypeId | null) || null
 
@@ -202,6 +214,11 @@ export function SurveyWorkspace() {
     has_review: boolean
   } | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [workflowAccess, setWorkflowAccess] = useState<WorkflowAccess | null>(null)
+  const [workflowAccessLoaded, setWorkflowAccessLoaded] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false)
+  const [commandOpen, setCommandOpen] = useState(false)
   const reloadQcSummary = useCallback(async () => {
     if (!surveyId) return
     try {
@@ -228,18 +245,33 @@ export function SurveyWorkspace() {
     if (!surveyEntryUsesDefaults(qs ? `?${qs}` : '')) return
 
     const saved = loadSurveySession(user.username, surveyId)
-    if (!saved) return
+    if (saved) {
+      setSearchParams((prev) => mergeSessionIntoSearch(prev, saved), { replace: true })
+      if (saved.selectedQuestionId) setSelectedId(saved.selectedQuestionId)
+      if (saved.metric) setMetric(saved.metric)
+      return
+    }
 
-    setSearchParams((prev) => mergeSessionIntoSearch(prev, saved), { replace: true })
-    if (saved.selectedQuestionId) setSelectedId(saved.selectedQuestionId)
-    if (saved.metric) setMetric(saved.metric)
+    const layout = loadSurveyLayout(user.username, surveyId)
+    if (!layout?.mode) return
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('mode', layout.mode!)
+      if (layout.analyzeView) next.set('view', layout.analyzeView)
+      else if (layout.fieldView) next.set('view', layout.fieldView)
+      else if (layout.setupView) next.set('view', layout.setupView)
+      else next.delete('view')
+      return next
+    }, { replace: true })
   }, [user?.username, surveyId, setSearchParams])
 
   useEffect(() => {
     if (!user?.username || !Number.isFinite(surveyId)) return
+    const viewParam = searchParams.get('view') || undefined
     saveSurveySession(user.username, surveyId, {
       mode: rawModeParam || 'home',
-      view: searchParams.get('view') || undefined,
+      view: viewParam,
       responses: completionStatus,
       selectedQuestionId: selectedId,
       sideRowIds,
@@ -252,11 +284,16 @@ export function SurveyWorkspace() {
       lastSurveyTitle: project?.title || navTitle || undefined,
       lastPath: qs ? `/projects/${surveyId}?${qs}` : `/projects/${surveyId}`,
     })
+    saveSurveyLayout(user.username, surveyId, {
+      mode: rawModeParam || 'home',
+      analyzeView: analyzeView === 'compare' ? 'crosstabs' : undefined,
+      fieldView,
+      setupView: mode === 'variables' ? setupView : undefined,
+    })
   }, [
     user?.username,
     surveyId,
     rawModeParam,
-    searchParams,
     completionStatus,
     selectedId,
     sideRowIds,
@@ -264,9 +301,63 @@ export function SurveyWorkspace() {
     metric,
     project?.title,
     navTitle,
+    analyzeView,
+    fieldView,
+    mode,
+    setupView,
+    searchParams,
   ])
 
-  // Background QC summary on Home after schema is ready (toolbar count) — does not block first paint.
+  useEffect(() => {
+    if (!surveyId) return
+    let cancelled = false
+    setWorkflowAccessLoaded(false)
+    api
+      .getProjectWorkflow(surveyId)
+      .then((res) => {
+        if (!cancelled) {
+          setWorkflowAccess(res.access)
+          setWorkflowAccessLoaded(true)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkflowAccess(null)
+          setWorkflowAccessLoaded(true)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [surveyId])
+
+  useEffect(() => {
+    if (!workflowAccessLoaded || !workflowAccess) return
+    if (canAccessMode(workflowAccess, mode)) return
+    const fallback = firstAllowedMode(workflowAccess)
+    setSearchParams((prev) => {
+      prev.set('mode', fallback)
+      return prev
+    }, { replace: true })
+  }, [workflowAccess, workflowAccessLoaded, mode, setSearchParams])
+
+  useCommandPaletteHotkey(() => setCommandOpen(true))
+
+  const activeNavId = resolveSidebarActiveId(mode, analyzeView, fieldView, setupView)
+
+  const navigateToNavItem = useCallback(
+    (item: WorkspaceNavItem) => {
+      const { mode: nextMode, view } = navItemToSearchParams(item)
+      setSearchParams((prev) => {
+        prev.set('mode', nextMode)
+        if (view) prev.set('view', view)
+        else if (nextMode === 'explore') prev.delete('view')
+        else if (nextMode !== 'fields' && nextMode !== 'variables') prev.delete('view')
+        return prev
+      }, { replace: true })
+    },
+    [setSearchParams],
+  )
   useEffect(() => {
     if (!surveyId || !schema || mode !== 'home') return
     const timer = window.setTimeout(() => {
@@ -413,13 +504,34 @@ export function SurveyWorkspace() {
         } else if (targetMode === 'quality') {
           prev.set('mode', 'fields')
           prev.set('view', 'quality')
+        } else if (targetMode === 'variables') {
+          if (view === 'custom' || view === 'weighting' || view === 'questions') {
+            prev.set('view', view === 'questions' ? '' : view)
+            if (view === 'questions') prev.delete('view')
+          } else {
+            prev.delete('view')
+          }
         } else if (view === 'compare' || view === 'crosstabs') {
+          prev.set('mode', 'explore')
           prev.set('view', 'crosstabs')
         } else if (view === 'profile') {
+          prev.set('mode', 'explore')
           prev.delete('view')
         } else if (targetMode !== 'explore' && targetMode !== 'fields') {
           prev.delete('view')
         }
+        return prev
+      }, { replace: true })
+    },
+    [setSearchParams],
+  )
+
+  const setSetupView = useCallback(
+    (view: SetupView) => {
+      setSearchParams((prev) => {
+        prev.set('mode', 'variables')
+        if (view === 'questions') prev.delete('view')
+        else prev.set('view', view)
         return prev
       }, { replace: true })
     },
@@ -437,6 +549,7 @@ export function SurveyWorkspace() {
     setFocusQuestionId(selectedId)
     setSearchParams((prev) => {
       prev.set('mode', 'variables')
+      prev.delete('view')
       return prev
     }, { replace: true })
   }, [selectedId, setSearchParams])
@@ -546,7 +659,7 @@ export function SurveyWorkspace() {
     }, { replace: true })
   }
 
-  // Load project (fast) then schema (slow)
+  // Load project (fast) then schema when an analysis/field tab needs it
   useEffect(() => {
     if (!surveyId) return
     api.getProject(surveyId).then(setProject).catch(() => {})
@@ -554,6 +667,10 @@ export function SurveyWorkspace() {
 
   useEffect(() => {
     if (!surveyId) return
+    if (mode === 'home' || mode === 'workflow') {
+      setSchemaLoading(false)
+      return
+    }
     let cancelled = false
     initialized.current = false
     setSchemaLoading(true)
@@ -630,7 +747,7 @@ export function SurveyWorkspace() {
     void loadLightSchema()
 
     return () => { cancelled = true }
-  }, [surveyId, completionStatus, schemaVersion, user?.username])
+  }, [surveyId, completionStatus, schemaVersion, user?.username, mode])
 
   // Phase 2: full enrichment — defer on Home so opening a survey stays fast
   useEffect(() => {
@@ -952,6 +1069,7 @@ export function SurveyWorkspace() {
     <div className="flex h-screen flex-col bg-[var(--canvas)]">
       <header className="shrink-0 border-b border-[var(--et-teal)]/12 bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
+          <WorkspaceSidebarToggle onClick={() => setSidebarMobileOpen(true)} />
           <Link
             to="/dashboard"
             className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-[var(--et-teal-light)] hover:text-[var(--et-teal-dark)]"
@@ -972,14 +1090,41 @@ export function SurveyWorkspace() {
               </h1>
               {project && <StatusBadge status={project.status} />}
             </div>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <div className="mt-0.5 hidden sm:block">
+              <WorkspaceBreadcrumbs
+                activeId={activeNavId}
+                surveyTitle={project?.title || navTitle}
+                onNavigate={(navId) => {
+                  const item = WORKSPACE_NAV_ITEMS.find((row) => row.id === navId)
+                  if (item) navigateToNavItem(item)
+                }}
+              />
+            </div>
+            <p className="mt-0.5 text-xs text-slate-500 sm:hidden">
               ID {surveyId}
               {schema && ` · ${schema.response_count.toLocaleString()} in sample`}
-              {project && project.responses.total > 0 && ` · ${project.responses.completed.toLocaleString()} completed`}
             </p>
           </div>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCommandOpen(true)}
+              className="hidden items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-slate-300 sm:inline-flex"
+            >
+              <Search size={14} />
+              Jump to…
+              <kbd className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-400">⌘K</kbd>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCommandOpen(true)}
+              className="inline-flex rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:border-slate-300 sm:hidden"
+              aria-label="Jump to"
+            >
+              <Search size={16} />
+            </button>
+
             <button
               type="button"
               onClick={() => void togglePinned(surveyId)}
@@ -991,7 +1136,7 @@ export function SurveyWorkspace() {
               title={isPinned(surveyId) ? 'Unpin from surveys page' : 'Pin to surveys page'}
             >
               <Pin size={14} className={isPinned(surveyId) ? 'fill-current' : ''} />
-              {isPinned(surveyId) ? 'Pinned' : 'Pin'}
+              <span className="hidden sm:inline">{isPinned(surveyId) ? 'Pinned' : 'Pin'}</span>
             </button>
 
             <select
@@ -1020,57 +1165,39 @@ export function SurveyWorkspace() {
                 title="Review flagged responses and exclusions"
               >
                 <ShieldCheck size={14} />
-                QC review
+                <span className="hidden sm:inline">QC review</span>
               </button>
             )}
           </div>
         </div>
-
-        <div className="et-toolbar-scroll flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-slate-100 bg-slate-50/90 px-3 py-2 sm:gap-3 sm:px-4">
-          <span className="hidden shrink-0 et-kicker lg:inline">Overview</span>
-          <div className="et-segment">
-            <ModeButton active={mode === 'home'} onClick={() => setMode('home')} icon={<Home size={15} />}>
-              Home
-            </ModeButton>
-            <ModeButton active={mode === 'workflow'} onClick={() => setMode('workflow')} icon={<Kanban size={15} />}>
-              Workflow
-            </ModeButton>
-          </div>
-          <span className="hidden shrink-0 text-slate-300 lg:inline" aria-hidden>
-            |
-          </span>
-          <span className="hidden shrink-0 et-kicker lg:inline">Analyze</span>
-          <div className="et-segment">
-            <ModeButton active={mode === 'explore'} onClick={() => setMode('explore')} icon={<Layers size={15} />}>
-              Analyze
-            </ModeButton>
-            <ModeButton active={mode === 'charts'} onClick={() => setMode('charts')} icon={<BarChart3 size={15} />}>
-              Charts
-            </ModeButton>
-            <ModeButton active={mode === 'reports'} onClick={() => setMode('reports')} icon={<FileText size={15} />}>
-              Reports
-            </ModeButton>
-            <ModeButton active={mode === 'multivariate'} onClick={() => setMode('multivariate')} icon={<Sigma size={15} />}>
-              Statistics
-            </ModeButton>
-          </div>
-          <span className="hidden shrink-0 text-slate-300 lg:inline" aria-hidden>
-            |
-          </span>
-          <span className="hidden shrink-0 et-kicker lg:inline">Field & data</span>
-          <div className="et-segment">
-            <ModeButton active={mode === 'fields'} onClick={() => setMode('fields')} icon={<ClipboardList size={15} />}>
-              Field
-            </ModeButton>
-            <ModeButton active={mode === 'variables'} onClick={() => setMode('variables')} icon={<SlidersHorizontal size={15} />}>
-              Data setup
-            </ModeButton>
-            <ModeButton active={mode === 'data'} onClick={() => setMode('data')} icon={<Database size={15} />}>
-              Raw data
-            </ModeButton>
-          </div>
-        </div>
       </header>
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {sidebarMobileOpen && (
+          <button
+            type="button"
+            aria-label="Close navigation"
+            className="fixed inset-0 z-40 bg-slate-900/50 lg:hidden"
+            onClick={() => setSidebarMobileOpen(false)}
+          />
+        )}
+        <div
+          className={`${
+            sidebarMobileOpen
+              ? 'fixed inset-y-0 left-0 z-50 flex pt-0 lg:relative lg:z-auto'
+              : 'hidden lg:flex'
+          } h-full min-h-0 shrink-0`}
+        >
+          <WorkspaceSidebar
+            access={workflowAccess}
+            activeId={activeNavId}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
+            onNavigate={navigateToNavItem}
+            onCloseMobile={() => setSidebarMobileOpen(false)}
+            mobile={sidebarMobileOpen}
+          />
+        </div>
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
           {showsQuestionNav && mobileNavOpen && (
@@ -1196,12 +1323,14 @@ export function SurveyWorkspace() {
               qcApprovedCount={qcSummary?.qc_approved_count ?? null}
               onUseQcApproved={() => setCompletionStatus('qc_approved')}
               onReviewChanged={handleQcReviewChanged}
+              hideSubNav
             />
           )}
 
           {mode === 'reports' && (
             <ReportBuilderPanel
               surveyId={surveyId}
+              surveyTitle={project?.title || navTitle}
               completionStatus={completionStatus}
               variables={activeSchema?.variables ?? []}
               filters={filters}
@@ -1306,6 +1435,9 @@ export function SurveyWorkspace() {
               focusQuestionId={focusQuestionId}
               onFocusQuestionConsumed={() => setFocusQuestionId(null)}
               onChanged={reloadCustomVariables}
+              pageTab={setupView}
+              onPageTabChange={setSetupView}
+              hideSubNav
               />
             </div>
           )}
@@ -1418,6 +1550,15 @@ export function SurveyWorkspace() {
           )}
         </main>
       </div>
+      </div>
+
+      <CommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        surveyId={surveyId}
+        surveyTitle={project?.title || navTitle}
+        access={workflowAccess}
+      />
     </div>
   )
 }
@@ -1440,29 +1581,6 @@ function AnalyzeViewButton({
       className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition ${
         active ? 'et-segment-btn-active' : 'et-segment-btn-inactive'
       }`}
-    >
-      {icon}
-      {children}
-    </button>
-  )
-}
-
-function ModeButton({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`et-segment-btn ${active ? 'et-segment-btn-active' : 'et-segment-btn-inactive'}`}
     >
       {icon}
       {children}

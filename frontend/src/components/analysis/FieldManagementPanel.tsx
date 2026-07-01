@@ -29,6 +29,7 @@ import {
   loadUserFieldDefaults,
   saveUserFieldDefaults,
 } from '../../lib/surveyFieldDefaults'
+import { TeamPresetsMenu } from './TeamPresetsMenu'
 
 interface Props {
   surveyId: number
@@ -452,6 +453,18 @@ export function FieldManagementPanel({ surveyId, variables, embedded, nested }: 
 
           {notice && <p className="mt-3 text-sm text-emerald-700">{notice}</p>}
           {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+
+          <div className="mt-4">
+            <TeamPresetsMenu
+              surveyId={surveyId}
+              kind="quota"
+              onSave={() => ({
+                name: `Quota ${config.fields.length} field${config.fields.length === 1 ? '' : 's'}`,
+                config: config as unknown as Record<string, unknown>,
+              })}
+              onApplied={loadConfig}
+            />
+          </div>
 
           {checkResult && (
             <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">

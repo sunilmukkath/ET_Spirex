@@ -20,6 +20,7 @@ interface Props {
   qcApprovedCount?: number | null
   onUseQcApproved?: () => void
   onReviewChanged?: () => void
+  hideSubNav?: boolean
 }
 
 function FieldViewButton({
@@ -57,8 +58,8 @@ function PanelLoader() {
 
 const VIEW_HINT: Record<FieldView, string> = {
   fielding: 'Fielding pace, daily completes, and quota targets',
-  quality: 'QC scan, flagged responses, thresholds, and interviewer proximity checks',
-  team: 'Interviewer throughput, completion rates, and rejection stats',
+  quality: 'QC review — flagged responses, thresholds, and GPS proximity checks',
+  team: 'Field team throughput, completion rates, and rejection stats',
 }
 
 export function FieldOperationsPanel({
@@ -70,9 +71,11 @@ export function FieldOperationsPanel({
   qcApprovedCount,
   onUseQcApproved,
   onReviewChanged,
+  hideSubNav = false,
 }: Props) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {!hideSubNav && (
       <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 sm:px-4">
         <div className="et-segment">
           <FieldViewButton
@@ -94,11 +97,12 @@ export function FieldOperationsPanel({
             onClick={() => onViewChange('team')}
             icon={<Users size={14} />}
           >
-            Team
+            Field team
           </FieldViewButton>
         </div>
         <p className="hidden text-xs text-slate-500 sm:block">{VIEW_HINT[view]}</p>
       </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--canvas-subtle)] et-scroll">
         {view === 'fielding' && (
@@ -127,7 +131,7 @@ export function FieldOperationsPanel({
             <header className="mb-4 flex items-start gap-2">
               <ShieldCheck size={20} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">Response quality</h2>
+                <h2 className="text-lg font-semibold text-slate-900">QC review</h2>
                 <p className="text-xs text-slate-500">
                   Run QC scans, review flagged records, and configure checks including GPS proximity.
                 </p>
@@ -151,9 +155,9 @@ export function FieldOperationsPanel({
             <header className="mb-4 flex items-start gap-2">
               <Users size={20} className="mt-0.5 shrink-0 text-[var(--et-teal)]" />
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">Interviewers</h2>
+                <h2 className="text-lg font-semibold text-slate-900">Field team</h2>
                 <p className="text-xs text-slate-500">
-                  Throughput, completion rates, and rejection rates by interviewer.
+                  Interviewer throughput, completion rates, and rejection rates.
                 </p>
               </div>
             </header>
