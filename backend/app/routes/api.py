@@ -157,7 +157,11 @@ def _handle_lime_error(exc: Exception) -> HTTPException:
 
 @router.get("/health")
 def health():
-    commit = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT")
+    commit = (
+        os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+        or os.environ.get("RENDER_GIT_COMMIT")
+        or os.environ.get("GIT_COMMIT")
+    )
     return {
         "status": "ok",
         "git_commit": commit,

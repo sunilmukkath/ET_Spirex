@@ -6,7 +6,7 @@ import base64
 import json
 import logging
 import re
-import secrets
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from email.utils import parseaddr
 from typing import Any, Callable, TypeVar
@@ -73,14 +73,12 @@ def _redirect_uri() -> str:
 
 
 def build_oauth_url(*, session_token: str) -> str:
-    from google_auth_oauthlib.flow import Flow
-
-    verifier = secrets.token_urlsafe(64)
-    state = encode_oauth_state(session_token, verifier)
-    flow = Flow.from_client_config(_client_config(), scopes=GMAIL_SCOPES, redirect_uri=_redirect_uri())
-    flow.oauth2session.scope = GMAIL_SCOPES
-    flow.oauth2session.code_verifier = verifier
-    auth_kwargs: dict[str, str] = {
+    state = encode_oauth_state(session_token)
+    params: dict[str, str] = {
+        "client_id": settings.google_client_id.strip(),
+        "redirect_uri": _redirect_uri(),
+        "response_type": "code",
+        "scope": " ".join(GMAIL_SCOPES),
         "access_type": "offline",
         "include_granted_scopes": "true",
         "prompt": "consent",
@@ -88,19 +86,17 @@ def build_oauth_url(*, session_token: str) -> str:
     }
     domain = settings.workspace_domain.strip()
     if domain:
-        auth_kwargs["hd"] = domain
-    auth_url, _ = flow.authorization_url(**auth_kwargs)
-    return auth_url
+        params["hd"] = domain
+    return f"https://accounts.google.com/o/oauth2/auth?{urllib.parse.urlencode(params)}"
 
 
-def exchange_code_for_tokens(code: str, *, code_verifier: str) -> dict[str, Any]:
+def exchange_code_for_tokens(code: str) -> dict[str, Any]:
     payload = {
         "code": code,
         "client_id": settings.google_client_id.strip(),
         "client_secret": settings.google_client_secret.strip(),
         "redirect_uri": _redirect_uri(),
         "grant_type": "authorization_code",
-        "code_verifier": code_verifier,
     }
     with httpx.Client(timeout=30.0) as client:
         response = client.post("https://oauth2.googleapis.com/token", data=payload)
@@ -283,20 +279,17 @@ def send_email_message(
         raise RuntimeError(f"Gmail send failed: {exc}") from exc
 
 
-def encode_oauth_state(token: str, code_verifier: str) -> str:
-    payload = json.dumps({"t": token, "cv": code_verifier})
+def encode_oauth_state(token: str) -> str:
+    payload = json.dumps({"t": token})
     return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
 
-def decode_oauth_state(state: str) -> dict[str, str] | None:
+def decode_oauth_state(state: str) -> str | None:
     try:
         pad = "=" * (-len(state) % 4)
         raw = base64.urlsafe_b64decode(state + pad)
         data = json.loads(raw.decode())
         token = str(data.get("t") or "").strip()
-        verifier = str(data.get("cv") or "").strip()
-        if not token or not verifier:
-            return None
-        return {"token": token, "code_verifier": verifier}
+        return token or None
     except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
         return None

@@ -51,15 +51,22 @@ class Settings(BaseSettings):
         lowered = url.strip().lower()
         return lowered.startswith("http://localhost") or lowered.startswith("http://127.0.0.1")
 
-    @property
-    def resolved_app_public_url(self) -> str:
-        """Public app URL — explicit env, Railway domain, or Render URL."""
-        explicit = self.app_public_url.strip().rstrip("/")
-        if explicit and not self._is_local_url(explicit):
-            return explicit
+    @staticmethod
+    def _railway_public_base() -> str | None:
         railway = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
         if railway:
             return f"https://{railway}".rstrip("/")
+        return None
+
+    @property
+    def resolved_app_public_url(self) -> str:
+        """Public app URL — Railway domain wins over manual env on Railway."""
+        railway_base = self._railway_public_base()
+        if railway_base:
+            return railway_base
+        explicit = self.app_public_url.strip().rstrip("/")
+        if explicit and not self._is_local_url(explicit):
+            return explicit
         render = os.environ.get("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
         if render:
             return render
@@ -67,6 +74,9 @@ class Settings(BaseSettings):
 
     @property
     def resolved_google_auth_redirect_uri(self) -> str:
+        railway_base = self._railway_public_base()
+        if railway_base:
+            return f"{railway_base}/api/auth/google/callback"
         explicit = self.google_auth_redirect_uri.strip()
         if explicit and not self._is_local_url(explicit):
             return explicit
@@ -77,6 +87,9 @@ class Settings(BaseSettings):
 
     @property
     def resolved_google_redirect_uri(self) -> str:
+        railway_base = self._railway_public_base()
+        if railway_base:
+            return f"{railway_base}/api/gmail/oauth/callback"
         explicit = self.google_redirect_uri.strip()
         if explicit and not self._is_local_url(explicit):
             return explicit
@@ -87,6 +100,9 @@ class Settings(BaseSettings):
 
     @property
     def resolved_google_auth_success_url(self) -> str:
+        railway_base = self._railway_public_base()
+        if railway_base:
+            return f"{railway_base}/dashboard"
         explicit = self.google_auth_success_url.strip().rstrip("/")
         if explicit and not self._is_local_url(explicit):
             return explicit
@@ -97,6 +113,9 @@ class Settings(BaseSettings):
 
     @property
     def resolved_google_oauth_success_url(self) -> str:
+        railway_base = self._railway_public_base()
+        if railway_base:
+            return f"{railway_base}/my-work?gmail=connected"
         explicit = self.google_oauth_success_url.strip()
         if explicit and not self._is_local_url(explicit):
             return explicit

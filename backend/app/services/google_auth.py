@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import secrets
+import urllib.parse
 from typing import Any
 
 import httpx
@@ -20,28 +21,13 @@ GOOGLE_AUTH_SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
 ]
+_AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 
 def is_google_auth_configured() -> bool:
     return is_gmail_configured()
-
-
-def _client_config() -> dict[str, Any]:
-    if not is_google_auth_configured():
-        raise GmailNotConfiguredError(
-            "Google sign-in is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET."
-        )
-    return {
-        "web": {
-            "client_id": settings.google_client_id.strip(),
-            "client_secret": settings.google_client_secret.strip(),
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": _TOKEN_URL,
-            "redirect_uris": [settings.resolved_google_auth_redirect_uri],
-        }
-    }
 
 
 def _auth_redirect_uri() -> str:
@@ -52,25 +38,23 @@ def _auth_redirect_uri() -> str:
 
 
 def build_google_signin_url() -> str:
-    from google_auth_oauthlib.flow import Flow
-
-    verifier = secrets.token_urlsafe(64)
-    flow = Flow.from_client_config(_client_config(), scopes=GOOGLE_AUTH_SCOPES, redirect_uri=_auth_redirect_uri())
-    flow.oauth2session.scope = GOOGLE_AUTH_SCOPES
-    flow.oauth2session.code_verifier = verifier
-    auth_kwargs: dict[str, str] = {
+    """Build Google sign-in URL (confidential web client — no PKCE)."""
+    params: dict[str, str] = {
+        "client_id": settings.google_client_id.strip(),
+        "redirect_uri": _auth_redirect_uri(),
+        "response_type": "code",
+        "scope": " ".join(GOOGLE_AUTH_SCOPES),
         "access_type": "online",
         "prompt": "select_account",
-        "state": encode_login_state(verifier),
+        "state": encode_login_state(),
     }
     domain = settings.workspace_domain.strip()
     if domain:
-        auth_kwargs["hd"] = domain
-    auth_url, _ = flow.authorization_url(**auth_kwargs)
-    return auth_url
+        params["hd"] = domain
+    return f"{_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
 
-def exchange_code_for_email(code: str, *, code_verifier: str) -> str | None:
+def exchange_code_for_email(code: str) -> str | None:
     """Exchange Google auth code for the signed-in user's email."""
     payload = {
         "code": code,
@@ -78,7 +62,6 @@ def exchange_code_for_email(code: str, *, code_verifier: str) -> str | None:
         "client_secret": settings.google_client_secret.strip(),
         "redirect_uri": _auth_redirect_uri(),
         "grant_type": "authorization_code",
-        "code_verifier": code_verifier,
     }
     with httpx.Client(timeout=30.0) as client:
         token_response = client.post(_TOKEN_URL, data=payload)
@@ -101,20 +84,25 @@ def exchange_code_for_email(code: str, *, code_verifier: str) -> str | None:
     return email or None
 
 
-def encode_login_state(code_verifier: str) -> str:
-    payload = json.dumps({"purpose": "login", "cv": code_verifier})
+def encode_login_state() -> str:
+    payload = json.dumps({"purpose": "login", "n": secrets.token_urlsafe(16)})
     return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
 
-def decode_login_state(state: str) -> str | None:
-    """Return PKCE verifier when state is a valid login request."""
+def decode_login_state(state: str) -> bool:
     try:
         pad = "=" * (-len(state) % 4)
         raw = base64.urlsafe_b64decode(state + pad)
         data = json.loads(raw.decode())
-        if str(data.get("purpose") or "") != "login":
-            return None
-        verifier = str(data.get("cv") or "").strip()
-        return verifier or None
+        return str(data.get("purpose") or "") == "login"
     except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
-        return None
+        return False
+
+
+def classify_token_exchange_error(exc: Exception) -> str:
+    text = str(exc).lower()
+    if "invalid_client" in text:
+        return "invalid_client"
+    if "invalid_grant" in text:
+        return "invalid_grant"
+    return "token_exchange"

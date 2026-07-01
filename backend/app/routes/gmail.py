@@ -72,14 +72,14 @@ def gmail_oauth_callback(code: str | None = None, state: str | None = None, erro
         return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=error&reason={error}")
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing OAuth code or state")
-    oauth_state = decode_oauth_state(state)
-    if not oauth_state:
+    session_token = decode_oauth_state(state)
+    if not session_token:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
-    record = get_session(oauth_state["token"])
+    record = get_session(session_token)
     if not record:
         raise HTTPException(status_code=401, detail="Session expired — sign in and connect Gmail again")
     try:
-        tokens = exchange_code_for_tokens(code, code_verifier=oauth_state["code_verifier"])
+        tokens = exchange_code_for_tokens(code)
         gmail_store.save_tokens(record.username, tokens)
     except Exception as exc:
         return RedirectResponse(f"{settings.resolved_google_oauth_success_url}&gmail=error&reason=token_exchange")

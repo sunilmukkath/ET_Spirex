@@ -10,6 +10,10 @@ interface Props {
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   token_exchange: 'Google sign-in could not be completed. Please try again.',
+  invalid_client:
+    'Google client ID or secret is wrong on the server. Check GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Railway.',
+  invalid_grant:
+    'Google sign-in expired or redirect URI mismatch. In Google Cloud, add https://et-scout.up.railway.app/api/auth/google/callback',
   not_authorized: 'This Google account is not authorized for ET Scout. Use your Elastic Tree email.',
   session_failed: 'Could not start your ET Scout session. Please try again.',
   access_denied: 'Google sign-in was cancelled.',
