@@ -33,6 +33,7 @@ from app.models.project_workflow import (
     TaskCommentCreate,
 )
 from app.models.team_hr import StaffMemberOut, StaffProfileUpdate, TeamDirectoryOut
+from app.models.team_preset import TeamPresetCreate
 from app.models.team_registry import TeamRegistry, TeamUserCreate, PROJECT_MODULES
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
 from app.services.auth import get_session, list_active_sessions, logout
