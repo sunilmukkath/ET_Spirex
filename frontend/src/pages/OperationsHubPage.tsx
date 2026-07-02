@@ -319,17 +319,22 @@ export function OperationsHubPage() {
         setPipeline(null)
         return
       }
-      const [pipe] = await Promise.all([api.getPmPipeline()])
-      setPipeline(pipe)
-      const first = pipe.projects[0]?.project_id ?? ''
-      const financeProject = searchParams.get('project')
-      setSelectedProjectId((cur) => {
-        if (financeProject && pipe.projects.some((p) => p.project_id === financeProject)) {
-          return financeProject
-        }
-        return cur || first
-      })
-      setProposalProjectId((cur) => cur || first)
+      try {
+        const pipe = await api.getPmPipeline()
+        setPipeline(pipe)
+        const first = pipe.projects[0]?.project_id ?? ''
+        const financeProject = searchParams.get('project')
+        setSelectedProjectId((cur) => {
+          if (financeProject && pipe.projects.some((p) => p.project_id === financeProject)) {
+            return financeProject
+          }
+          return cur || first
+        })
+        setProposalProjectId((cur) => cur || first)
+      } catch (e) {
+        setPipeline(null)
+        setError(e instanceof Error ? e.message : 'Failed to load pipeline')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load operations hub')
     } finally {
@@ -686,10 +691,10 @@ export function OperationsHubPage() {
       </div>
     )
   }
-  if (error) return <div className="et-page py-10"><ErrorState message={error} /></div>
 
   return (
     <div className="et-page et-page-wide space-y-6 py-8">
+      {error && <ErrorState message={error} />}
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-semibold text-slate-900">Operations hub</h1>

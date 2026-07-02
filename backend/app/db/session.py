@@ -61,6 +61,7 @@ def ensure_database_ready() -> None:
         try:
             engine = get_engine()
             Base.metadata.create_all(bind=engine)
+            _ensure_missing_tables(engine)
             _apply_schema_patches(engine)
             _seed_team_members(engine)
             _bootstrap_pm_projects(engine)
@@ -127,6 +128,17 @@ def get_db() -> Generator[Session, None, None]:
 def init_database() -> None:
     """Backward-compatible alias used by startup hook."""
     ensure_database_ready()
+
+
+def _ensure_missing_tables(engine: Engine) -> None:
+    """create_all skips existing tables but won't add tables added in newer releases."""
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    existing = set(inspector.get_table_names())
+    expected = set(Base.metadata.tables.keys())
+    if expected - existing:
+        Base.metadata.create_all(bind=engine)
 
 
 def _apply_schema_patches(engine: Engine) -> None:

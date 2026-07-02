@@ -42,15 +42,28 @@ export function QuantitativePage() {
         setPipeline(null)
         return
       }
-      const [pipe, surveysRaw] = await Promise.all([
+      const [pipeRes, surveysRes] = await Promise.allSettled([
         api.getPmPipeline(),
         api.getProjects().catch(() => [] as Project[]),
       ])
-      const surveys = Array.isArray(surveysRaw) ? surveysRaw : surveysRaw.projects
-      setPipeline(pipe)
-      setLimeSurveys(surveys)
-      const first = pipe.projects[0]?.project_id ?? ''
-      setSelectedProjectId((cur) => cur || first)
+      if (pipeRes.status === 'fulfilled') {
+        const pipe = pipeRes.value
+        setPipeline(pipe)
+        const first = pipe.projects[0]?.project_id ?? ''
+        setSelectedProjectId((cur) => cur || first)
+      } else {
+        setPipeline(null)
+        setOpsError(
+          pipeRes.reason instanceof Error ? pipeRes.reason.message : 'Failed to load PM pipeline',
+        )
+      }
+      if (surveysRes.status === 'fulfilled') {
+        const surveysRaw = surveysRes.value
+        const surveys = Array.isArray(surveysRaw) ? surveysRaw : surveysRaw.projects
+        setLimeSurveys(surveys)
+      } else {
+        setLimeSurveys([])
+      }
     } catch (e) {
       setOpsError(e instanceof Error ? e.message : 'Failed to load survey operations')
     } finally {

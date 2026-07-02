@@ -20,6 +20,7 @@ import { useAuth } from '../auth/AuthContext'
 import { APP_MODULE_PATHS, type AppModule } from '../lib/appModules'
 import { BrandLogo } from './BrandLogo'
 import { CommandPalette, useCommandPaletteHotkey } from './workspace/CommandPalette'
+import { PageErrorBoundary } from './PageErrorBoundary'
 
 const APP_NAV_ITEMS: CommandPaletteItem[] = [
   {
@@ -400,7 +401,9 @@ export function AppShell() {
       )}
 
       <main className="et-page et-page-wide et-page-main">
-        <Outlet />
+        <PageErrorBoundary>
+          <Outlet />
+        </PageErrorBoundary>
       </main>
 
       <CommandPalette

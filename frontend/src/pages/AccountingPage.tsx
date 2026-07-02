@@ -138,27 +138,27 @@ export function AccountingPage() {
           break
         }
         case 'sales': {
-          const [inv, estList, srList, payList] = await Promise.all([
+          const [inv, estList, srList, payList] = await Promise.allSettled([
             api.listAcctInvoices(),
             api.listAcctEstimates(),
             api.listAcctSalesReceipts(),
             api.listAcctPayments(),
           ])
-          setInvoices(inv)
-          setEstimates(estList)
-          setSalesReceipts(srList)
-          setPayments(payList)
+          setInvoices(inv.status === 'fulfilled' ? inv.value : [])
+          setEstimates(estList.status === 'fulfilled' ? estList.value : [])
+          setSalesReceipts(srList.status === 'fulfilled' ? srList.value : [])
+          setPayments(payList.status === 'fulfilled' ? payList.value : [])
           break
         }
         case 'purchases': {
-          const [billList, poList, payList] = await Promise.all([
+          const [billList, poList, payList] = await Promise.allSettled([
             api.listAcctBills(),
             api.listAcctPurchaseOrders(),
             api.listAcctPayments(),
           ])
-          setBills(billList)
-          setPurchaseOrders(poList)
-          setPayments(payList)
+          setBills(billList.status === 'fulfilled' ? billList.value : [])
+          setPurchaseOrders(poList.status === 'fulfilled' ? poList.value : [])
+          setPayments(payList.status === 'fulfilled' ? payList.value : [])
           break
         }
         case 'reports': {

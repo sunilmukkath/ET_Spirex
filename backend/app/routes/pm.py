@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import time
 from uuid import UUID
 
@@ -96,6 +97,7 @@ from app.db.models import TeamMember
 from sqlalchemy import select
 
 router = APIRouter(prefix="/pm", tags=["project-management"])
+logger = logging.getLogger(__name__)
 
 
 def _require_db() -> None:
@@ -400,7 +402,11 @@ def pm_pipeline(
         survey_ids = [int(p["id"]) for p in list_projects() if p.get("id")]
     except Exception:
         pass
-    return pm_ops_store.pipeline_overview(session, survey_ids)
+    try:
+        return pm_ops_store.pipeline_overview(session, survey_ids)
+    except Exception as exc:
+        logger.exception("PM pipeline overview failed")
+        raise HTTPException(status_code=500, detail=f"Pipeline load failed: {exc}") from exc
 
 
 @router.get("/survey-links", response_model=list[SurveyLinkOut])

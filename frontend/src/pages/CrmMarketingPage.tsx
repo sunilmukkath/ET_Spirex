@@ -65,16 +65,25 @@ export function CrmMarketingPage() {
         setMarketing([])
         return
       }
-      const [clientRows, pipe, activities] = await Promise.all([
+      const [clientRows, pipe, activities] = await Promise.allSettled([
         api.listPmClients(),
         api.getPmPipeline(),
         api.listPmMarketing(),
       ])
-      setClients(clientRows)
-      setPipeline(pipe)
-      setMarketing(activities)
-      const firstProject = pipe.projects[0]?.project_id ?? ''
+      setClients(clientRows.status === 'fulfilled' ? clientRows.value : [])
+      setPipeline(pipe.status === 'fulfilled' ? pipe.value : null)
+      setMarketing(activities.status === 'fulfilled' ? activities.value : [])
+      const firstProject =
+        (pipe.status === 'fulfilled' ? pipe.value.projects[0]?.project_id : '') ?? ''
       setAgentProjectId((cur) => cur || preselectedProject || firstProject)
+
+      const failures: string[] = []
+      if (clientRows.status === 'rejected') failures.push('clients')
+      if (pipe.status === 'rejected') failures.push('pipeline')
+      if (activities.status === 'rejected') failures.push('marketing')
+      if (failures.length) {
+        setError(`Some data could not be loaded (${failures.join(', ')}). Try refresh.`)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load CRM & marketing')
     } finally {
