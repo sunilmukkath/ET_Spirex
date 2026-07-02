@@ -9,7 +9,7 @@ from typing import Any
 from app.models.gmail import GmailEmailBreakdown, GmailTaskDraft
 from app.models.project_workflow import TaskCategory, TaskPriority
 from app.services.ai_narrative import ai_configured, complete_json
-from app.services.auth import VALID_USERS
+from app.services.auth import get_valid_users
 from app.services.gmail_proposal import proposal_brief_hint
 from app.services.gmail_suggest import (
     suggest_assignee,
@@ -72,7 +72,7 @@ def _normalize_assignee(value: Any) -> str | None:
     if not value:
         return None
     name = str(value).strip()
-    for valid in VALID_USERS:
+    for valid in get_valid_users():
         if valid.lower() == name.lower():
             return valid
     return None

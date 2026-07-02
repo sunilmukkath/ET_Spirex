@@ -17,9 +17,8 @@ from app.models.team_hr import (
     TeamDirectoryOut,
 )
 from app.models.team_registry import GlobalRole
-from app.services.auth import VALID_USERS
+from app.services.auth import get_valid_users
 from app.services.personal_tasks_store import list_personal_tasks
-from app.services.super_admin import email_for_username
 from app.services.team_registry_store import get_global_role, get_team_registry
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "team"
@@ -42,10 +41,19 @@ _DEFAULT_TITLES: dict[str, str] = {
 
 
 def _default_email(username: str) -> str:
-    mapped = email_for_username(username)
-    if mapped:
-        return mapped
-    slug = username.strip().lower()
+    clean = username.strip()
+    raw = _load_staff_raw().get(clean)
+    if raw and str(raw.get("email", "")).strip():
+        return str(raw["email"]).strip().lower()
+    from app.config import settings
+
+    for pair in settings.resolved_gmail_team_email_map.split(","):
+        if ":" not in pair:
+            continue
+        email, mapped = pair.split(":", 1)
+        if mapped.strip() == clean:
+            return email.strip().lower()
+    slug = clean.lower()
     return f"{slug}@elastictree.com" if slug else ""
 
 
@@ -83,7 +91,7 @@ def _save_staff_raw(data: dict[str, dict[str, Any]]) -> None:
 
 def get_staff_profile(username: str) -> StaffProfile | None:
     clean = username.strip()
-    if clean not in VALID_USERS:
+    if clean not in get_valid_users():
         return None
     raw = _load_staff_raw().get(clean)
     base = _default_profile(clean)
@@ -98,9 +106,25 @@ def get_staff_profile(username: str) -> StaffProfile | None:
     return StaffProfile(**merged)
 
 
+def upsert_staff_profile(username: str, **fields: Any) -> StaffProfile:
+    clean = username.strip()
+    if clean not in get_valid_users():
+        raise ValueError("Unknown team member")
+    data = _load_staff_raw()
+    current = get_staff_profile(clean) or _default_profile(clean)
+    merged = current.model_dump()
+    for key, value in fields.items():
+        if value is not None and key in merged:
+            merged[key] = value
+    profile = StaffProfile(**merged)
+    data[clean] = profile.model_dump()
+    _save_staff_raw(data)
+    return profile
+
+
 def update_staff_profile(username: str, body: StaffProfileUpdate) -> StaffProfile | None:
     clean = username.strip()
-    if clean not in VALID_USERS:
+    if clean not in get_valid_users():
         return None
     data = _load_staff_raw()
     current = get_staff_profile(clean)
@@ -156,7 +180,7 @@ def _collect_open_tasks(username: str) -> list[dict[str, Any]]:
 
     if _DATA_DIR.parent.joinpath("personal_tasks").is_dir():
         seen_ids: set[str] = {str(row["task_id"]) for row in rows}
-        for member in VALID_USERS:
+        for member in get_valid_users():
             for task in list_personal_tasks(member, include_done=False):
                 if (task.assignee or member).strip() != assignee:
                     continue
@@ -264,7 +288,7 @@ def get_team_directory() -> TeamDirectoryOut:
     members: list[StaffMemberOut] = []
     load_counts = {"light": 0, "balanced": 0, "busy": 0, "overloaded": 0}
 
-    for username in sorted(VALID_USERS, key=str.lower):
+    for username in sorted(get_valid_users(), key=str.lower):
         profile = get_staff_profile(username) or _default_profile(username)
         workload, preview = build_workload(username)
         load_counts[workload.load_level] += 1

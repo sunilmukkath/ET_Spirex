@@ -7,7 +7,7 @@ from typing import Any
 
 from app.models.assistant import AssistantChatRequest, AssistantChatResponse, AssistantMessage
 from app.services.ai_narrative import ai_status, complete_chat, format_ai_error
-from app.services.auth import VALID_USERS
+from app.services.auth import get_valid_users
 
 ASSISTANT_SYSTEM = """You are Scout — a helpful assistant inside Elastic Tree's research workspace (ET Scout).
 
@@ -43,7 +43,7 @@ def _context_block(context: dict[str, Any], username: str) -> str:
         lines.append(f"URL query: {context['search']}")
     if context.get("page_hint"):
         lines.append(f"Page hint: {context['page_hint']}")
-    lines.append(f"Known team usernames: {', '.join(sorted(VALID_USERS))}")
+    lines.append(f"Known team usernames: {', '.join(sorted(get_valid_users()))}")
     return "Context:\n" + "\n".join(f"- {line}" for line in lines)
 
 

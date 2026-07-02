@@ -40,6 +40,8 @@ interface AuthState {
 interface AuthContextValue {
   user: AuthState | null
   loading: boolean
+  teamUsers: readonly string[]
+  refreshTeamUsers: () => Promise<void>
   gmailStatus: GmailConnectionStatus | null
   activeSessions: { username: string; login_at: number; last_seen: number }[]
   login: (username: string, password: string) => Promise<void>
@@ -100,6 +102,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [activeSessions, setActiveSessions] = useState<
     { username: string; login_at: number; last_seen: number }[]
   >([])
+  const [teamUsers, setTeamUsers] = useState<string[]>(() => [...TEAM_USERS])
+
+  const refreshTeamUsers = useCallback(async () => {
+    try {
+      const { users } = await api.getAuthUsers()
+      if (users?.length) setTeamUsers(users)
+    } catch {
+      /* keep last known roster */
+    }
+  }, [])
 
   const refreshGmailStatus = useCallback(async () => {
     if (!user) {
@@ -201,6 +213,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, refreshSessions])
 
   useEffect(() => {
+    if (user) void refreshTeamUsers()
+  }, [user, refreshTeamUsers])
+
+  useEffect(() => {
     if (user && !loading) void refreshGmailStatus()
   }, [user, loading, refreshGmailStatus])
 
@@ -260,6 +276,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       loading,
+      teamUsers,
+      refreshTeamUsers,
       gmailStatus,
       activeSessions,
       login,
@@ -274,6 +292,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [
       user,
       loading,
+      teamUsers,
+      refreshTeamUsers,
       gmailStatus,
       activeSessions,
       login,

@@ -20,7 +20,7 @@ from app.models.gmail import (
 from app.models.pm import ClientCreate, PmProjectCreate, ProposalCreate
 from app.models.project_requirements import ProjectRequirements
 from app.services import gmail_store, pm_ops_store, pm_store
-from app.services.auth import VALID_USERS
+from app.services.auth import get_valid_users
 from app.services.gmail_proposal import default_proposal_tasks, suggest_client_name
 from app.services.gmail_suggest import suggest_assignee
 from app.services.gmail_tasks import _resolve_message, create_task_from_email, gmail_message_url
@@ -30,7 +30,7 @@ def _normalize_team_member(name: str | None, fallback: str) -> str:
     if not name:
         return fallback
     clean = name.strip()
-    for valid in VALID_USERS:
+    for valid in get_valid_users():
         if valid.lower() == clean.lower():
             return valid
     return fallback

@@ -7,9 +7,9 @@ from typing import Any
 
 from app.models.gmail import GmailTaskSuggestion
 from app.models.project_workflow import TaskCategory, TaskPriority
-from app.services.auth import VALID_USERS
+from app.services.auth import get_valid_users
 
-_TEAM_NAMES = sorted(VALID_USERS, key=len, reverse=True)
+_TEAM_NAMES = sorted(get_valid_users(), key=len, reverse=True)
 
 _CLIENT_HINTS = re.compile(
     r"\b(brief|proposal|approval|sign[\s-]?off|client|deck|report|invoice)\b",
@@ -36,7 +36,7 @@ def _parse_team_email_map() -> dict[str, str]:
         email, name = pair.split(":", 1)
         email = email.strip().lower()
         name = name.strip()
-        if email and name in VALID_USERS:
+        if email and name in get_valid_users():
             mapping[email] = name
     return mapping
 

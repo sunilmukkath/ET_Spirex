@@ -12,7 +12,6 @@ import {
   type PmPipelineProject,
   type TaskManagerAgentBrief,
 } from '../api/client'
-import { TEAM_USERS } from '../auth/AuthContext'
 import { MyWorkEmailPanel } from '../components/mywork/MyWorkEmailPanel'
 import { activePmProjects, pmProjectOptionLabel } from '../lib/pmProjectOptions'
 import { TASK_CATEGORY_LABELS, TASK_STATUS_LABELS } from '../lib/workflowAccess'
@@ -33,11 +32,13 @@ function TaskCard({
   showAssignee,
   reviewable,
   onAssigned,
+  teamUsers,
 }: {
   row: MyTaskRow
   showAssignee?: boolean
   reviewable?: boolean
   onAssigned?: () => void
+  teamUsers: readonly string[]
 }) {
   const emailLink = gmailUrl(row.task.gmail_message_id)
   const isEmail = row.task.source === 'email' || !!row.task.gmail_message_id
@@ -113,7 +114,7 @@ function TaskCard({
                 required
               >
                 <option value="">Assign to…</option>
-                {TEAM_USERS.map((name) => (
+                {teamUsers.map((name) => (
                   <option key={name} value={name}>
                     {name}
                   </option>
@@ -140,6 +141,7 @@ function TaskBox({
   reviewable,
   onAssigned,
   action,
+  teamUsers,
 }: {
   title: string
   icon: LucideIcon
@@ -150,6 +152,7 @@ function TaskBox({
   reviewable?: boolean
   onAssigned?: () => void
   action?: ReactNode
+  teamUsers: readonly string[]
 }) {
   return (
     <section className="flex min-h-[14rem] flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -173,6 +176,7 @@ function TaskBox({
                 showAssignee={showAssignee}
                 reviewable={reviewable}
                 onAssigned={onAssigned}
+                teamUsers={teamUsers}
               />
             ))}
           </ul>
@@ -183,7 +187,7 @@ function TaskBox({
 }
 
 export function MyWorkPage() {
-  const { user, gmailStatus: authGmailStatus, refreshGmailStatus } = useAuth()
+  const { user, teamUsers, gmailStatus: authGmailStatus, refreshGmailStatus } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [gmailStatus, setGmailStatus] = useState<GmailConnectionStatus | null>(authGmailStatus)
   const [inbox, setInbox] = useState<GmailMessageSummary[]>([])
@@ -576,6 +580,7 @@ export function MyWorkPage() {
           count={openMyTasks.length}
           empty="Nothing assigned to you yet."
           rows={openMyTasks}
+          teamUsers={teamUsers}
         />
         <TaskBox
           title="New tasks"
@@ -585,6 +590,7 @@ export function MyWorkPage() {
           rows={openNewTasks}
           reviewable
           onAssigned={() => void load()}
+          teamUsers={teamUsers}
           action={
             <button
               type="button"
@@ -603,6 +609,7 @@ export function MyWorkPage() {
           empty="No open tasks assigned to teammates."
           rows={openTeamTasks}
           showAssignee
+          teamUsers={teamUsers}
         />
       </div>
 
@@ -671,7 +678,7 @@ export function MyWorkPage() {
                             value={pipelineOwner}
                             onChange={(e) => setPipelineOwner(e.target.value)}
                           >
-                            {TEAM_USERS.map((name) => (
+                            {teamUsers.map((name) => (
                               <option key={name} value={name}>
                                 {name}
                               </option>
@@ -736,7 +743,7 @@ export function MyWorkPage() {
                           onChange={(e) => updateDraft(index, { assignee: e.target.value || null })}
                         >
                           <option value="">Unassigned</option>
-                          {TEAM_USERS.map((name) => (
+                          {teamUsers.map((name) => (
                             <option key={name} value={name}>
                               {name}
                             </option>
@@ -838,7 +845,7 @@ export function MyWorkPage() {
                   onChange={(e) => setTaskAssignee(e.target.value)}
                 >
                   <option value="">Unassigned (new task queue)</option>
-                  {TEAM_USERS.map((name) => (
+                  {teamUsers.map((name) => (
                     <option key={name} value={name}>
                       {name}
                     </option>

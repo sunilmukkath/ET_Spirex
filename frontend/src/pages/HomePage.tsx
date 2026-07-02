@@ -15,7 +15,7 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react'
-import { TEAM_USERS, useAuth } from '../auth/AuthContext'
+import { useAuth } from '../auth/AuthContext'
 import {
   api,
   type MyTaskRow,
@@ -237,7 +237,7 @@ function TaskList({ rows, empty }: { rows: MyTaskRow[]; empty: string }) {
 }
 
 export function HomePage() {
-  const { user } = useAuth()
+  const { user, teamUsers } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -682,7 +682,7 @@ export function HomePage() {
                   onChange={(e) => setTaskAssignee(e.target.value)}
                 >
                   <option value="">Unassigned (new task queue)</option>
-                  {TEAM_USERS.map((name) => (
+                  {teamUsers.map((name) => (
                     <option key={name} value={name}>
                       {name}
                     </option>

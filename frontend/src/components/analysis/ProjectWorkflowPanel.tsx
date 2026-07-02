@@ -30,7 +30,7 @@ import {
   type TranslationStatus,
   type WorkflowAccess,
 } from '../../api/client'
-import { TEAM_USERS } from '../../auth/AuthContext'
+import { useAuth } from '../../auth/AuthContext'
 import {
   PROJECT_PHASE_LABELS,
   PROJECT_PHASE_HINTS,
@@ -130,6 +130,7 @@ interface Props {
 }
 
 export function ProjectWorkflowPanel({ projectId, surveyId, currentUser, globalRole }: Props) {
+  const { teamUsers } = useAuth()
   const [resolvedProjectId, setResolvedProjectId] = useState<string | null>(projectId ?? null)
   const [workflow, setWorkflow] = useState<ProjectWorkflow>({ members: [], tasks: [], notes: '' })
   const [access, setAccess] = useState<WorkflowAccess | null>(null)
@@ -183,7 +184,7 @@ export function ProjectWorkflowPanel({ projectId, surveyId, currentUser, globalR
     [workflow.members],
   )
 
-  const availableToAdd = TEAM_USERS.filter((u) => !assignedMembers.has(u))
+  const availableToAdd = teamUsers.filter((u) => !assignedMembers.has(u))
 
   const filteredTasks = useMemo(() => {
     let tasks = workflow.tasks ?? []

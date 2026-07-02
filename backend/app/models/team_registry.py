@@ -27,3 +27,12 @@ class TeamUser(BaseModel):
 class TeamRegistry(BaseModel):
     users: list[TeamUser] = Field(default_factory=list)
     super_admins: list[str] = Field(default_factory=list)
+
+
+class TeamUserCreate(BaseModel):
+    username: str
+    email: str = ""
+    full_name: str = ""
+    job_title: str = ""
+    department: str = "Research"
+    role: GlobalRole = "member"

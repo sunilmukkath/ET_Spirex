@@ -8,6 +8,13 @@ from typing import Any
 VALID_USERS = frozenset(
     {"Sunil", "Tony", "Ravi", "Aneena", "Shilaja", "Palani", "Bagya", "Ambika", "Venisha", "Samara"}
 )
+BUILTIN_USERS = VALID_USERS
+
+
+def get_valid_users() -> frozenset[str]:
+    from app.services.user_roster_store import get_valid_users as _roster_users
+
+    return _roster_users()
 SESSION_TTL_SECONDS = 60 * 60 * 12  # 12 hours
 
 
@@ -24,7 +31,7 @@ _sessions: dict[str, SessionRecord] = {}
 
 def create_session(username: str) -> str | None:
     name = str(username or "").strip()
-    if name not in VALID_USERS:
+    if name not in get_valid_users():
         return None
     token = secrets.token_urlsafe(32)
     now = time.time()

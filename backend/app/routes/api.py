@@ -33,7 +33,7 @@ from app.models.project_workflow import (
     TaskCommentCreate,
 )
 from app.models.team_hr import StaffMemberOut, StaffProfileUpdate, TeamDirectoryOut
-from app.models.team_registry import TeamRegistry, PROJECT_MODULES
+from app.models.team_registry import TeamRegistry, TeamUserCreate, PROJECT_MODULES
 from app.models.custom_variable import CustomVariableCreate, CustomVariableSyncRequest, CustomVariableUpdate
 from app.services.auth import get_session, list_active_sessions, logout
 from app.services.banner_analysis import run_banner_table, run_chart_data, run_question_profile, get_filter_options
@@ -152,6 +152,7 @@ from app.services.team_hr_store import (
     update_staff_profile,
 )
 from app.services.super_admin import all_super_admins, is_super_admin, super_admin_email, super_admin_username, email_for_username
+from app.services.user_roster_store import add_team_user, list_team_usernames, remove_team_user
 
 router = APIRouter(prefix="/api")
 
@@ -193,8 +194,11 @@ def health():
 
 
 @router.get("/auth/users")
-def auth_users():
-    return {"users": []}
+def auth_users(authorization: str | None = Header(default=None)):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return {"users": list_team_usernames()}
 
 
 @router.post("/auth/login")
@@ -307,6 +311,60 @@ def team_registry_update(
     if not is_super_admin(record.username):
         raise HTTPException(status_code=403, detail="Only super admins can update team roles and module access")
     return set_team_registry(body)
+
+
+@router.post("/team/users")
+def team_user_create(
+    body: TeamUserCreate,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not is_super_admin(record.username):
+        raise HTTPException(status_code=403, detail="Only super admins can add team members")
+    try:
+        created = add_team_user(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reg = get_team_registry()
+    return {
+        "user": created.model_dump(),
+        "users": list_team_usernames(),
+        "registry": {
+            **reg.model_dump(),
+            "primary_super_admin": super_admin_username(),
+            "super_admins": all_super_admins(),
+        },
+    }
+
+
+@router.delete("/team/users/{username}")
+def team_user_remove(
+    username: str,
+    authorization: str | None = Header(default=None),
+):
+    record = get_session(_extract_token(authorization))
+    if not record:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    if not is_super_admin(record.username):
+        raise HTTPException(status_code=403, detail="Only super admins can remove team members")
+    try:
+        ok = remove_team_user(username, actor=record.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    reg = get_team_registry()
+    return {
+        "ok": True,
+        "users": list_team_usernames(),
+        "registry": {
+            **reg.model_dump(),
+            "primary_super_admin": super_admin_username(),
+            "super_admins": all_super_admins(),
+        },
+    }
 
 
 @router.get("/team/directory", response_model=TeamDirectoryOut)

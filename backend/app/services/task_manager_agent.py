@@ -10,7 +10,7 @@ from typing import Any
 from app.models.task_manager import TaskManagerAgentResponse, TaskManagerUpdate
 from app.services.agent_helpers import parse_agent_brief_text
 from app.services.ai_narrative import ai_status, complete_custom, complete_json
-from app.services.auth import VALID_USERS
+from app.services.auth import get_valid_users
 from app.services.personal_tasks_store import patch_personal_task
 from app.services.project_workflow_store import (
     list_my_tasks,
@@ -96,7 +96,7 @@ def _next_run_hint() -> str:
 def _build_context(username: str | None, *, triggered_by: str = "manual") -> dict[str, Any]:
     today = date.today().isoformat()
     workloads: dict[str, dict[str, Any]] = {}
-    for member in sorted(VALID_USERS):
+    for member in sorted(get_valid_users()):
         wl, _ = build_workload(member)
         workloads[member] = {
             "open_tasks": wl.open_tasks,
@@ -112,7 +112,7 @@ def _build_context(username: str | None, *, triggered_by: str = "manual") -> dic
     if username:
         my_scope = [_compact_row(row) for row in list_my_tasks(username)]
     else:
-        for member in sorted(VALID_USERS):
+        for member in sorted(get_valid_users()):
             for row in list_my_tasks(member):
                 compact = _compact_row(row)
                 compact["assignee"] = member
@@ -327,7 +327,7 @@ def _suggest_assignments(
     rows: list[dict[str, Any]],
     workloads: dict[str, dict[str, Any]],
 ) -> list[TaskManagerUpdate]:
-    candidates = sorted(VALID_USERS, key=lambda u: workloads.get(u, {}).get("open_tasks", 999))
+    candidates = sorted(get_valid_users(), key=lambda u: workloads.get(u, {}).get("open_tasks", 999))
     updates: list[TaskManagerUpdate] = []
     workload_idx = 0
 

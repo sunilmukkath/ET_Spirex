@@ -46,12 +46,14 @@ def is_primary_super_admin(username: str | None) -> bool:
 
 def resolve_login_identifier(raw: str) -> str | None:
     """Map team name or @elastictree.com email to an ET Scout username."""
-    from app.services.auth import VALID_USERS
+    from app.services.auth import get_valid_users
+    from app.services.user_roster_store import username_for_email
 
     value = str(raw or "").strip()
     if not value:
         return None
-    if value in VALID_USERS:
+    valid = get_valid_users()
+    if value in valid:
         return value
     lowered = value.lower()
     if lowered == super_admin_email():
@@ -60,22 +62,29 @@ def resolve_login_identifier(raw: str) -> str | None:
         domain = lowered.split("@", 1)[1]
         if settings.workspace_domain.strip() and domain != settings.workspace_domain.strip().lower():
             return None
+        roster_match = username_for_email(lowered)
+        if roster_match:
+            return roster_match
         for pair in settings.resolved_gmail_team_email_map.split(","):
             if ":" not in pair:
                 continue
             email, name = pair.split(":", 1)
-            if email.strip().lower() == lowered and name.strip() in VALID_USERS:
+            if email.strip().lower() == lowered and name.strip() in valid:
                 return name.strip()
     return None
 
 
 def email_for_username(username: str) -> str | None:
     """Map ET Scout username to workspace Gmail address."""
-    from app.services.auth import VALID_USERS
+    from app.services.auth import get_valid_users
+    from app.services.user_roster_store import email_for_username_from_roster
 
     name = str(username or "").strip()
-    if not name or name not in VALID_USERS:
+    if not name or name not in get_valid_users():
         return None
+    roster_email = email_for_username_from_roster(name)
+    if roster_email:
+        return roster_email
     for pair in settings.resolved_gmail_team_email_map.split(","):
         if ":" not in pair:
             continue

@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.models.app_modules import AppModule
+from app.models.app_modules import APP_MODULES, AppModule
 from app.models.team_registry import GlobalRole, TeamRegistry, TeamUser
 from app.services.app_module_access import get_user_app_modules, resolve_user_modules
-from app.services.auth import VALID_USERS
+from app.services.auth import get_valid_users
 from app.services.super_admin import is_primary_super_admin, is_super_admin, super_admin_username
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "team"
@@ -20,7 +20,7 @@ def _default_registry() -> TeamRegistry:
     owner = super_admin_username()
     users = [
         TeamUser(username=name, role="admin" if name in _DEFAULT_ADMINS else "member")
-        for name in sorted(VALID_USERS)
+        for name in sorted(get_valid_users())
     ]
     return TeamRegistry(users=users, super_admins=[owner] if owner else [])
 
@@ -37,7 +37,7 @@ def _normalize_registry(raw: dict[str, Any] | None) -> TeamRegistry:
         if not isinstance(item, dict):
             continue
         username = str(item.get("username") or "").strip()
-        if username not in VALID_USERS:
+        if username not in get_valid_users():
             continue
         role = str(item.get("role") or "member").strip().lower()
         if role not in {"admin", "manager", "member"}:
@@ -45,15 +45,7 @@ def _normalize_registry(raw: dict[str, Any] | None) -> TeamRegistry:
         modules_raw = item.get("modules")
         modules: list[AppModule] = []
         if isinstance(modules_raw, list):
-            allowed = {
-                "home",
-                "quantitative",
-                "my_work",
-                "operations",
-                "accounting",
-                "team",
-                "settings",
-            }
+            allowed = set(APP_MODULES)
             for mod in modules_raw:
                 key = str(mod or "").strip()
                 if key in allowed and key not in modules:
@@ -65,7 +57,7 @@ def _normalize_registry(raw: dict[str, Any] | None) -> TeamRegistry:
     if isinstance(super_admins_raw, list):
         for name in super_admins_raw:
             clean = str(name or "").strip()
-            if clean in VALID_USERS and clean not in super_admins:
+            if clean in get_valid_users() and clean not in super_admins:
                 super_admins.append(clean)
 
     return _enforce_super_admin(
@@ -80,7 +72,7 @@ def _enforce_super_admin(registry: TeamRegistry) -> TeamRegistry:
     owner = super_admin_username()
     super_names = {owner} if owner else set()
     for name in registry.super_admins or []:
-        if name in VALID_USERS:
+        if name in get_valid_users():
             super_names.add(name)
     users: list[TeamUser] = []
     for user in registry.users:
@@ -134,7 +126,7 @@ def get_global_role(username: str | None) -> GlobalRole:
     for user in get_team_registry().users:
         if user.username == username:
             return user.role
-    if username in VALID_USERS:
+    if username in get_valid_users():
         return "admin" if username in _DEFAULT_ADMINS else "member"
     return "member"
 

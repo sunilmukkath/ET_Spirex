@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FileUp, Loader2, Mail, Save, Settings, Shield, Sparkles, SlidersHorizontal, Wifi, WifiOff } from 'lucide-react'
+import { FileUp, Loader2, Mail, Plus, Save, Settings, Shield, Sparkles, SlidersHorizontal, Trash2, Wifi, WifiOff } from 'lucide-react'
 import { api, type AiHealth, type AiStatus, type AppModule, type GlobalRole, type TeamRegistry } from '../api/client'
-import { useAuth } from '../auth/AuthContext'
-import { TEAM_USERS } from '../auth/AuthContext'
+import { TEAM_USERS, useAuth } from '../auth/AuthContext'
 import { useUserPreferences } from '../hooks/useUserPreferences'
 import { AI_FEATURES } from '../lib/aiFeatures'
 import {
@@ -23,7 +22,7 @@ const ROLE_LABELS: Record<GlobalRole, string> = {
 }
 
 export function AdminSettingsPage() {
-  const { user, isAdmin, isSuperAdmin, refreshProfile } = useAuth()
+  const { user, isAdmin, isSuperAdmin, refreshProfile, teamUsers, refreshTeamUsers } = useAuth()
   const { prefs, loading: prefsLoading, saving: prefsSaving, savePrefs } = useUserPreferences(user?.username)
   const [connection, setConnection] = useState<Awaited<ReturnType<typeof api.getConnection>> | null>(null)
   const [sessions, setSessions] = useState<{ username: string; last_seen: number }[]>([])
@@ -39,6 +38,20 @@ export function AdminSettingsPage() {
   const [uploadingTemplate, setUploadingTemplate] = useState(false)
   const [templateError, setTemplateError] = useState<string | null>(null)
   const templateInputRef = useRef<HTMLInputElement>(null)
+  const [newUsername, setNewUsername] = useState('')
+  const [newFullName, setNewFullName] = useState('')
+  const [newEmail, setNewEmail] = useState('')
+  const [newJobTitle, setNewJobTitle] = useState('')
+  const [newUserRole, setNewUserRole] = useState<GlobalRole>('member')
+  const [addingUser, setAddingUser] = useState(false)
+  const [addUserError, setAddUserError] = useState<string | null>(null)
+  const [removingUser, setRemovingUser] = useState<string | null>(null)
+
+  const rosterNames = useMemo(() => {
+    const fromRegistry = registry?.users?.map((u) => u.username) ?? []
+    const merged = new Set([...teamUsers, ...fromRegistry])
+    return [...merged].sort((a, b) => a.localeCompare(b))
+  }, [registry, teamUsers])
 
   useEffect(() => {
     Promise.all([
@@ -80,7 +93,7 @@ export function AdminSettingsPage() {
 
   function setRole(username: string, role: GlobalRole) {
     if (!registry) return
-    const users = TEAM_USERS.map((name) => {
+    const users = rosterNames.map((name) => {
       const existing = registry.users.find((u) => u.username === name)
       const nextRole = name === username ? role : existing?.role ?? 'member'
       return { username: name, role: nextRole, modules: existing?.modules ?? [] }
@@ -97,7 +110,7 @@ export function AdminSettingsPage() {
     if (!registry || isUserSuperAdmin(username)) return
     const current = effectiveModules(username)
     const next = current.includes(module) ? current.filter((m) => m !== module) : [...current, module]
-    const users = TEAM_USERS.map((name) => {
+    const users = rosterNames.map((name) => {
       const existing = registry.users.find((u) => u.username === name)
       if (name === username) {
         return { username: name, role: existing?.role ?? 'member', modules: next }
@@ -114,7 +127,7 @@ export function AdminSettingsPage() {
   function resetModulesToRoleDefaults(username: string) {
     if (!registry || isUserSuperAdmin(username)) return
     const role = roleFor(username)
-    const users = TEAM_USERS.map((name) => {
+    const users = rosterNames.map((name) => {
       const existing = registry.users.find((u) => u.username === name)
       if (name === username) {
         return { username: name, role, modules: [] }
@@ -145,11 +158,60 @@ export function AdminSettingsPage() {
       const saved = await api.setTeamRegistry(registry)
       setRegistry(saved)
       await refreshProfile()
+      await refreshTeamUsers()
     } catch (err) {
       setRoleError(err instanceof Error ? err.message : 'Failed to save team roles')
     } finally {
       setSavingRoles(false)
     }
+  }
+
+  async function handleAddUser(e: React.FormEvent) {
+    e.preventDefault()
+    if (!isSuperAdmin) return
+    setAddingUser(true)
+    setAddUserError(null)
+    try {
+      const result = await api.createTeamUser({
+        username: newUsername.trim(),
+        full_name: newFullName.trim() || undefined,
+        email: newEmail.trim() || undefined,
+        job_title: newJobTitle.trim() || undefined,
+        role: newUserRole,
+      })
+      setRegistry(result.registry)
+      await refreshTeamUsers()
+      setNewUsername('')
+      setNewFullName('')
+      setNewEmail('')
+      setNewJobTitle('')
+      setNewUserRole('member')
+    } catch (err) {
+      setAddUserError(err instanceof Error ? err.message : 'Failed to add team member')
+    } finally {
+      setAddingUser(false)
+    }
+  }
+
+  async function handleRemoveUser(username: string) {
+    if (!isSuperAdmin || !window.confirm(`Remove ${username} from ET Scout? They will no longer be able to sign in.`)) {
+      return
+    }
+    setRemovingUser(username)
+    setAddUserError(null)
+    try {
+      const result = await api.removeTeamUser(username)
+      setRegistry(result.registry)
+      await refreshTeamUsers()
+    } catch (err) {
+      setAddUserError(err instanceof Error ? err.message : 'Failed to remove team member')
+    } finally {
+      setRemovingUser(null)
+    }
+  }
+
+  function isRemovableUser(username: string): boolean {
+    return !TEAM_USERS.includes(username as (typeof TEAM_USERS)[number]) && username !== primarySuperAdmin()
   }
 
   async function handleTemplateUpload(file: File) {
@@ -340,7 +402,7 @@ export function AdminSettingsPage() {
               <div>
                 <h2 className="text-sm font-semibold text-slate-900">Team access control</h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  Super admin only — set global roles, grant super admin, and control which app modules each user can open.
+                  Super admin only — add employees, set global roles, grant super admin, and control which app modules each user can open.
                 </p>
               </div>
             </div>
@@ -355,6 +417,76 @@ export function AdminSettingsPage() {
             </button>
           </div>
           {roleError && <p className="mt-3 text-sm text-rose-700">{roleError}</p>}
+          {addUserError && <p className="mt-3 text-sm text-rose-700">{addUserError}</p>}
+
+          <form
+            onSubmit={(e) => void handleAddUser(e)}
+            className="mt-4 grid gap-3 rounded-lg border border-slate-100 bg-slate-50/80 p-4 sm:grid-cols-2 lg:grid-cols-6"
+          >
+            <label className="text-xs">
+              <span className="mb-1 block font-medium text-slate-600">Username</span>
+              <input
+                className="et-input w-full"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                placeholder="e.g. Jordan"
+                required
+              />
+            </label>
+            <label className="text-xs">
+              <span className="mb-1 block font-medium text-slate-600">Full name</span>
+              <input
+                className="et-input w-full"
+                value={newFullName}
+                onChange={(e) => setNewFullName(e.target.value)}
+                placeholder="Display name"
+              />
+            </label>
+            <label className="text-xs sm:col-span-2">
+              <span className="mb-1 block font-medium text-slate-600">Google / work email</span>
+              <input
+                className="et-input w-full"
+                type="email"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="name@elastictree.com"
+              />
+            </label>
+            <label className="text-xs">
+              <span className="mb-1 block font-medium text-slate-600">Job title</span>
+              <input
+                className="et-input w-full"
+                value={newJobTitle}
+                onChange={(e) => setNewJobTitle(e.target.value)}
+                placeholder="Research Analyst"
+              />
+            </label>
+            <label className="text-xs">
+              <span className="mb-1 block font-medium text-slate-600">Role</span>
+              <select
+                className="et-select w-full"
+                value={newUserRole}
+                onChange={(e) => setNewUserRole(e.target.value as GlobalRole)}
+              >
+                {(Object.keys(ROLE_LABELS) as GlobalRole[]).map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-end sm:col-span-2 lg:col-span-6">
+              <button
+                type="submit"
+                disabled={addingUser || !newUsername.trim()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--et-navy)] px-4 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {addingUser ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                Add team member
+              </button>
+            </div>
+          </form>
+
           <div className="mt-4 overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
@@ -370,10 +502,11 @@ export function AdminSettingsPage() {
                     </th>
                   ))}
                   <th className="py-2 pl-2 font-semibold">Reset</th>
+                  <th className="py-2 pl-2 font-semibold">Remove</th>
                 </tr>
               </thead>
               <tbody>
-                {TEAM_USERS.map((name) => {
+                {rosterNames.map((name) => {
                   const modules = effectiveModules(name)
                   const locked = isUserSuperAdmin(name)
                   const isPrimary = name === primarySuperAdmin()
@@ -435,6 +568,23 @@ export function AdminSettingsPage() {
                             className="text-[10px] font-medium text-[var(--et-teal-dark)] hover:underline"
                           >
                             Role defaults
+                          </button>
+                        )}
+                      </td>
+                      <td className="py-2.5 pl-2">
+                        {isRemovableUser(name) && (
+                          <button
+                            type="button"
+                            disabled={removingUser === name}
+                            onClick={() => void handleRemoveUser(name)}
+                            className="inline-flex items-center gap-1 text-[10px] font-medium text-rose-600 hover:underline disabled:opacity-50"
+                          >
+                            {removingUser === name ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={12} />
+                            )}
+                            Remove
                           </button>
                         )}
                       </td>

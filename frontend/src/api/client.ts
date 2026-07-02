@@ -536,6 +536,15 @@ export interface TeamRegistry {
   primary_super_admin?: string
 }
 
+export interface TeamUserCreate {
+  username: string
+  email?: string
+  full_name?: string
+  job_title?: string
+  department?: string
+  role?: GlobalRole
+}
+
 export type StaffStatus = 'active' | 'away' | 'inactive'
 export type LoadLevel = 'light' | 'balanced' | 'busy' | 'overloaded'
 
@@ -1991,6 +2000,17 @@ export const api = {
       BOOTSTRAP_TIMEOUT_MS,
     ),
   getAuthUsers: () => fetchJson<{ users: string[] }>('/api/auth/users'),
+  createTeamUser: (body: TeamUserCreate) =>
+    fetchJson<{ user: TeamUser; users: string[]; registry: TeamRegistry }>('/api/team/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  removeTeamUser: (username: string) =>
+    fetchJson<{ ok: boolean; users: string[]; registry: TeamRegistry }>(
+      `/api/team/users/${encodeURIComponent(username)}`,
+      { method: 'DELETE' },
+    ),
   getGoogleAuthConfigured: () =>
     fetchJson<{ configured: boolean }>('/api/auth/google/configured', undefined, BOOTSTRAP_TIMEOUT_MS),
   getGoogleAuthUrl: () =>
