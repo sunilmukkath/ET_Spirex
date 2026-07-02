@@ -136,6 +136,27 @@ def test_same_day_fieldwork_upsert(pm_session):
     assert len(entries) == 1
 
 
+def test_pipeline_overview(pm_session):
+    project = pm_store.create_project(
+        pm_session,
+        PmProjectCreate(
+            project_name="Qual study",
+            project_type="qual",
+            engagement_type="ad-hoc",
+            owner_name="Sunil",
+        ),
+    )
+    pm_ops_store.link_survey(pm_session, UUID(str(project.project_id)), 201)
+
+    overview = pm_ops_store.pipeline_overview(pm_session, [201, 999])
+    assert len(overview.projects) == 1
+    row = overview.projects[0]
+    assert row.project_name == "Qual study"
+    assert row.linked_survey_ids == [201]
+    assert row.has_survey_link is True
+    assert 999 in overview.unlinked_survey_ids
+
+
 def test_list_live_fieldwork_projects_filters_stages(pm_session):
     live = pm_store.create_project(
         pm_session,

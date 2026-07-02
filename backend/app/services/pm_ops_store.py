@@ -448,7 +448,6 @@ def pipeline_overview(session: Session, linked_survey_ids: list[int] | None = No
             client_name=row.client.client_name if row.client else None,
             proposal_status=proposal_status.get(row.project_id),
             has_survey_link=bool(survey_ids),
-            linked_survey_ids=survey_ids,
             data_collection_status=dc_status,
             data_collection_pct=dc_pct,
             open_task_count=open_tasks,

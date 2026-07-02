@@ -35,6 +35,7 @@ import { PmWorkspaceLinks, primarySurveyId } from '../components/pm/PmWorkspaceL
 import { useUserPreferences } from '../hooks/useUserPreferences'
 import { buildSurveyWorkspaceHref } from '../lib/workspaceNav'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
+import { ModuleQuickNav } from '../components/ModuleQuickNav'
 
 type Tab = 'pipeline' | 'finance'
 
@@ -705,6 +706,8 @@ export function OperationsHubPage() {
           Refresh
         </button>
       </header>
+
+      <ModuleQuickNav current="operations" />
 
       <div className="et-segment flex flex-wrap gap-1">
         {(

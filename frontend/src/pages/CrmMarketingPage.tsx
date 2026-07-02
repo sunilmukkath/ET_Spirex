@@ -10,6 +10,7 @@ import {
 } from '../api/client'
 import { AgentBriefPanel } from '../components/pm/AgentBriefPanel'
 import { EmptyState, ErrorState, LoadingState } from '../components/States'
+import { ModuleQuickNav } from '../components/ModuleQuickNav'
 
 type Tab = 'clients' | 'marketing' | 'agent'
 
@@ -212,6 +213,8 @@ export function CrmMarketingPage() {
           Refresh
         </button>
       </header>
+
+      <ModuleQuickNav current="crm_marketing" />
 
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div>

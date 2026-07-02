@@ -4,6 +4,7 @@ import { Briefcase, FileText, RefreshCw } from 'lucide-react'
 import { api, type PmPipelineOverview } from '../api/client'
 import { QualPanel } from '../components/analysis/QualPanel'
 import { EmptyState, LoadingState } from '../components/States'
+import { ModuleQuickNav } from '../components/ModuleQuickNav'
 import type { QualWorkspaceScope } from '../lib/qualScope'
 
 type ProjectOption = {
@@ -113,6 +114,8 @@ export function QualitativePage() {
             Refresh
           </button>
         </header>
+
+        <ModuleQuickNav current="qualitative" />
 
         {error && (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div>

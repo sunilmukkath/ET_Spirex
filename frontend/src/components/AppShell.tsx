@@ -1,6 +1,20 @@
 import { useMemo, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { BarChart3, ClipboardList, Home, Landmark, LayoutGrid, LogOut, Menu, Megaphone, Mic, Settings, Users, X } from 'lucide-react'
+import {
+  BarChart3,
+  ChevronDown,
+  ClipboardList,
+  Home,
+  Landmark,
+  LayoutGrid,
+  LogOut,
+  Menu,
+  Megaphone,
+  Mic,
+  Settings,
+  Users,
+  X,
+} from 'lucide-react'
 import type { CommandPaletteItem } from './workspace/CommandPalette'
 import { useAuth } from '../auth/AuthContext'
 import { APP_MODULE_PATHS, type AppModule } from '../lib/appModules'
@@ -106,6 +120,9 @@ const NAV_LINKS: NavLinkDef[] = [
   { module: 'settings', label: 'Settings', icon: Settings, isActive: (p) => p === '/settings' },
 ]
 
+const PRIMARY_MODULES = new Set<AppModule>(['home', 'my_work', 'operations', 'quantitative', 'qualitative'])
+const MORE_MODULES = new Set<AppModule>(['crm_marketing', 'accounting', 'team', 'settings'])
+
 function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString(undefined, {
     hour: 'numeric',
@@ -120,6 +137,7 @@ export function AppShell() {
   const [showSessions, setShowSessions] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const isWorkspace = /^\/projects\/\d+/.test(location.pathname)
   const isQuantitative =
     location.pathname === '/quantitative' || location.pathname.startsWith('/quantitative/')
@@ -128,6 +146,18 @@ export function AppShell() {
     () => NAV_LINKS.filter((link) => canAccessModule(link.module)),
     [canAccessModule],
   )
+
+  const primaryNavLinks = useMemo(
+    () => visibleNavLinks.filter((link) => PRIMARY_MODULES.has(link.module)),
+    [visibleNavLinks],
+  )
+
+  const moreNavLinks = useMemo(
+    () => visibleNavLinks.filter((link) => MORE_MODULES.has(link.module)),
+    [visibleNavLinks],
+  )
+
+  const moreNavActive = moreNavLinks.some((link) => link.isActive(location.pathname, isQuantitative))
 
   const visibleCommandItems = useMemo(
     () =>
@@ -173,8 +203,8 @@ export function AppShell() {
             </Link>
           </div>
 
-          <nav className="hidden items-center gap-1 sm:flex">
-            {visibleNavLinks.map((link) => {
+          <nav className="hidden items-center gap-1 lg:flex">
+            {primaryNavLinks.map((link) => {
               const Icon = link.icon
               const active = link.isActive(location.pathname, isQuantitative)
               return (
@@ -188,12 +218,59 @@ export function AppShell() {
                 </Link>
               )
             })}
+            {moreNavLinks.length > 0 && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen((open) => !open)}
+                  className={`et-chip ${moreNavActive ? 'et-chip-active' : 'et-chip-inactive'}`}
+                  aria-expanded={moreOpen}
+                  aria-haspopup="menu"
+                >
+                  More
+                  <ChevronDown size={14} className={moreOpen ? 'rotate-180 transition' : 'transition'} />
+                </button>
+                {moreOpen && (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Close menu"
+                      className="fixed inset-0 z-10"
+                      onClick={() => setMoreOpen(false)}
+                    />
+                    <div className="absolute right-0 top-full z-20 mt-1 min-w-[11rem] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
+                      {moreNavLinks.map((link) => {
+                        const Icon = link.icon
+                        const active = link.isActive(location.pathname, isQuantitative)
+                        return (
+                          <Link
+                            key={link.module}
+                            to={APP_MODULE_PATHS[link.module]}
+                            onClick={() => setMoreOpen(false)}
+                            className={`flex items-center gap-2 px-3 py-2 text-sm ${
+                              active
+                                ? 'bg-[var(--et-yellow-light)] font-medium text-[var(--et-navy)]'
+                                : 'text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Icon size={15} />
+                            {link.label}
+                          </Link>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             <button
               type="button"
               onClick={() => setCommandOpen(true)}
-              className="et-chip et-chip-inactive"
+              className="et-chip et-chip-inactive hidden xl:inline-flex"
+              title="Quick jump (⌘K)"
             >
               Jump to…
+              <kbd className="ml-1 rounded border border-slate-200 bg-slate-50 px-1 text-[10px] text-slate-500">⌘K</kbd>
             </button>
           </nav>
 
@@ -260,24 +337,53 @@ export function AppShell() {
                 <X size={18} />
               </button>
             </div>
-            <nav className="space-y-1">
-              {visibleNavLinks.map((link) => {
-                const Icon = link.icon
-                const active = link.isActive(location.pathname, isQuantitative)
-                return (
-                  <Link
-                    key={link.module}
-                    to={APP_MODULE_PATHS[link.module]}
-                    onClick={() => setMobileOpen(false)}
-                    className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                      active ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Icon size={16} />
-                    {link.label}
-                  </Link>
-                )
-              })}
+            <nav className="space-y-4">
+              <div>
+                <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Work</p>
+                <div className="space-y-1">
+                  {primaryNavLinks.map((link) => {
+                    const Icon = link.icon
+                    const active = link.isActive(location.pathname, isQuantitative)
+                    return (
+                      <Link
+                        key={link.module}
+                        to={APP_MODULE_PATHS[link.module]}
+                        onClick={() => setMobileOpen(false)}
+                        className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
+                          active ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Icon size={16} />
+                        {link.label}
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+              {moreNavLinks.length > 0 && (
+                <div>
+                  <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Business</p>
+                  <div className="space-y-1">
+                    {moreNavLinks.map((link) => {
+                      const Icon = link.icon
+                      const active = link.isActive(location.pathname, isQuantitative)
+                      return (
+                        <Link
+                          key={link.module}
+                          to={APP_MODULE_PATHS[link.module]}
+                          onClick={() => setMobileOpen(false)}
+                          className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
+                            active ? 'bg-[var(--et-yellow-light)] text-[var(--et-navy)]' : 'text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Icon size={16} />
+                          {link.label}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => {

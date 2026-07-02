@@ -134,16 +134,15 @@ def _apply_schema_patches(engine: Engine) -> None:
     if not settings.database_url.startswith("postgresql"):
         return
     with engine.begin() as conn:
-        conn.execute(
-            text(
-                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS requirements JSONB"
-            )
-        )
-        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_code VARCHAR(80)"))
-        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS fiscal_year VARCHAR(40)"))
-        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS billing_month VARCHAR(40)"))
-        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_value_inr NUMERIC(14, 2)"))
-        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS linked_survey_ids JSONB DEFAULT '[]'::jsonb"))
+        for ddl in (
+            "ALTER TABLE projects ADD COLUMN IF NOT EXISTS requirements JSONB",
+            "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_code VARCHAR(80)",
+            "ALTER TABLE projects ADD COLUMN IF NOT EXISTS fiscal_year VARCHAR(40)",
+            "ALTER TABLE projects ADD COLUMN IF NOT EXISTS billing_month VARCHAR(40)",
+            "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_value_inr NUMERIC(14, 2)",
+            "ALTER TABLE projects ADD COLUMN IF NOT EXISTS linked_survey_ids JSONB DEFAULT '[]'::jsonb",
+        ):
+            conn.execute(text(ddl))
 
 
 def _seed_team_members(engine: Engine) -> None:
